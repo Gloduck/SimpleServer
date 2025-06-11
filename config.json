@@ -1,0 +1,8 @@
+{
+  "port": 2226,
+  "jrebel": {
+    "companyName": "Gloduck",
+    "offlineDay": 0,
+    "licenseValidDays": 180
+  }
+}
