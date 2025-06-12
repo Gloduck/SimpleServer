@@ -8,11 +8,17 @@ import org.apache.commons.csv.CSVRecord;
 import java.io.*;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
-import java.util.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.locks.ReentrantLock;
 
 public abstract class CsvModifyHandler {
+    private static final ReentrantLock INTRA_JVM_LOCK = new ReentrantLock();
+
     private List<Map<String, String>> appendRows = new LinkedList<>();
 
     public CsvModifyHandler(String baseCsvPath, String tableName) {
@@ -28,56 +34,79 @@ public abstract class CsvModifyHandler {
 
     protected abstract boolean shouldHandleData(Map<String, String> row);
 
+
     public int execute() {
-        File csvFile = new File(baseCsvPath, tableName + ".csv");
-        File tempFile = new File(baseCsvPath, tableName + "_temp.csv");
-        File lockFile = new File(baseCsvPath, tableName + ".lock");
-
-        int affectCount = 0;
-
-        // 使用专门的锁文件进行同步
-        try (RandomAccessFile lockRaf = new RandomAccessFile(lockFile, "rw");
-             FileChannel lockChannel = lockRaf.getChannel();
-             FileLock lock = lockChannel.lock()) {
-            // 读取、处理、写入临时文件
-            List<String> headerNames = null;
-            try (FileReader reader = new FileReader(csvFile);
-                 CSVParser parser = CSVFormat.DEFAULT.withFirstRecordAsHeader().withTrim().parse(reader);
-                 FileWriter writer = new FileWriter(tempFile)) {
-
-                headerNames = parser.getHeaderNames();
-                CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headerNames.toArray(new String[0])));
-                for (CSVRecord record : parser) {
-                    Map<String, String> row = record.toMap();
-                    if (shouldHandleData(row)) {
-                        row = handleData(row);
-                        affectCount++;
-                    }
-                    if (row != null) {
-                        printer.printRecord(row.values());
-                    }
+        INTRA_JVM_LOCK.lock();
+        try {
+            // 用一个专门的 .lock 文件做进程间的“锁”
+            Path lockPath = Paths.get(baseCsvPath, tableName + ".lock");
+            try (
+                    FileChannel lockChannel = FileChannel.open(lockPath,
+                            StandardOpenOption.CREATE,
+                            StandardOpenOption.WRITE);
+                    FileLock ignored = lockChannel.lock()
+            ) {
+                return doModifyCsv();
+            } finally {
+                try {
+                    Files.deleteIfExists(lockPath);
+                } catch (IOException ignore) {
                 }
-
-                for (Map<String, String> row : appendRows) {
-                    printer.printRecord(prepareRecord(headerNames, row));
-                }
-            } catch (IOException e) {
-                throw new RuntimeException("Modify operation failed", e);
             }
-
-            // 替换原文件
-            replaceOriginalFile(csvFile, tempFile);
-
         } catch (IOException e) {
-            throw new RuntimeException("Could not obtain lock", e);
+            throw new RuntimeException("Failed to lock/modify CSV", e);
         } finally {
-            if (lockFile.exists()) {
-                lockFile.delete();
-            }
+            INTRA_JVM_LOCK.unlock();
         }
-        return affectCount;
     }
 
+    private int doModifyCsv() throws IOException {
+        File csvFile = new File(baseCsvPath, tableName + ".csv");
+        File tmpFile = new File(baseCsvPath, tableName + "_temp.csv");
+        int affectCount = 0;
+
+        try (
+                Reader reader = new InputStreamReader(
+                        new FileInputStream(csvFile),
+                        StandardCharsets.UTF_8);
+                CSVParser parser = CSVFormat.DEFAULT
+                        .withFirstRecordAsHeader()
+                        .withTrim()
+                        .parse(reader);
+                Writer writer = new OutputStreamWriter(
+                        new FileOutputStream(tmpFile),
+                        StandardCharsets.UTF_8);
+                CSVPrinter printer = new CSVPrinter(
+                        writer,
+                        CSVFormat.DEFAULT
+                                .withHeader(parser.getHeaderNames().toArray(new String[0])));
+        ) {
+            List<String> headers = parser.getHeaderNames();
+            for (CSVRecord rec : parser) {
+                Map<String, String> row = rec.toMap();
+                if (shouldHandleData(row)) {
+                    row = handleData(row);
+                    affectCount++;
+                }
+                if (row != null) {
+                    printer.printRecord(prepareRecord(headers, row));
+                }
+            }
+            // 追加新行
+            for (Map<String, String> row : appendRows) {
+                printer.printRecord(prepareRecord(headers, row));
+            }
+            printer.flush();
+        }
+
+        Files.move(
+                tmpFile.toPath(),
+                csvFile.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE
+        );
+        return affectCount;
+    }
 
     private List<String> prepareRecord(List<String> headers, Map<String, String> toAddDatas) {
         List<String> res = new ArrayList<>(headers.size());
@@ -85,10 +114,6 @@ public abstract class CsvModifyHandler {
             res.add(toAddDatas.getOrDefault(header, null));
         }
         return res;
-    }
-
-    private void replaceOriginalFile(File original, File temp) throws IOException {
-        Files.move(temp.toPath(), original.toPath(), StandardCopyOption.REPLACE_EXISTING);
     }
 
     protected void appendRow(Map<String, String> row) {
