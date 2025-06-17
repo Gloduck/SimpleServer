@@ -2,6 +2,7 @@ package cn.gloduck.api;
 
 import cn.gloduck.api.controller.HelloController;
 import cn.gloduck.api.controller.JrebelController;
+import cn.gloduck.api.controller.OnlineClipBoardController;
 import cn.gloduck.api.entity.config.ServerConfig;
 import cn.gloduck.api.utils.ConfigUtils;
 import cn.gloduck.server.core.SimpleServer;
@@ -15,6 +16,7 @@ public class Bootstrap {
         SimpleServer server = new SimpleServer(config.port);
         server.registerController(new HelloController());
         server.registerController(new JrebelController());
+        server.registerController(new OnlineClipBoardController());
         server.addHandler(new StaticFileHandler("./", "/static/**"));
         server.start();
     }
