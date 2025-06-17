@@ -2,8 +2,10 @@ package cn.gloduck.db.converter;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.lang.reflect.Type;
 import java.util.Map;
 
 public class CsvJsonBasedConverter implements CsvDataConvertor {
@@ -11,8 +13,9 @@ public class CsvJsonBasedConverter implements CsvDataConvertor {
 
     @Override
     public <T> T parseToObject(Map<String, String> dataMap, ConverterTypeReference<T> typeReference) {
-        return objectMapper.convertValue(dataMap, new TypeReference<T>() {
-        });
+        Type actualType = typeReference.getActualType();
+        JavaType javaType = objectMapper.getTypeFactory().constructType(actualType);
+        return objectMapper.convertValue(dataMap, javaType);
     }
 
     @Override
