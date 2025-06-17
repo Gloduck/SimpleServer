@@ -95,6 +95,7 @@ public abstract class CsvModifyHandler {
             // 追加新行
             for (Map<String, String> row : appendRows) {
                 printer.printRecord(prepareRecord(headers, row));
+                affectCount++;
             }
             printer.flush();
         }
