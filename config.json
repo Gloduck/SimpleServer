@@ -1,5 +1,6 @@
 {
   "port": 2226,
+  "logLevel": "INFO",
   "jrebel": {
     "companyName": "Gloduck",
     "offlineDay": 0,
