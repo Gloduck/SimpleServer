@@ -81,8 +81,12 @@ public class RouterHandler implements HttpHandler {
 
     private void logError(HttpExchange exchange, int code, String message) {
         InetSocketAddress remoteAddress = exchange.getRemoteAddress();
-        String clientIP = (remoteAddress != null) ? remoteAddress.getAddress().getHostAddress() : "unknown";
-
+        String clientIP = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
+        if (clientIP == null || clientIP.isEmpty()) {
+            clientIP = (remoteAddress != null) ?
+                    remoteAddress.getAddress().getHostAddress() :
+                    "unknown";
+        }
         logger.warning(String.format("Request [%s] %s exist with code [%s] and message [%s], clientIp: [%s]", exchange.getRequestMethod(), exchange.getRequestURI(), code, message, clientIP));
     }
 
