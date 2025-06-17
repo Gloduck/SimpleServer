@@ -3,6 +3,7 @@ package cn.gloduck.db;
 import cn.gloduck.db.converter.ConverterTypeReference;
 import cn.gloduck.db.converter.CsvDataConvertor;
 
+import java.lang.reflect.Type;
 import java.util.List;
 import java.util.Map;
 
@@ -22,6 +23,10 @@ public class CsvDbInsert<T> extends CsvModifyHandler {
 
     static <R> CsvDbInsert<R> insertInto(String baseCsvPath, String tableName, CsvDataConvertor convertor, Class<R> classz) {
         return new CsvDbInsert(baseCsvPath, tableName, convertor, new ConverterTypeReference<R>() {
+            @Override
+            public Type getActualType() {
+                return classz;
+            }
         });
     }
 

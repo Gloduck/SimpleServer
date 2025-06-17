@@ -3,6 +3,7 @@ package cn.gloduck.db;
 import cn.gloduck.db.converter.ConverterTypeReference;
 import cn.gloduck.db.converter.CsvDataConvertor;
 
+import java.lang.reflect.Type;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,10 @@ public class CsvDbUpdateBy<T> extends CsvModifyHandler {
 
     static <R> CsvDbUpdateBy<R> updateBy(String baseCsvPath, String tableName, String filedName, CsvDataConvertor convertor, Class<R> classz) {
         return new CsvDbUpdateBy<R>(baseCsvPath, tableName, filedName, convertor, new ConverterTypeReference<R>() {
+            @Override
+            public Type getActualType() {
+                return classz;
+            }
         });
     }
 

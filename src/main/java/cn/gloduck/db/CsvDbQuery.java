@@ -11,6 +11,7 @@ import org.apache.commons.csv.CSVRecord;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.lang.reflect.Type;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -45,6 +46,10 @@ public class CsvDbQuery<T> implements CsvDbFilterCondition<CsvDbQuery<T>> {
 
     static <R> CsvDbQuery<R> select(String baseCsvPath, String tableName, CsvDataConvertor convertor, Class<R> classz) {
         return new CsvDbQuery<R>(baseCsvPath, tableName, convertor, new ConverterTypeReference<R>() {
+            @Override
+            public Type getActualType() {
+                return classz;
+            }
         });
     }
 
