@@ -3,12 +3,11 @@ package cn.gloduck.server.core.util;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpsExchange;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.net.HttpCookie;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -21,6 +20,29 @@ public class HttpExchangeUtils {
             Pattern.compile("((25[0-5]|2[0-4]\\d|[01]?\\d?\\d)(\\.|$)){4}");
     private static final Pattern IPv6_PATTERN =
             Pattern.compile("([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}");
+
+    public static byte[] getRequestBodyBytes(HttpExchange exchange) {
+        try (InputStream is = exchange.getRequestBody();
+             ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[1024];
+            int len;
+            while ((len = is.read(buffer)) != -1) {
+                baos.write(buffer, 0, len);
+            }
+            return baos.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static String getRequestBodyString(HttpExchange exchange) {
+        return getRequestBodyString(exchange, StandardCharsets.UTF_8);
+    }
+
+    public static String getRequestBodyString(HttpExchange exchange, Charset charset) {
+        byte[] bytes = getRequestBodyBytes(exchange);
+        return new String(bytes, charset);
+    }
 
     public static String getBaseUrl(HttpExchange exchange) {
         String scheme = (exchange instanceof HttpsExchange) ? "https" : "http";
