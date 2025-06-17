@@ -6,6 +6,7 @@ import com.sun.net.httpserver.HttpHandler;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
@@ -75,10 +76,17 @@ public class RouterHandler implements HttpHandler {
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(bytes);
         }
-        logger.warning(String.format("Request [%s] %s exist with code [%s] and message [%s]", exchange.getRequestMethod(), exchange.getRequestURI(), code, message));
+        logError(exchange, code, message);
     }
 
-    private void logRequest(HttpExchange exchange){
+    private void logError(HttpExchange exchange, int code, String message) {
+        InetSocketAddress remoteAddress = exchange.getRemoteAddress();
+        String clientIP = (remoteAddress != null) ? remoteAddress.getAddress().getHostAddress() : "unknown";
+
+        logger.warning(String.format("Request [%s] %s exist with code [%s] and message [%s], clientIp: [%s]", exchange.getRequestMethod(), exchange.getRequestURI(), code, message, clientIP));
+    }
+
+    private void logRequest(HttpExchange exchange) {
         logger.info(String.format("Request [%s] %s", exchange.getRequestMethod(), exchange.getRequestURI()));
     }
 }
