@@ -20,6 +20,8 @@ public class OnlineClipBoardHtmlConst {
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/clike/clike.min.js"></script>
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/php/php.min.js"></script>
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/sql/sql.min.js"></script>
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/yaml/yaml.min.js"></script>
                 <style>
                     * {
                         margin: 0;
@@ -36,7 +38,7 @@ public class OnlineClipBoardHtmlConst {
                     }
                         
                     .container {
-                        max-width: 1200px;
+                        max-width: 1600px;
                         margin: 0 auto;
                         background: white;
                         border-radius: 12px;
@@ -331,6 +333,8 @@ public class OnlineClipBoardHtmlConst {
                     <div class="right-controls">
                         <select id="format-select">
                             <option value="text">纯文本</option>
+                            <option value="application/json">JSON</option>
+                            <option value="yaml">YAML</option>
                             <option value="javascript">JavaScript</option>
                             <option value="htmlmixed">HTML</option>
                             <option value="css">CSS</option>
@@ -638,9 +642,9 @@ public class OnlineClipBoardHtmlConst {
                             isFirstUpdate = false;
                             return;
                         }
-            /*            if (autoCopyCheckbox.checked) {
-                            copyToClipboard(editor.getValue());
-                        }*/
+                        /*            if (autoCopyCheckbox.checked) {
+                                        copyToClipboard(editor.getValue());
+                                    }*/
                         
                         // 如果启用了自动保存，则调用防抖保存函数
                         if (autoSaveCheckbox.checked) {
