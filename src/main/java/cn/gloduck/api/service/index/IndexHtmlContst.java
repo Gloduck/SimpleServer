@@ -473,7 +473,7 @@ public class IndexHtmlContst {
                         };
                         
                         renderTools(response.data);
-                    }, 1000);
+                    }, 100);
                 }
                         
                 function renderTools(tools) {
@@ -484,22 +484,29 @@ public class IndexHtmlContst {
                         const card = document.createElement('div');
                         card.className = 'tool-card';
                         
-                        const icons = ['fa-rocket', 'fa-wrench', 'fa-code', 'fa-calculator', 'fa-lock', 'fa-image', 'fa-palette', 'fa-network-wired'];
-                        const randomIcon = icons[Math.floor(Math.random() * icons.length)];
+                        const iconMapping = {
+                            "开发": "fa-code",
+                            "工具": "fa-wrench",
+                            "设计": "fa-palette",
+                            "安全": "fa-lock",
+                            "图像": "fa-image",
+                            "网络": "fa-network-wired"
+                        };
+                        const icon = iconMapping[tool.category] || "fa-tools";
                         
                         card.innerHTML = `
-                                <div class="card-header">
-                                    <i class="fas ${randomIcon}"></i>
-                                </div>
-                                <div class="card-body">
-                                    <div class="tool-name">${tool.name}</div>
-                                    <div class="tool-desc">${tool.desc}</div>
-                                </div>
-                                <div class="card-footer">
-                                    <a href="${tool.href}" class="tool-link">立即使用 <i class="fas fa-arrow-right"></i></a>
-                                    <span class="tool-badge">${tool.category}</span>
-                                </div>
-                            `;
+                                            <div class="card-header">
+                                                <i class="fas ${icon}"></i>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="tool-name">${tool.name}</div>
+                                                <div class="tool-desc">${tool.desc}</div>
+                                            </div>
+                                            <div class="card-footer">
+                                                <a href="${tool.href}" class="tool-link">立即使用 <i class="fas fa-arrow-right"></i></a>
+                                                <span class="tool-badge">${tool.category}</span>
+                                            </div>
+                                        `;
                         
                         toolsGrid.appendChild(card);
                     });
