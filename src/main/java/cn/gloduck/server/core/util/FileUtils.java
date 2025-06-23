@@ -6,51 +6,119 @@ import java.util.Locale;
 import java.util.Map;
 
 public class FileUtils {
-    /**
-     * 支持多段后缀，如 tar.gz、tar.bz2、tar.xz 等。
-     * 1) 去掉 URL 的 query 部分和锚点部分；
-     * 2) 截取最后一个 "/" 之后的文件名；
-     * 3) 遍历常见的 multi-part 后缀（按长度降序），优先匹配；否则取最后一个 "." 之后的部分。
-     *
-     * @param url 带有文件名的 URL
-     * @return 不带点号的后缀；如果无后缀则返回空串
-     */
+    private final static String[] MULTI_EXTENSIONS = {
+            ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.Z", ".tar.lz", ".tar.lzma", "tar.zst"
+    };
+
+    public static String getFileExtensionFromPath(String path) {
+        // 处理空路径
+        if (path == null || path.isEmpty()) {
+            return "";
+        }
+
+        // 提取文件名部分（忽略路径分隔符）
+        String filename = extractFileName(path);
+        if (filename.isEmpty()) {
+            return "";
+        }
+
+
+        // 转换为小写以进行不区分大小写的匹配
+        String lowercaseFilename = filename.toLowerCase();
+
+        // 检查多重扩展名
+        for (String ext : MULTI_EXTENSIONS) {
+            if (lowercaseFilename.endsWith(ext)) {
+                // 从原始文件名中截取实际扩展名（保留原始大小写）
+                return filename.substring(filename.length() - ext.length());
+            }
+        }
+
+        // 处理标准扩展名（最后一个点之后的部分）
+        int lastDotIndex = filename.lastIndexOf('.');
+        // 排除点位于开头或结尾的情况
+        if (lastDotIndex <= 0 || lastDotIndex == filename.length() - 1) {
+            return "";
+        }
+        return filename.substring(lastDotIndex);
+    }
+
+    private static String extractFileName(String path) {
+        int lastSeparator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        if (lastSeparator >= 0) {
+            return path.substring(lastSeparator + 1);
+        }
+        return path;
+    }
+
     public static String getFileExtensionFromUrl(String url) {
         if (url == null || url.isEmpty()) {
             return "";
         }
-        // 去掉 ? 和 # 之后的参数
-        int q = url.indexOf('?');
-        if (q != -1) {
-            url = url.substring(0, q);
-        }
-        int h = url.indexOf('#');
-        if (h != -1) {
-            url = url.substring(0, h);
-        }
-        // 取最后一个 "/" 之后
-        int slash = url.lastIndexOf('/');
-        String filename = (slash >= 0) ? url.substring(slash + 1) : url;
+
+        // 移除URL中的查询参数和片段标识符
+        String cleanPath = removeQueryAndFragment(url);
+
+        // 从清理后的路径中提取文件名
+        String filename = extractFileNameFromUrl(cleanPath);
         if (filename.isEmpty()) {
             return "";
         }
-        filename = filename.toLowerCase(Locale.ROOT);
 
-        // 常见的多段后缀，按长度降序排列，保证 longest-first
-        String[] multiExts = {
-                "tar.gz", "tar.bz2", "tar.xz", "tar.zst"
-        };
-        for (String me : multiExts) {
-            if (filename.endsWith("." + me)) {
-                return me;
+        // 使用文件名处理逻辑获取扩展名
+        return getExtensionFromFileName(filename);
+    }
+
+    // 移除URL中的查询参数(?之后)和片段标识符(#之后)
+    private static String removeQueryAndFragment(String url) {
+        // 先移除片段标识符
+        int fragmentIndex = url.indexOf('#');
+        if (fragmentIndex != -1) {
+            url = url.substring(0, fragmentIndex);
+        }
+
+        // 再移除查询参数
+        int queryIndex = url.indexOf('?');
+        if (queryIndex != -1) {
+            url = url.substring(0, queryIndex);
+        }
+
+        return url;
+    }
+
+    // 从URL路径中提取文件名（最后一个'/'之后的内容）
+    private static String extractFileNameFromUrl(String urlPath) {
+        // 处理以斜杠结尾的情况
+        if (urlPath.endsWith("/")) {
+            return "";
+        }
+
+        int lastSlashIndex = urlPath.lastIndexOf('/');
+        if (lastSlashIndex >= 0) {
+            return urlPath.substring(lastSlashIndex + 1);
+        }
+        // 无路径分隔符
+        return urlPath;
+    }
+
+    // 核心方法：从纯文件名中提取扩展名
+    private static String getExtensionFromFileName(String filename) {
+
+        String lowercaseFilename = filename.toLowerCase();
+
+        // 检查多重扩展名
+        for (String ext : MULTI_EXTENSIONS) {
+            if (lowercaseFilename.endsWith(ext)) {
+                return filename.substring(filename.length() - ext.length());
             }
         }
-        // 普通后缀：最后一个 "."
-        int dot = filename.lastIndexOf('.');
-        if (dot >= 0 && dot < filename.length() - 1) {
-            return filename.substring(dot + 1);
+
+        // 处理标准扩展名
+        int lastDotIndex = filename.lastIndexOf('.');
+        if (lastDotIndex <= 0 || lastDotIndex == filename.length() - 1) {
+            return "";
         }
-        return "";
+        return filename.substring(lastDotIndex);
     }
 
     /**
