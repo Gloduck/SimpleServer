@@ -1,12 +1,11 @@
 package cn.gloduck.api.controller;
 
 import cn.gloduck.api.entity.db.OnlineClipBoard;
-import cn.gloduck.api.service.clipboard.OnlineClipBoardHtmlConst;
 import cn.gloduck.api.service.clipboard.OnlineClipBoardService;
 import cn.gloduck.common.entity.base.Result;
 import cn.gloduck.server.core.enums.HttpMethod;
+import cn.gloduck.server.core.handler.ClassPathFileHandler;
 import cn.gloduck.server.core.handler.ControllerHandler;
-import cn.gloduck.server.core.handler.styles.classes.HtmlControllerHandler;
 import cn.gloduck.server.core.handler.styles.classes.JsonControllerHandler;
 import cn.gloduck.server.core.util.HttpExchangeUtils;
 import cn.gloduck.server.core.util.JsonUtils;
@@ -43,20 +42,14 @@ public class OnlineClipBoardController {
     }
 
     public ControllerHandler index2() {
-        return new HtmlControllerHandler(HttpMethod.GET, "/clipboard/", exchange -> {
-            return OnlineClipBoardHtmlConst.INDEX_PAGE;
-        });
+        return new ClassPathFileHandler(HttpMethod.GET, "/clipboard/", "static/clipboard/index.html");
     }
 
     public ControllerHandler index1() {
-        return new HtmlControllerHandler(HttpMethod.GET, "/clipboard", exchange -> {
-            return OnlineClipBoardHtmlConst.INDEX_PAGE;
-        });
+        return new ClassPathFileHandler(HttpMethod.GET, "/clipboard", "static/clipboard/index.html");
     }
 
     public ControllerHandler clipboard() {
-        return new HtmlControllerHandler(HttpMethod.GET, "/clipboard/*", exchange -> {
-            return OnlineClipBoardHtmlConst.CLIPBOARD_PAGE;
-        });
+        return new ClassPathFileHandler(HttpMethod.GET, "/clipboard/*", "static/clipboard/clipboard.html");
     }
 }

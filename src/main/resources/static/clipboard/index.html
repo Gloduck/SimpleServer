@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网络剪贴板 - 首页</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: #f5f7fa;
+            min-height: 100vh;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .logo {
+            margin-bottom: 30px;
+        }
+
+        .logo h1 {
+            font-size: 2.5rem;
+            color: #249ffd;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .logo p {
+            font-size: 1.1rem;
+            color: #718096;
+        }
+
+        .search-box {
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+            position: relative;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 16px 24px;
+            border: none;
+            font-size: 1.1rem;
+            outline: none;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .search-input:focus {
+            box-shadow: 0 4px 16px rgba(90, 141, 204, 0.2);
+        }
+
+        .search-button {
+            position: absolute;
+            right: 8px;
+            top: 8px;
+            padding: 8px 16px;
+            background: #249ffd;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .search-button:hover {
+            background: #4a7cbb;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .search-button:active {
+            transform: translateY(0);
+        }
+
+        .instructions {
+            margin-top: 40px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .instructions h2 {
+            color: #249ffd;
+            margin-bottom: 15px;
+        }
+
+        .instructions p {
+            color: #718096;
+            margin-bottom: 10px;
+            line-height: 1.6;
+        }
+
+        .message {
+            margin-top: 20px;
+            padding: 12px;
+            border-radius: 6px;
+            background: #e53e3e;
+            color: white;
+            display: none;
+        }
+
+        .message.show {
+            display: block;
+            animation: fadeInOut 3s forwards;
+        }
+
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateY(-10px); }
+            10% { opacity: 1; transform: translateY(0); }
+            90% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-10px); }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+
+            .logo h1 {
+                font-size: 2rem;
+            }
+
+            .search-input {
+                padding: 14px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="logo">
+        <h1>网络剪贴板</h1>
+        <p>快速创建或访问共享的文本内容</p>
+    </div>
+
+    <div class="search-box">
+        <input type="text" class="search-input" id="clipboard-id" placeholder="输入剪贴板ID，例如: my-clipboard">
+        <button class="search-button" id="go-button">前往</button>
+    </div>
+
+    <div class="message" id="message"></div>
+
+    <div class="instructions">
+        <h2>使用说明</h2>
+        <p>1. 输入一个唯一的剪贴板ID（只能包含字母、数字和连字符）</p>
+        <p>2. 如果剪贴板不存在，将会在第一次输入内容过后自动创建一个新的</p>
+        <p>3. 剪贴板内容会被明文存储在服务器上，请勿输入敏感信息</p>
+    </div>
+</div>
+
+<script>
+    const clipboardIdInput = document.getElementById('clipboard-id');
+    const goButton = document.getElementById('go-button');
+    const messageElement = document.getElementById('message');
+
+    // 显示错误消息
+    function showMessage(text) {
+        messageElement.textContent = text;
+        messageElement.className = 'message show';
+
+        setTimeout(() => {
+            messageElement.className = 'message';
+        }, 3000);
+    }
+
+    // 验证剪贴板ID
+    function validateClipboardId(id) {
+        return /^[a-zA-Z0-9\-]+$/.test(id);
+    }
+
+    // 跳转到剪贴板页面
+    function goToClipboard() {
+        const clipboardId = clipboardIdInput.value.trim();
+
+        if (!clipboardId) {
+            showMessage('请输入剪贴板ID');
+            return;
+        }
+
+        if (!validateClipboardId(clipboardId)) {
+            showMessage('ID只能包含字母、数字和连字符');
+            return;
+        }
+
+        // 跳转到剪贴板页面
+        window.location.href = `/clipboard/${clipboardId}`;
+    }
+
+    // 事件监听
+    goButton.addEventListener('click', goToClipboard);
+    clipboardIdInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            goToClipboard();
+        }
+    });
+
+    // 自动聚焦输入框
+    clipboardIdInput.focus();
+</script>
+</body>
+</html>

@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JRebel激活</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background-color: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        header {
+            background-color: #249ffd;
+            color: white;
+            text-align: center;
+            padding: 25px 20px;
+        }
+
+        header h1 {
+            font-size: 2.2rem;
+            margin-bottom: 8px;
+        }
+
+        header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .main-content {
+            padding: 30px;
+        }
+
+        .activation-card {
+            background: linear-gradient(to right, #f8fcff, #e6f5ff);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 1px solid #c2e4ff;
+            box-shadow: 0 4px 15px rgba(36, 159, 253, 0.15);
+        }
+
+        .url-container {
+            display: flex;
+            margin-top: 15px;
+            gap: 10px;
+        }
+
+        #activationUrl {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #249ffd;
+            border-radius: 8px;
+            font-size: 16px;
+            background-color: #fff;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 15px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background-color: #249ffd;
+            color: white;
+            flex: 1;
+        }
+
+        .btn-secondary {
+            background-color: #e8f5ff;
+            color: #249ffd;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(36, 159, 253, 0.3);
+        }
+
+        .btn-primary:hover {
+            background-color: #1d8ee0;
+        }
+
+        .btn-secondary:hover {
+            background-color: #d9eeff;
+        }
+
+        .notification {
+            background-color: #fff8e6;
+            border-left: 5px solid #ffc107;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+            position: relative;
+        }
+
+        .notification h3 {
+            color: #e0a800;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .notification p {
+            color: #856404;
+            line-height: 1.6;
+        }
+
+        .highlight {
+            background-color: #fff3cd;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .steps {
+            display: flex;
+            margin-top: 30px;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .step-card {
+            flex: 1;
+            min-width: 200px;
+            background-color: #f0f9ff;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #c2e4ff;
+        }
+
+        .step-card h4 {
+            color: #249ffd;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .step-card p {
+            color: #2c3e50;
+            line-height: 1.5;
+        }
+
+        .step-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            background-color: #249ffd;
+            color: white;
+            border-radius: 50%;
+            font-weight: bold;
+        }
+
+        @media (max-width: 768px) {
+            .url-container {
+                flex-direction: column;
+            }
+
+            .btn-group {
+                width: 100%;
+            }
+
+            header h1 {
+                font-size: 1.8rem;
+            }
+
+            .steps {
+                flex-direction: column;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .main-content {
+                padding: 20px 15px;
+            }
+
+            .activation-card {
+                padding: 20px;
+            }
+
+            button {
+                padding: 12px 15px;
+                font-size: 14px;
+            }
+
+            #activationUrl {
+                padding: 12px;
+                font-size: 14px;
+            }
+        }
+
+        /* 动画效果 */
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.05);
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        .pulse {
+            animation: pulse 1.5s infinite;
+        }
+
+        .copied-message {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #4CAF50;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .show {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1><i class="fas fa-bolt"></i> JRebel激活</h1>
+        <p>本工具仅用于开发测试目的，请勿用于商业用途</p>
+    </header>
+
+    <div class="main-content">
+        <div class="activation-card">
+            <h2><i class="fas fa-link"></i> 您的激活链接</h2>
+            <div class="url-container">
+                <input type="text" id="activationUrl" readonly>
+                <div class="btn-group">
+                    <button id="copyBtn" class="btn-primary">
+                        <i class="fas fa-copy"></i> 复制链接
+                    </button>
+                    <button id="refreshBtn" class="btn-secondary" title="生成新链接">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="notification">
+            <h3><i class="fas fa-exclamation-triangle pulse"></i> 重要提示</h3>
+            <p>如果出现错误：<span class="highlight">Cannot read the array length because "sigBytes" is null</span>，请先点击<span
+                    class="highlight">离线</span>然后再次点击<span class="highlight">在线</span>，即可正常激活。</p>
+        </div>
+
+        <div class="steps">
+            <div class="step-card">
+                <h4><span class="step-number">1</span> 复制链接</h4>
+                <p>点击上方"复制链接"按钮，将生成的激活链接复制到剪贴板</p>
+            </div>
+            <div class="step-card">
+                <h4><span class="step-number">2</span> 配置JRebel</h4>
+                <p>在JRebel激活界面，选择通过Team URL激活，粘贴链接，邮箱随意</p>
+            </div>
+            <div class="step-card">
+                <h4><span class="step-number">3</span> 确认激活</h4>
+                <p>点击激活按钮，等待激活成功提示</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="copiedMessage" class="copied-message">
+    <i class="fas fa-check-circle"></i> 链接已复制到剪贴板！
+</div>
+
+<script>
+    // 生成UUID函数
+    function generateUUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    // 获取当前根路径
+    function getBaseUrl() {
+        return window.location.origin;
+    }
+
+    // 生成完整的激活链接
+    function generateActivationUrl() {
+        const baseUrl = getBaseUrl();
+        const uuid = generateUUID();
+        return `${baseUrl}/jrebel/${uuid}`;
+    }
+
+    // 更新激活链接显示
+    function updateActivationUrl() {
+        const url = generateActivationUrl();
+        document.getElementById('activationUrl').value = url;
+    }
+
+    // 复制链接到剪贴板
+    function copyToClipboard() {
+        const urlInput = document.getElementById('activationUrl');
+        urlInput.select();
+        document.execCommand('copy');
+
+        // 显示复制成功消息
+        const message = document.getElementById('copiedMessage');
+        message.classList.add('show');
+
+        setTimeout(() => {
+            message.classList.remove('show');
+        }, 2000);
+    }
+
+    // 页面加载时初始化
+    document.addEventListener('DOMContentLoaded', () => {
+        // 初始生成链接
+        updateActivationUrl();
+
+        // 绑定复制按钮事件
+        document.getElementById('copyBtn').addEventListener('click', copyToClipboard);
+
+        // 绑定刷新按钮事件
+        document.getElementById('refreshBtn').addEventListener('click', updateActivationUrl);
+    });
+</script>
+</body>
+</html>
