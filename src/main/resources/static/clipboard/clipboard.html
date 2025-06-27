@@ -496,7 +496,8 @@
     // 保存剪贴板内容
     async function saveClipboardContent() {
         const content = editor.getValue();
-        const contentType = formatSelect.value;
+
+        const contentType = 'text';
 
         try {
             editorStatusElement.textContent = "正在保存...";
