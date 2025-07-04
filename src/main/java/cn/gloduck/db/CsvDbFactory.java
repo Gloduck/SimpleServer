@@ -65,11 +65,11 @@ public class CsvDbFactory {
         return CsvDbQuery.select(csvFilePath, tableName, fieldNames);
     }
 
-    public CsvDbUpdate updateFrom(String tableName) {
+    public CsvDbUpdate update(String tableName) {
         return CsvDbUpdate.update(csvFilePath, tableName);
     }
 
-    public CsvDbUpdate updateFrom(Class<?> classz) {
+    public CsvDbUpdate update(Class<?> classz) {
         return CsvDbUpdate.update(csvFilePath, getTableNameByClass(classz));
     }
 
