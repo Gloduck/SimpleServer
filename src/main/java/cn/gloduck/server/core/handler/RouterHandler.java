@@ -29,13 +29,20 @@ public class RouterHandler implements HttpHandler {
             String requestMethod = exchange.getRequestMethod();
 
             for (ControllerHandler handler : handlers) {
-                if (isPathMatch(handler.getRequestPath(), requestPath) &&
-                        handler.getHttpMethod().name().equals(requestMethod)) {
-
+                boolean matchHandler = isPathMatch(handler.getRequestPath(), requestPath) &&
+                        handler.getHttpMethod().name().equals(requestMethod);
+                if (!matchHandler) {
+                    continue;
+                }
+                if (handler instanceof RedirectHandler) {
+                    String location = new String(handler.handleRequest(exchange), StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().set("Location", location);
+                    exchange.sendResponseHeaders(((RedirectHandler) handler).getRedirectCode(), 0);
+                } else {
                     byte[] response = handler.handleRequest(exchange);
                     sendResponse(exchange, handler.getContentType(exchange), response);
-                    return;
                 }
+                return;
             }
             sendError(exchange, 404, "Not Found");
         } catch (FileNotFoundException e) {
