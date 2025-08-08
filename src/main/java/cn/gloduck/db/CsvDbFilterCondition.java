@@ -28,6 +28,11 @@ public interface CsvDbFilterCondition<R extends CsvDbFilterCondition<?>> {
         return (R) this;
     }
 
+    default R contains(String fieldName, String pattern) {
+        getFilter().contains(fieldName, pattern);
+        return (R) this;
+    }
+
     default R gt(String fieldName, Object value) {
         getFilter().gt(fieldName, value);
         return (R) this;

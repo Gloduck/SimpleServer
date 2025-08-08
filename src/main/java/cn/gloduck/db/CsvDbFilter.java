@@ -2,6 +2,9 @@ package cn.gloduck.db;
 
 import java.util.*;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
 
 public class CsvDbFilter implements Predicate<Map<String, String>> {
@@ -37,9 +40,24 @@ public class CsvDbFilter implements Predicate<Map<String, String>> {
     public void like(String fieldName, String pattern) {
         filters.add(m -> {
             String v = m.get(fieldName);
-            return v != null && v.contains(pattern);
+            if (v == null) {
+                return false;
+            }
+            try {
+                Pattern p = Pattern.compile(pattern);
+                Matcher matcher = p.matcher(v);
+                return matcher.find();
+            } catch (PatternSyntaxException e) {
+                return false;
+            }
         });
+    }
 
+    public void contains(String fieldName, String value) {
+        filters.add(m -> {
+            String v = m.get(fieldName);
+            return v != null && v.contains(value);
+        });
     }
 
     public void gt(String fieldName, Object value) {
