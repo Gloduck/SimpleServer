@@ -10,9 +10,11 @@ import cn.gloduck.api.service.torrent.handler.TorrentHandler;
 import cn.gloduck.api.utils.ConfigUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
+import javax.swing.text.html.Option;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 public class TorrentService {
     private final List<TorrentHandler> torrentHandlers;
@@ -20,8 +22,8 @@ public class TorrentService {
     public TorrentService(TorrentConfig config) {
         this.config = config;
         this.torrentHandlers = new ArrayList<>();
-        this.torrentHandlers.add(new BtsowHandler(config.getBtsow()));
-        this.torrentHandlers.add(new DmhyHandler(config.getDmhy()));
+        Optional.ofNullable(config.getBtsow()).ifPresent(btsow -> this.torrentHandlers.add(new BtsowHandler(btsow)));
+        Optional.ofNullable(config.getDmhy()).ifPresent(dmhy -> this.torrentHandlers.add(new DmhyHandler(dmhy)));
     }
 
     public List<TorrentHandlerInfo> listHandlers() {
