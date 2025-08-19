@@ -9,7 +9,7 @@
   "torrent": {
     "btsow": {
       "url": "https://btsow.lol",
-      "validStatusTimeout": 1,
+      "validStatusTimeout": 3,
       "connectTimeout": 5,
       "requestTimeout": 10,
       "proxy": null

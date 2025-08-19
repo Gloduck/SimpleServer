@@ -109,6 +109,7 @@
                         <buildArg>--no-fallback</buildArg>
                         <buildArg>--enable-http</buildArg>
                         <buildArg>--features=cn.gloduck.api.NativeReflectionRegistration</buildArg>
+                        <buildArg>--enable-url-protocols=https,http</buildArg>
                     </buildArgs>
                 </configuration>
             </plugin>
