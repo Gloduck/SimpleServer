@@ -18,10 +18,6 @@ import java.util.Collections;
 import java.util.List;
 
 public class NativeReflectionRegistration implements Feature {
-    public static void main(String[] args) {
-        new NativeReflectionRegistration().beforeAnalysis(null);
-    }
-
     @Override
     public void beforeAnalysis(BeforeAnalysisAccess access) {
         String[] scanPackages = {

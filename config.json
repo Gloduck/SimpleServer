@@ -5,5 +5,21 @@
     "companyName": "Gloduck",
     "offlineDay": 0,
     "licenseValidDays": 180
+  },
+  "torrent": {
+    "btsow": {
+      "url": "https://btsow.lol",
+      "validStatusTimeout": 1,
+      "connectTimeout": 5,
+      "requestTimeout": 10,
+      "proxy": null
+    },
+    "dmhy": {
+      "url": "https://www.dmhy.org",
+      "validStatusTimeout": 3,
+      "connectTimeout": 5,
+      "requestTimeout": 30,
+      "proxy": null
+    }
   }
 }
