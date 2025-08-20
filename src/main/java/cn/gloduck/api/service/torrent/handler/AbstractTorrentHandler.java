@@ -14,9 +14,25 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.Charset;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Date;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 public abstract class AbstractTorrentHandler implements TorrentHandler {
+    protected static final DateTimeFormatter DATE_TIME_FORMAT_NO_PAD = DateTimeFormatter.ofPattern("yyyy/MM/dd H:m");
+    protected static final DateTimeFormatter DATE_TIME_FORMAT_PADDED = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm");
+
+    protected static final Pattern TBODY_PATTERN = Pattern.compile("<tbody\\b[^>]*>(.*?)</tbody>", Pattern.DOTALL);
+    protected static final Pattern TR_PATTERN = Pattern.compile("<tr\\b[^>]*>(.*?)</tr>", Pattern.DOTALL);
+
+    protected static final Pattern TD_PATTERN = Pattern.compile("<td\\b[^>]*>(.*?)</td>", Pattern.DOTALL);
+    protected static final Pattern LI_PATTERN = Pattern.compile("<li\\b[^>]*>(.*?)</li>", Pattern.DOTALL);
+
+    protected static final Pattern MAGNET_HASH_PATTERN = Pattern.compile("magnet:\\?xt=urn:btih:([0-9a-zA-Z]{32,40})");
     protected final HttpClient httpClient;
     protected final String baseUrl;
 
@@ -37,6 +53,10 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
         InetSocketAddress inetSocketAddress = buildProxyAddress();
         Proxy proxy = inetSocketAddress != null ? new Proxy(Proxy.Type.HTTP, inetSocketAddress) : null;
         return isWebsiteReachable(baseUrl, proxy, validStatusTimeout);
+    }
+
+    protected boolean sortReverse(String order){
+        return "desc".equalsIgnoreCase(order);
     }
 
     public static boolean isWebsiteReachable(String websiteUrl, Proxy proxy, int timeout) {
@@ -140,6 +160,17 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
         } else {
             return Math.round(Double.parseDouble(sizeStr));
         }
+    }
+
+    protected Date convertUploadTime(String uploadTimeStr, DateTimeFormatter formatter) {
+        if (uploadTimeStr == null) {
+            return null;
+        }
+        LocalDateTime localDateTime = LocalDateTime.parse(uploadTimeStr, formatter);
+
+        ZonedDateTime zdt = localDateTime.atZone(ZoneId.of("Asia/Shanghai"));
+
+        return Date.from(zdt.toInstant());
     }
 
     public AbstractTorrentHandler(TorrentConfig.WebConfig config) {
