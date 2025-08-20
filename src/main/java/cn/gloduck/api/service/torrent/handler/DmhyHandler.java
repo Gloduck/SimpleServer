@@ -11,13 +11,8 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class DmhyHandler extends AbstractTorrentHandler {
 
@@ -46,7 +41,7 @@ public class DmhyHandler extends AbstractTorrentHandler {
         torrentInfo.setName(name);
         torrentInfo.setHash(hash);
         torrentInfo.setSize(convertSizeUnit(sizeStr));
-        torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, DATE_TIME_FORMAT_NO_PAD));
+        torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD));
         List<TorrentFileInfo> torrentFileInfos = parseFileInfo(response);
         torrentInfo.setFileCount((long) torrentFileInfos.size());
         torrentInfo.setFiles(torrentFileInfos);
@@ -112,7 +107,7 @@ public class DmhyHandler extends AbstractTorrentHandler {
             torrentInfo.setName(name);
             torrentInfo.setHash(hash);
             torrentInfo.setSize(convertSizeUnit(sizeStr));
-            torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, DATE_TIME_FORMAT_NO_PAD));
+            torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD));
             torrentInfos.add(torrentInfo);
         }
         boolean hasNext = response.contains("/topics/list/page/" + (index + 1));

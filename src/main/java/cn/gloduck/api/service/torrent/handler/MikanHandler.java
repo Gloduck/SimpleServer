@@ -46,7 +46,7 @@ public class MikanHandler extends AbstractTorrentHandler{
         torrentInfo.setName(name);
         torrentInfo.setHash(String.format("magnet:?xt=urn:btih:%s", id.toUpperCase()));
         torrentInfo.setSize(convertSizeUnit(sizeStr));
-        torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, DATE_TIME_FORMAT_PADDED));
+        torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
         torrentInfo.setFileCount(null);
         torrentInfo.setFiles(null);
 
@@ -95,7 +95,7 @@ public class MikanHandler extends AbstractTorrentHandler{
             torrentInfo.setName(name);
             torrentInfo.setHash(hash.toUpperCase());
             torrentInfo.setSize(convertSizeUnit(sizeStr));
-            torrentInfo.setUploadTime(convertUploadTime(tds.get(2).trim(), DATE_TIME_FORMAT_PADDED));
+            torrentInfo.setUploadTime(convertUploadTime(tds.get(2).trim(), SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
             torrentInfos.add(torrentInfo);
         }
         if(sortField != null && !sortField.isEmpty()){

@@ -18,19 +18,24 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Optional;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public abstract class AbstractTorrentHandler implements TorrentHandler {
-    protected static final DateTimeFormatter DATE_TIME_FORMAT_NO_PAD = DateTimeFormatter.ofPattern("yyyy/MM/dd H:m");
-    protected static final DateTimeFormatter DATE_TIME_FORMAT_PADDED = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm");
-
+    protected static final DateTimeFormatter SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD = DateTimeFormatter.ofPattern("yyyy/MM/dd H:m");
+    protected static final DateTimeFormatter SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm");
+    protected static final DateTimeFormatter DASH_SEPARATED_DATE_TIME_FORMAT_PADDED = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    protected static final DateTimeFormatter DASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD = DateTimeFormatter.ofPattern("yyyy-MM-dd H:m");
     protected static final Pattern TBODY_PATTERN = Pattern.compile("<tbody\\b[^>]*>(.*?)</tbody>", Pattern.DOTALL);
     protected static final Pattern TR_PATTERN = Pattern.compile("<tr\\b[^>]*>(.*?)</tr>", Pattern.DOTALL);
 
     protected static final Pattern TD_PATTERN = Pattern.compile("<td\\b[^>]*>(.*?)</td>", Pattern.DOTALL);
     protected static final Pattern LI_PATTERN = Pattern.compile("<li\\b[^>]*>(.*?)</li>", Pattern.DOTALL);
+    protected static final Pattern A_PATTERN = Pattern.compile("<a\\b[^>]*>(.*?)</a>", Pattern.DOTALL);
 
     protected static final Pattern MAGNET_HASH_PATTERN = Pattern.compile("magnet:\\?xt=urn:btih:([0-9a-zA-Z]{32,40})");
     protected final HttpClient httpClient;
@@ -55,9 +60,38 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
         return isWebsiteReachable(baseUrl, proxy, validStatusTimeout);
     }
 
-    protected boolean sortReverse(String order){
+    protected boolean sortReverse(String order) {
         return "desc".equalsIgnoreCase(order);
     }
+
+    public static String getTagContent(String html, Pattern tagPattern) {
+        if (html == null || html.isEmpty() || tagPattern == null) {
+            return null;
+        }
+        Matcher matcher = tagPattern.matcher(html);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return null;
+    }
+
+    public static List<String> getTagContents(String html, Pattern tagPattern) {
+        List<String> result = new ArrayList<>();
+
+        if (html == null || html.isEmpty() || tagPattern == null) {
+            return result;
+        }
+
+        Matcher matcher = tagPattern.matcher(html);
+
+        while (matcher.find()) {
+            String content = matcher.group(1);
+            content = content.trim();
+            result.add(content);
+        }
+        return result;
+    }
+
 
     public static boolean isWebsiteReachable(String websiteUrl, Proxy proxy, int timeout) {
         try {
@@ -148,15 +182,29 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
         if (sizeStr == null) {
             return null;
         }
-        sizeStr = sizeStr.trim().toLowerCase();
-        if (sizeStr.endsWith("tb")) {
-            return Math.round(Double.parseDouble(sizeStr.replace("tb", "")) * 1024 * 1024 * 1024 * 1024);
+        sizeStr = sizeStr.trim().replace(" ", "").toLowerCase();
+        if (sizeStr.endsWith("pb")) {
+            return Math.round(Double.parseDouble(sizeStr.replace("pb", "")) * 1024 * 1024 * 1024 * 1024);
+        } else if (sizeStr.endsWith("tb")) {
+            return Math.round(Double.parseDouble(sizeStr.replace("tb", "")) * 1024 * 1024 * 1024);
         } else if (sizeStr.endsWith("gb")) {
             return Math.round(Double.parseDouble(sizeStr.replace("gb", "")) * 1024 * 1024 * 1024);
         } else if (sizeStr.endsWith("mb")) {
             return Math.round(Double.parseDouble(sizeStr.replace("mb", "")) * 1024 * 1024);
         } else if (sizeStr.endsWith("kb")) {
             return Math.round(Double.parseDouble(sizeStr.replace("kb", "")) * 1024);
+        } else if (sizeStr.endsWith("pib")) {
+            return Math.round(Double.parseDouble(sizeStr.replace("pib", "")) * 1024 * 1024 * 1024 * 1024);
+        } else if (sizeStr.endsWith("tib")) {
+            return Math.round(Double.parseDouble(sizeStr.replace("tib", "")) * 1024 * 1024 * 1024);
+        } else if (sizeStr.endsWith("gib")) {
+            return Math.round(Double.parseDouble(sizeStr.replace("gib", "")) * 1024 * 1024 * 1024);
+        } else if (sizeStr.endsWith("mib")) {
+            return Math.round(Double.parseDouble(sizeStr.replace("mib", "")) * 1024 * 1024);
+        } else if (sizeStr.endsWith("kib")) {
+            return Math.round(Double.parseDouble(sizeStr.replace("kib", "")) * 1024);
+        } else if(sizeStr.endsWith("b")) {
+            return Math.round(Double.parseDouble(sizeStr.replace("b", "")));
         } else {
             return Math.round(Double.parseDouble(sizeStr));
         }
