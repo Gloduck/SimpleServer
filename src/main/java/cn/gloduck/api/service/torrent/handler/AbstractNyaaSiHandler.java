@@ -149,7 +149,7 @@ public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
 
     @Override
     public List<String> sortFields() {
-        return Arrays.asList("name", "uploadTime", "size");
+        return Arrays.asList("uploadTime", "size");
     }
 
 
