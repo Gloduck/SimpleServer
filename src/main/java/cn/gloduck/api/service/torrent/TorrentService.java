@@ -48,6 +48,7 @@ public class TorrentService {
             info.setUrl(torrentHandler.url());
             info.setAvailable(handlerStatusMap.getOrDefault(torrentHandler.code(), false));
             info.setSupportSortFields(torrentHandler.sortFields());
+            info.setTags(torrentHandler.tags());
             res.add(info);
         }
         return res;

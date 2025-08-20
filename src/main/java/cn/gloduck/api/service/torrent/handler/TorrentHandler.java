@@ -16,6 +16,8 @@ public interface TorrentHandler {
 
     String code();
 
+    List<String> tags();
+
     boolean checkAvailable();
 
     int pageSize();

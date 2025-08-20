@@ -16,6 +16,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -153,6 +154,11 @@ public class DmhyHandler extends AbstractTorrentHandler {
     @Override
     public String code(){
         return "dmhy";
+    }
+
+    @Override
+    public List<String> tags() {
+        return Arrays.asList("ACG");
     }
 
 }

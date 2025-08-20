@@ -12,5 +12,7 @@ public class TorrentHandlerInfo {
 
     private Boolean available;
 
+    private List<String> tags;
+
     private List<String> supportSortFields;
 }

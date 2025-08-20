@@ -8,10 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import java.net.URI;
 import java.net.http.HttpRequest;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 import java.util.logging.Logger;
 
 public class BtsowHandler extends AbstractTorrentHandler {
@@ -97,6 +94,11 @@ public class BtsowHandler extends AbstractTorrentHandler {
     @Override
     public String code() {
         return "btsow";
+    }
+
+    @Override
+    public List<String> tags() {
+        return Arrays.asList("所有内容");
     }
 
     @Override

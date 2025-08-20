@@ -439,10 +439,13 @@
 
             // 添加搜索源选项
             handlers.forEach(handler => {
+                // 标签
+                const tags = handler.tags || [];
+                const showName = handler.code + (tags.length > 0 ? ` (${tags.join(',')})` : '');
                 // 下拉选项
                 const option = document.createElement('option');
                 option.value = handler.code;
-                option.textContent = handler.code;
+                option.textContent = showName;
                 option.disabled = !handler.available;
                 // 存储支持的排序字段
                 option.dataset.supportedSorts = JSON.stringify(handler.supportSortFields || []);
