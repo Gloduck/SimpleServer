@@ -685,7 +685,7 @@
                     state.totalResults = results.items.length;
 
                     // 更新结果计数
-                    elements.resultCount.textContent = `(${state.totalResults} 个结果)`;
+                    elements.resultCount.textContent = `(当前页${state.totalResults} 个结果)`;
 
                     // 渲染结果和分页
                     render.renderResults(results.items);
@@ -756,7 +756,7 @@
                 state.totalResults = results.items.length;
 
                 // 更新结果计数
-                elements.resultCount.textContent = `(${state.totalResults} 个结果)`;
+                elements.resultCount.textContent = `(当前页${state.totalResults} 个结果)`;
 
                 // 渲染结果和分页
                 render.renderResults(results.items);
@@ -791,6 +791,10 @@
 
             if (results) {
                 state.hasNext = results.hasNext;
+                state.totalResults = results.items.length;
+
+                // 更新结果计数
+                elements.resultCount.textContent = `(当前页${state.totalResults} 个结果)`;
 
                 // 渲染结果和分页
                 render.renderResults(results.items);
@@ -825,6 +829,10 @@
 
             if (results) {
                 state.hasNext = results.hasNext;
+                state.totalResults = results.items.length;
+
+                // 更新结果计数
+                elements.resultCount.textContent = `(当前页${state.totalResults} 个结果)`;
 
                 // 渲染结果和分页
                 render.renderResults(results.items);
