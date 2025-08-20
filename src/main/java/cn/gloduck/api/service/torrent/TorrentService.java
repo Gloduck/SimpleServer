@@ -6,6 +6,7 @@ import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
 import cn.gloduck.api.service.torrent.handler.BtsowHandler;
 import cn.gloduck.api.service.torrent.handler.DmhyHandler;
+import cn.gloduck.api.service.torrent.handler.MikanHandler;
 import cn.gloduck.api.service.torrent.handler.TorrentHandler;
 import cn.gloduck.api.utils.ConfigUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
@@ -27,6 +28,7 @@ public class TorrentService {
         this.scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
         Optional.ofNullable(config.getBtsow()).ifPresent(btsow -> this.torrentHandlers.add(new BtsowHandler(btsow)));
         Optional.ofNullable(config.getDmhy()).ifPresent(dmhy -> this.torrentHandlers.add(new DmhyHandler(dmhy)));
+        Optional.ofNullable(config.getMikan()).ifPresent(mikan -> this.torrentHandlers.add(new MikanHandler(mikan)));
         handlerStatusMap = new HashMap<>(torrentHandlers.size() / 3 * 4 + 1);
         scheduledExecutor.scheduleAtFixedRate(checkHandlerStatusTask(), 0, 30, TimeUnit.MINUTES);
     }

@@ -15,23 +15,12 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class DmhyHandler extends AbstractTorrentHandler {
-    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy/MM/dd H:m");
 
-    private static final Pattern TBODY_PATTERN = Pattern.compile("<tbody\\b[^>]*>(.*?)</tbody>", Pattern.DOTALL);
-    private static final Pattern TR_PATTERN = Pattern.compile("<tr\\b[^>]*>(.*?)</tr>", Pattern.DOTALL);
-
-    private static final Pattern TD_PATTERN = Pattern.compile("<td\\b[^>]*>(.*?)</td>", Pattern.DOTALL);
-    private static final Pattern LI_PATTERN = Pattern.compile("<li\\b[^>]*>(.*?)</li>", Pattern.DOTALL);
-
-    private static final Pattern MAGNET_HASH_PATTERN = Pattern.compile("magnet:\\?xt=urn:btih:([0-9a-zA-Z]{32,40})");
 
     public DmhyHandler(TorrentConfig.WebConfig config) {
         super(config);
@@ -57,7 +46,7 @@ public class DmhyHandler extends AbstractTorrentHandler {
         torrentInfo.setName(name);
         torrentInfo.setHash(hash);
         torrentInfo.setSize(convertSizeUnit(sizeStr));
-        torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr));
+        torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, DATE_TIME_FORMAT_NO_PAD));
         List<TorrentFileInfo> torrentFileInfos = parseFileInfo(response);
         torrentInfo.setFileCount((long) torrentFileInfos.size());
         torrentInfo.setFiles(torrentFileInfos);
@@ -123,27 +112,18 @@ public class DmhyHandler extends AbstractTorrentHandler {
             torrentInfo.setName(name);
             torrentInfo.setHash(hash);
             torrentInfo.setSize(convertSizeUnit(sizeStr));
-            torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr));
+            torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, DATE_TIME_FORMAT_NO_PAD));
             torrentInfos.add(torrentInfo);
         }
         boolean hasNext = response.contains("/topics/list/page/" + (index + 1));
         return new ScrollPageResult<>(index, hasNext, torrentInfos);
     }
 
-    private Date convertUploadTime(String uploadTimeStr) {
-        if (uploadTimeStr == null) {
-            return null;
-        }
-        LocalDateTime localDateTime = LocalDateTime.parse(uploadTimeStr, TIME_FORMATTER);
 
-        ZonedDateTime zdt = localDateTime.atZone(ZoneId.of("Asia/Shanghai"));
-
-        return Date.from(zdt.toInstant());
-    }
 
     @Override
     public List<String> sortFields() {
-        return List.of();
+        return Collections.emptyList();
     }
 
     @Override

@@ -20,6 +20,13 @@
       "connectTimeout": 5,
       "requestTimeout": 30,
       "proxy": null
+    },
+    "mikan": {
+      "url": "https://mikanani.me",
+      "validStatusTimeout": 3,
+      "connectTimeout": 5,
+      "requestTimeout": 30,
+      "proxy": null
     }
   }
 }

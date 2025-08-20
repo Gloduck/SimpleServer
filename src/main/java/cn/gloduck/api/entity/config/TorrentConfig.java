@@ -8,6 +8,8 @@ public class TorrentConfig {
 
     private WebConfig dmhy;
 
+    private WebConfig mikan;
+
     @Data
     public static class WebConfig {
         private String url;
