@@ -61,6 +61,9 @@ public class MikanHandler extends AbstractTorrentHandler{
                 .GET()
                 .build();
         String response = sendRequest(request);
+        if(response.contains("找不到对应结果")){
+            return new ScrollPageResult<>(index, false, new ArrayList<>());
+        }
         List<TorrentInfo> torrentInfos = new ArrayList<>(pageSize());
         Matcher tbodyMatcher = TBODY_PATTERN.matcher(response);
         if (!tbodyMatcher.find()) {
