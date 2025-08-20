@@ -17,6 +17,6 @@ public class SukebeiNyaaSiHandler extends AbstractNyaaSiHandler {
 
     @Override
     public List<String> tags() {
-        return Arrays.asList("ACG", "JAV");
+        return Arrays.asList("JAV");
     }
 }
