@@ -11,19 +11,33 @@ import cn.gloduck.api.utils.ConfigUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
 import javax.swing.text.html.Option;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class TorrentService {
+    private final Map<String, Boolean> handlerStatusMap;
     private final List<TorrentHandler> torrentHandlers;
+    private final ScheduledExecutorService scheduledExecutor;
 
     public TorrentService(TorrentConfig config) {
         this.config = config;
         this.torrentHandlers = new ArrayList<>();
+        this.scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
         Optional.ofNullable(config.getBtsow()).ifPresent(btsow -> this.torrentHandlers.add(new BtsowHandler(btsow)));
         Optional.ofNullable(config.getDmhy()).ifPresent(dmhy -> this.torrentHandlers.add(new DmhyHandler(dmhy)));
+        handlerStatusMap = new HashMap<>(torrentHandlers.size() / 3 * 4 + 1);
+        scheduledExecutor.scheduleAtFixedRate(checkHandlerStatusTask(), 0, 30, TimeUnit.MINUTES);
+    }
+
+    private Runnable checkHandlerStatusTask() {
+        return () -> {
+            for (TorrentHandler torrentHandler : torrentHandlers) {
+                boolean available = torrentHandler.checkAvailable();
+                handlerStatusMap.put(torrentHandler.code(), available);
+            }
+        };
     }
 
     public List<TorrentHandlerInfo> listHandlers() {
@@ -32,7 +46,7 @@ public class TorrentService {
             TorrentHandlerInfo info = new TorrentHandlerInfo();
             info.setCode(torrentHandler.code());
             info.setUrl(torrentHandler.url());
-            info.setAvailable(torrentHandler.checkAvailable());
+            info.setAvailable(handlerStatusMap.getOrDefault(torrentHandler.code(), false));
             info.setSupportSortFields(torrentHandler.sortFields());
             res.add(info);
         }
