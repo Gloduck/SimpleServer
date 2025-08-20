@@ -37,7 +37,7 @@ public class BtsowHandler extends AbstractTorrentHandler {
         String name = data.get("name").asText();
         String hash = data.get("hash").asText();
         Long size = data.get("size").asLong();
-        Date lastUpdateTime = new Date(data.get("lastUpdateTime").asLong());
+        Date lastUpdateTime = new Date(data.get("lastUpdateTime").asLong() * 1000);
         torrentInfo.setId(hash);
         torrentInfo.setName(name);
         torrentInfo.setHash(hash);
@@ -76,7 +76,7 @@ public class BtsowHandler extends AbstractTorrentHandler {
             String name = data.get("name").asText().replace("<em>", "").replace("</em>", "");
             String hash = data.get("hash").asText();
             Long size = data.get("size").asLong();
-            Date lastUpdateTime = new Date(data.get("lastUpdateTime").asLong());
+            Date lastUpdateTime = new Date(data.get("lastUpdateTime").asLong() * 1000);
             TorrentInfo torrentInfo = new TorrentInfo();
             torrentInfo.setId(hash);
             torrentInfo.setName(name);
