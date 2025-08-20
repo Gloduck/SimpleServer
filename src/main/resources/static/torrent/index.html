@@ -75,25 +75,17 @@
             <form id="searchForm" class="flex flex-col md:flex-row gap-4">
                 <div class="flex-grow relative">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
-                    <input
-                            type="text"
-                            id="keyword"
-                            placeholder="输入搜索关键词..."
-                            class="w-full pl-10 pr-4 py-3 rounded-lg border border-gray-300 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                            required
-                    >
+                    <input type="text" id="keyword" placeholder="输入搜索关键词..."
+                           class="w-full pl-10 pr-4 py-3 rounded-lg border border-gray-300 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                           required>
                 </div>
 
                 <div class="w-full md:w-auto">
                     <select
                             id="handlerSelect"
                             class="w-full md:w-48 bg-white border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-no-repeat bg-right"
-                            style="background-image: url('data:image/svg+xml;charset=US-ASCII,<svg width=\" 20\"
-                    height=\"20\" xmlns=\"http://www.w3.org/2000/svg\">
-                    <path d=\"M7 10l5 5 5-5z\
-                    " fill=\"%23333\"/></svg>'); background-position: calc(100% - 10px) center;"
                     >
-                    <option value="">加载搜索源中...</option>
+                        <option value="">加载搜索源中...</option>
                     </select>
                 </div>
 
@@ -102,12 +94,8 @@
                     <select
                             id="sortSelect"
                             class="w-full md:w-48 bg-white border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-no-repeat bg-right"
-                            style="background-image: url('data:image/svg+xml;charset=US-ASCII,<svg width=\" 20\"
-                    height=\"20\" xmlns=\"http://www.w3.org/2000/svg\">
-                    <path d=\"M7 10l5 5 5-5z\
-                    " fill=\"%23333\"/></svg>'); background-position: calc(100% - 10px) center;"
                     >
-                    <option value="">默认排序</option>
+                        <option value="">默认排序</option>
                     </select>
                 </div>
 
@@ -258,6 +246,11 @@
         'name': '名称',
         'uploadTime': '上传时间',
         'size': '文件大小'
+    };
+
+    const sortOrderLabels = {
+        'asc': '升序',
+        'desc': '降序'
     };
 
     // 全局状态
@@ -477,7 +470,6 @@
         // 根据选中的搜索源更新排序选项
         updateSortOptions: (handlerCode) => {
             const handler = state.handlers.find(h => h.code === handlerCode);
-
             if (handler && handler.supportSortFields && handler.supportSortFields.length > 0) {
                 // 清空现有排序选项
                 elements.sortSelect.innerHTML = '';
@@ -491,10 +483,12 @@
 
                 // 添加支持的排序字段
                 handler.supportSortFields.forEach(field => {
-                    const option = document.createElement('option');
-                    option.value = field;
-                    option.textContent = sortFieldLabels[field] || field;
-                    elements.sortSelect.appendChild(option);
+                    Object.keys(sortOrderLabels).forEach(order => {
+                        const option = document.createElement('option');
+                        option.value = field + '-' + order;
+                        option.textContent = (sortFieldLabels[field] || field) + '-' + sortOrderLabels[order];
+                        elements.sortSelect.appendChild(option);
+                    })
                 });
 
                 // 显示排序选择器
@@ -504,6 +498,7 @@
                 // 隐藏排序选择器
                 elements.sortContainer.classList.add('hidden');
                 elements.sortContainer.classList.remove('flex');
+                elements.sortSelect.value = '';
                 state.currentSortField = '';
                 state.currentSortOrder = 'asc';
                 elements.sortInfo.classList.add('hidden');
@@ -569,7 +564,7 @@
         updateSortInfo: () => {
             if (state.currentSortField) {
                 const fieldLabel = sortFieldLabels[state.currentSortField] || state.currentSortField;
-                const orderLabel = state.currentSortOrder === 'asc' ? '升序' : '降序';
+                const orderLabel = sortOrderLabels[state.currentSortOrder] || state.currentSortOrder;
                 elements.sortInfo.textContent = `排序: ${fieldLabel} ${orderLabel}`;
                 elements.sortInfo.classList.remove('hidden');
             } else {
@@ -656,24 +651,12 @@
 
         // 排序方式变更时重新搜索
         elements.sortSelect.addEventListener('change', async () => {
-            const sortField = elements.sortSelect.value;
+            const sortValue = elements.sortSelect.value ? elements.sortSelect.value : '';
+            const sortField = sortValue ? sortValue.split('-')[0] : '';
+            const sortOrder = sortValue ? sortValue.split('-')[1] : 'asc';
 
-            // 如果没有选择排序字段，清除排序状态
-            if (!sortField) {
-                state.currentSortField = '';
-                state.currentSortOrder = 'asc';
-                render.updateSortInfo();
-                return;
-            }
-
-            // 如果选择了相同的字段，则切换排序顺序
-            if (state.currentSortField === sortField) {
-                state.currentSortOrder = state.currentSortOrder === 'asc' ? 'desc' : 'asc';
-            } else {
-                // 选择了新的字段，默认升序
-                state.currentSortField = sortField;
-                state.currentSortOrder = 'asc';
-            }
+            state.currentSortField = sortField;
+            state.currentSortOrder = sortOrder;
 
             // 更新排序信息显示
             render.updateSortInfo();
@@ -738,9 +721,11 @@
             state.currentPage = 1;
 
             // 获取当前选择的排序方式
-            const sortField = elements.sortSelect.value;
+            const sortValue = elements.sortSelect.value ? elements.sortSelect.value : '';
+            const sortField = sortValue ? sortValue.split('-')[0] : '';
+            const sortOrder = sortValue ? sortValue.split('-')[1] : 'asc';
             state.currentSortField = sortField;
-            state.currentSortOrder = 'asc'; // 每次新搜索默认升序
+            state.currentSortOrder = sortOrder;
 
             // 更新排序信息
             render.updateSortInfo();
