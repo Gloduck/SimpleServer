@@ -31,14 +31,17 @@
             .content-auto {
                 content-visibility: auto;
             }
+
             .text-truncate {
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
             }
+
             .backdrop-blur {
                 backdrop-filter: blur(8px);
             }
+
             .transition-height {
                 transition: max-height 0.3s ease-in-out;
             }
@@ -85,7 +88,10 @@
                     <select
                             id="handlerSelect"
                             class="w-full md:w-48 bg-white border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-no-repeat bg-right"
-                            style="background-image: url('data:image/svg+xml;charset=US-ASCII,<svg width=\"20\" height=\"20\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M7 10l5 5 5-5z\" fill=\"%23333\"/></svg>'); background-position: calc(100% - 10px) center;"
+                            style="background-image: url('data:image/svg+xml;charset=US-ASCII,<svg width=\" 20\"
+                    height=\"20\" xmlns=\"http://www.w3.org/2000/svg\">
+                    <path d=\"M7 10l5 5 5-5z\
+                    " fill=\"%23333\"/></svg>'); background-position: calc(100% - 10px) center;"
                     >
                     <option value="">加载搜索源中...</option>
                     </select>
@@ -96,7 +102,10 @@
                     <select
                             id="sortSelect"
                             class="w-full md:w-48 bg-white border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-no-repeat bg-right"
-                            style="background-image: url('data:image/svg+xml;charset=US-ASCII,<svg width=\"20\" height=\"20\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M7 10l5 5 5-5z\" fill=\"%23333\"/></svg>'); background-position: calc(100% - 10px) center;"
+                            style="background-image: url('data:image/svg+xml;charset=US-ASCII,<svg width=\" 20\"
+                    height=\"20\" xmlns=\"http://www.w3.org/2000/svg\">
+                    <path d=\"M7 10l5 5 5-5z\
+                    " fill=\"%23333\"/></svg>'); background-position: calc(100% - 10px) center;"
                     >
                     <option value="">默认排序</option>
                     </select>
@@ -226,7 +235,8 @@
             </div>
 
             <div class="pt-4 border-t border-gray-200">
-                <button id="copyMagnet" class="bg-primary hover:bg-secondary text-white font-medium py-2 px-4 rounded-lg transition-all duration-300 flex items-center gap-2">
+                <button id="copyMagnet"
+                        class="bg-primary hover:bg-secondary text-white font-medium py-2 px-4 rounded-lg transition-all duration-300 flex items-center gap-2">
                     <i class="fas fa-magnet"></i>
                     <span>复制磁力链接</span>
                 </button>
@@ -236,7 +246,8 @@
 </div>
 
 <!-- 提示弹窗 -->
-<div id="toast" class="fixed bottom-6 right-6 bg-dark text-white px-6 py-3 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-3 z-50">
+<div id="toast"
+     class="fixed bottom-6 right-6 bg-dark text-white px-6 py-3 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-3 z-50">
     <i id="toastIcon" class="fas fa-info-circle text-primary"></i>
     <span id="toastMessage"></span>
 </div>
@@ -590,27 +601,36 @@
                 elements.detailHash.textContent = detail.hash;
                 elements.detailSize.textContent = utils.formatSize(detail.size);
                 elements.detailUploadTime.textContent = utils.formatTime(detail.uploadTime);
-                elements.detailFileCount.textContent = detail.fileCount;
+                elements.detailFileCount.textContent = detail.fileCount !== null ? detail.fileCount : '未知';
 
                 // 渲染文件列表
                 elements.fileList.innerHTML = '';
-                detail.files.forEach(file => {
-                    const fileItem = document.createElement('li');
-                    fileItem.className = 'flex justify-between items-center p-2 bg-neutral rounded hover:bg-gray-100 transition-colors';
+                if (detail.files && detail.files.length > 0) {
+                    // 有文件列表时正常渲染
+                    detail.files.forEach(file => {
+                        const fileItem = document.createElement('li');
+                        fileItem.className = 'flex justify-between items-center p-2 bg-neutral rounded hover:bg-gray-100 transition-colors';
 
-                    const fileName = document.createElement('span');
-                    fileName.className = 'text-truncate max-w-[80%]';
-                    fileName.title = file.name;
-                    fileName.textContent = file.name;
+                        const fileName = document.createElement('span');
+                        fileName.className = 'text-truncate max-w-[80%]';
+                        fileName.title = file.name;
+                        fileName.textContent = file.name;
 
-                    const fileSize = document.createElement('span');
-                    fileSize.className = 'text-sm text-gray-500 whitespace-nowrap';
-                    fileSize.textContent = utils.formatSize(file.size);
+                        const fileSize = document.createElement('span');
+                        fileSize.className = 'text-sm text-gray-500 whitespace-nowrap';
+                        fileSize.textContent = utils.formatSize(file.size);
 
-                    fileItem.appendChild(fileName);
-                    fileItem.appendChild(fileSize);
-                    elements.fileList.appendChild(fileItem);
-                });
+                        fileItem.appendChild(fileName);
+                        fileItem.appendChild(fileSize);
+                        elements.fileList.appendChild(fileItem);
+                    });
+                } else {
+                    // 文件列表为空时显示提示
+                    const emptyItem = document.createElement('li');
+                    emptyItem.className = 'text-center py-4 text-gray-500';
+                    emptyItem.innerHTML = '<i class="fas fa-file-excel-o mr-2"></i>无法获取文件列表';
+                    elements.fileList.appendChild(emptyItem);
+                }
 
                 // 存储磁力链接信息，供复制使用
                 elements.copyMagnetBtn.setAttribute('data-magnet', `magnet:?xt=urn:btih:${detail.hash}`);
