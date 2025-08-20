@@ -40,7 +40,7 @@ public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
         TorrentInfo torrentInfo = new TorrentInfo();
         torrentInfo.setId(id);
         torrentInfo.setName(name);
-        torrentInfo.setHash(String.format("magnet:?xt=urn:btih:%s", hash));
+        torrentInfo.setHash(hash);
         torrentInfo.setSize(convertSizeUnit(fileSizeStr));
         torrentInfo.setUploadTime(parseDate(uploadTimeStr));
         torrentInfo.setFileCount((long) torrentFileInfos.size());

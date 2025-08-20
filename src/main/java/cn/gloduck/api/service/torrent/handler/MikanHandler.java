@@ -44,7 +44,7 @@ public class MikanHandler extends AbstractTorrentHandler{
         TorrentInfo torrentInfo = new TorrentInfo();
         torrentInfo.setId(id);
         torrentInfo.setName(name);
-        torrentInfo.setHash(String.format("magnet:?xt=urn:btih:%s", id.toUpperCase()));
+        torrentInfo.setHash(id.toUpperCase());
         torrentInfo.setSize(convertSizeUnit(sizeStr));
         torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
         torrentInfo.setFileCount(null);
