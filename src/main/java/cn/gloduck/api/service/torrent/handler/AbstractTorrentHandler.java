@@ -37,6 +37,8 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
     protected static final Pattern LI_PATTERN = Pattern.compile("<li\\b[^>]*>(.*?)</li>", Pattern.DOTALL);
     protected static final Pattern A_PATTERN = Pattern.compile("<a\\b[^>]*>(.*?)</a>", Pattern.DOTALL);
 
+    protected static final Pattern DIV_PATTERN = Pattern.compile("<div\\b[^>]*>(.*?)</div>", Pattern.DOTALL);
+
     protected static final Pattern MAGNET_HASH_PATTERN = Pattern.compile("magnet:\\?xt=urn:btih:([0-9a-zA-Z]{32,40})");
     protected final HttpClient httpClient;
     protected final String baseUrl;

@@ -4,10 +4,7 @@ import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentHandlerInfo;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
-import cn.gloduck.api.service.torrent.handler.BtsowHandler;
-import cn.gloduck.api.service.torrent.handler.DmhyHandler;
-import cn.gloduck.api.service.torrent.handler.MikanHandler;
-import cn.gloduck.api.service.torrent.handler.TorrentHandler;
+import cn.gloduck.api.service.torrent.handler.*;
 import cn.gloduck.api.utils.ConfigUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
@@ -29,6 +26,8 @@ public class TorrentService {
         Optional.ofNullable(config.getBtsow()).ifPresent(btsow -> this.torrentHandlers.add(new BtsowHandler(btsow)));
         Optional.ofNullable(config.getDmhy()).ifPresent(dmhy -> this.torrentHandlers.add(new DmhyHandler(dmhy)));
         Optional.ofNullable(config.getMikan()).ifPresent(mikan -> this.torrentHandlers.add(new MikanHandler(mikan)));
+        Optional.ofNullable(config.getSukebeiNyaaSi()).ifPresent(nyaaSi -> this.torrentHandlers.add(new SukebeiNyaaSiHandler(nyaaSi)));
+        Optional.ofNullable(config.getNyaaSi()).ifPresent(nyaaSi -> this.torrentHandlers.add(new NyaaSiHandler(nyaaSi)));
         handlerStatusMap = new HashMap<>(torrentHandlers.size() / 3 * 4 + 1);
         scheduledExecutor.scheduleAtFixedRate(checkHandlerStatusTask(), 0, 30, TimeUnit.MINUTES);
     }

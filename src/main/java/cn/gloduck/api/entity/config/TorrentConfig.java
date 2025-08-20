@@ -10,6 +10,10 @@ public class TorrentConfig {
 
     private WebConfig mikan;
 
+    private WebConfig sukebeiNyaaSi;
+
+    private WebConfig nyaaSi;
+
     @Data
     public static class WebConfig {
         private String url;

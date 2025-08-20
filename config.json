@@ -27,6 +27,20 @@
       "connectTimeout": 5,
       "requestTimeout": 30,
       "proxy": null
+    },
+    "nyaaSi": {
+      "url": "https://nyaa.si",
+      "validStatusTimeout": 3,
+      "connectTimeout": 5,
+      "requestTimeout": 30,
+      "proxy": null
+    },
+    "sukebeiNyaaSi": {
+      "url": "https://sukebei.nyaa.si",
+      "validStatusTimeout": 3,
+      "connectTimeout": 5,
+      "requestTimeout": 30,
+      "proxy": null
     }
   }
 }
