@@ -26,7 +26,7 @@ import java.util.regex.Pattern;
 
 public abstract class AbstractTorrentHandler implements TorrentHandler {
     private final Logger logger = Logger.getLogger(AbstractTorrentHandler.class.getName());
-    private static final List<Pair<String, Long>> UNIT_MAP = new ArrayList<>(){{
+    private static final List<Pair<String, Long>> UNIT_MAP = new ArrayList<>() {{
         add(new Pair<>("pib", 1024L * 1024 * 1024 * 1024 * 1024));
         add(new Pair<>("tib", 1024L * 1024 * 1024 * 1024));
         add(new Pair<>("gib", 1024L * 1024 * 1024));
@@ -157,26 +157,31 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
     }
 
     public JsonNode sendJsonRequest(HttpRequest request) {
+        String body = null;
         try {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(Charset.defaultCharset()));
+            body = response.body();
             if (response.statusCode() != 200) {
                 throw new RuntimeException(String.format("Server response error code: %s, response: %s", response.statusCode(), response.body()));
             }
-            String responseBody = response.body();
-            return JsonUtils.readTree(responseBody);
+            return JsonUtils.readTree(body);
         } catch (Exception e) {
+            logger.warning(String.format("Request [%s] Error: %s, response: %s", request.uri(), e.getMessage(), body));
             throw new ApiException("Request Api Error: " + e.getMessage());
         }
     }
 
     public String sendRequest(HttpRequest request) {
+        String body = null;
         try {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(Charset.defaultCharset()));
+            body = response.body();
             if (response.statusCode() != 200) {
                 throw new RuntimeException(String.format("Server response error code: %s, response: %s", response.statusCode(), response.body()));
             }
-            return response.body();
+            return body;
         } catch (Exception e) {
+            logger.warning(String.format("Request [%s] Error: %s, response: %s", request.uri(), e.getMessage(), body));
             throw new ApiException("Request Api Error: " + e.getMessage());
         }
     }
