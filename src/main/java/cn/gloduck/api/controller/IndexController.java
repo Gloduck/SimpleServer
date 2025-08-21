@@ -9,5 +9,9 @@ public class IndexController {
     public ControllerHandler index() {
         return new ClassPathFileHandler(HttpMethod.GET, "/", "static/index/index.html");
     }
+
+    public ControllerHandler favicon() {
+        return new ClassPathFileHandler(HttpMethod.GET, "/favicon.ico", "static/favicon.ico");
+    }
 }
 
