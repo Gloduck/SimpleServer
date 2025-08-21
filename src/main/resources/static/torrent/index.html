@@ -505,6 +505,14 @@
             }
         },
 
+        updateResultCount: (count) => {
+            if(!count){
+                elements.resultCount.textContent = "";
+            } else {
+                elements.resultCount.textContent = `(当前页${count} 个结果)`;
+            }
+        },
+
         // 渲染搜索结果
         renderResults: (items) => {
             elements.resultsList.innerHTML = '';
@@ -669,7 +677,7 @@
                 // 显示加载状态
                 elements.loadingIndicator.classList.remove('hidden');
                 elements.resultsList.classList.add('hidden');
-
+                render.updateResultCount(null);
                 // 执行搜索
                 const results = await api.searchTorrents(
                     state.currentKeyword,
@@ -685,7 +693,7 @@
                     state.totalResults = results.items.length;
 
                     // 更新结果计数
-                    elements.resultCount.textContent = `(当前页${state.totalResults} 个结果)`;
+                    render.updateResultCount(state.totalResults);
 
                     // 渲染结果和分页
                     render.renderResults(results.items);
@@ -740,6 +748,7 @@
             // 更新当前搜索源信息
             const currentHandler = state.handlers.find(h => h.code === handlerCode);
             elements.currentHandlerInfo.textContent = `当前搜索源: ${handlerCode} (${currentHandler.url})`;
+            render.updateResultCount(null);
 
             // 执行搜索 - 传入排序参数
             const results = await api.searchTorrents(
@@ -756,7 +765,7 @@
                 state.totalResults = results.items.length;
 
                 // 更新结果计数
-                elements.resultCount.textContent = `(当前页${state.totalResults} 个结果)`;
+                render.updateResultCount(state.totalResults);
 
                 // 渲染结果和分页
                 render.renderResults(results.items);
@@ -778,6 +787,7 @@
             // 显示加载状态
             elements.loadingIndicator.classList.remove('hidden');
             elements.resultsList.classList.add('hidden');
+            render.updateResultCount(null);
 
             // 执行搜索 - 传入排序参数
             const results = await api.searchTorrents(
@@ -794,7 +804,7 @@
                 state.totalResults = results.items.length;
 
                 // 更新结果计数
-                elements.resultCount.textContent = `(当前页${state.totalResults} 个结果)`;
+                render.updateResultCount(state.totalResults);
 
                 // 渲染结果和分页
                 render.renderResults(results.items);
@@ -816,6 +826,7 @@
             // 显示加载状态
             elements.loadingIndicator.classList.remove('hidden');
             elements.resultsList.classList.add('hidden');
+            render.updateResultCount(null);
 
             // 执行搜索 - 传入排序参数
             const results = await api.searchTorrents(
@@ -832,7 +843,7 @@
                 state.totalResults = results.items.length;
 
                 // 更新结果计数
-                elements.resultCount.textContent = `(当前页${state.totalResults} 个结果)`;
+                render.updateResultCount(state.totalResults);
 
                 // 渲染结果和分页
                 render.renderResults(results.items);
