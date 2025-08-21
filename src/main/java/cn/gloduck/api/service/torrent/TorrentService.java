@@ -8,13 +8,14 @@ import cn.gloduck.api.service.torrent.handler.*;
 import cn.gloduck.api.utils.ConfigUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
-import javax.swing.text.html.Option;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Logger;
 
 public class TorrentService {
+    private static final Logger LOGGER = Logger.getLogger(TorrentService.class.getName());
     private final Map<String, Boolean> handlerStatusMap;
     private final List<TorrentHandler> torrentHandlers;
     private final ScheduledExecutorService scheduledExecutor;
@@ -83,8 +84,18 @@ public class TorrentService {
         boolean lastHasNext;
         for (long i = sourceStartPage; ; i++) {
             long beforeSize = combinedResults.size();
-            ScrollPageResult<TorrentInfo> searchResult = torrentHandler.search(keyword, i, sortField, sortOrder);
+            ScrollPageResult<TorrentInfo> searchResult;
+            try {
+                searchResult = torrentHandler.search(keyword, i, sortField, sortOrder);
+            } catch (Exception e) {
+                LOGGER.warning(String.format("Search api error: %s [index=%s; size=%s; keyword=%s; code=%s; sort=%s; order=%s]", e.getMessage(), pageIndex, pageSize, keyword, code, sortField, sortOrder));
+                throw e;
+            }
             List<TorrentInfo> items = searchResult.getItems();
+            Boolean hasNext = searchResult.getHasNext();
+            if(hasNext && items.size() != torrentHandler.pageSize()){
+                LOGGER.warning(String.format("Source %s has next page, the returned sizes do not match %s out of %s", code, torrentHandler.pageSize(), items.size()));
+            }
             List<TorrentInfo> toAddResults;
             if (i == sourceStartPage) {
                 // 跳过需要偏移的数据
@@ -102,7 +113,7 @@ public class TorrentService {
                 }
                 combinedResults.add(toAddResult);
             }
-            lastHasNext = searchResult.getHasNext() || ((combinedResults.size() - beforeSize) < toAddResults.size());
+            lastHasNext = hasNext || ((combinedResults.size() - beforeSize) < toAddResults.size());
 //            System.out.printf("获取源%s页的数据, 预添加该页数据量: %d, 实际添加数据量: %d%n", i, toAddResults.size(), combinedResults.size() - beforeSize);
 
             // 已经获取到足够的数据或没有更多数据了就退出
