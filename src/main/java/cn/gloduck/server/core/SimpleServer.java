@@ -9,6 +9,7 @@ import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executors;
 import java.util.logging.Logger;
 
 public class SimpleServer {
@@ -16,8 +17,9 @@ public class SimpleServer {
     private final HttpServer server;
     private final List<ControllerHandler> handlers = new ArrayList<>();
 
-    public SimpleServer(int port) throws IOException {
+    public SimpleServer(int port, int workThreads) throws IOException {
         server = HttpServer.create(new InetSocketAddress(port), 0);
+        server.setExecutor(Executors.newFixedThreadPool(workThreads));
         server.createContext("/", new RouterHandler(handlers));
     }
 
