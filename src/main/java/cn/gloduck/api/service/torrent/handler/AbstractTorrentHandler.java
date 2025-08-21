@@ -2,6 +2,7 @@ package cn.gloduck.api.service.torrent.handler;
 
 import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.exceptions.ApiException;
+import cn.gloduck.common.entity.base.Pair;
 import cn.gloduck.server.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -25,19 +26,19 @@ import java.util.regex.Pattern;
 
 public abstract class AbstractTorrentHandler implements TorrentHandler {
     private final Logger logger = Logger.getLogger(AbstractTorrentHandler.class.getName());
-    private static final Map<String, Long> UNIT_MAP = new HashMap<>(){{
-        put("b", 1L);
-        put("kb", 1024L);
-        put("mb", 1024L * 1024);
-        put("gb", 1024L * 1024 * 1024);
-        put("tb", 1024L * 1024 * 1024 * 1024);
-        put("pb", 1024L * 1024 * 1024 * 1024 * 1024);
-        put("bytes", 1L);
-        put("kib", 1024L);
-        put("mib", 1024L * 1024);
-        put("gib", 1024L * 1024 * 1024);
-        put("tib", 1024L * 1024 * 1024 * 1024);
-        put("pib", 1024L * 1024 * 1024 * 1024 * 1024);
+    private static final List<Pair<String, Long>> UNIT_MAP = new ArrayList<>(){{
+        add(new Pair<>("pib", 1024L * 1024 * 1024 * 1024 * 1024));
+        add(new Pair<>("tib", 1024L * 1024 * 1024 * 1024));
+        add(new Pair<>("gib", 1024L * 1024 * 1024));
+        add(new Pair<>("mib", 1024L * 1024));
+        add(new Pair<>("kib", 1024L));
+        add(new Pair<>("bytes", 1L));
+        add(new Pair<>("pb", 1024L * 1024 * 1024 * 1024 * 1024));
+        add(new Pair<>("tb", 1024L * 1024 * 1024 * 1024));
+        add(new Pair<>("gb", 1024L * 1024 * 1024));
+        add(new Pair<>("mb", 1024L * 1024));
+        add(new Pair<>("kb", 1024L));
+        add(new Pair<>("b", 1L));
     }};
     protected static final DateTimeFormatter SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD = DateTimeFormatter.ofPattern("yyyy/MM/dd H:m");
     protected static final DateTimeFormatter SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm");
@@ -198,7 +199,7 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
             return null;
         }
         sizeStr = sizeStr.trim().replace(" ", "").toLowerCase();
-        for (Map.Entry<String, Long> kv : UNIT_MAP.entrySet()) {
+        for (Pair<String, Long> kv : UNIT_MAP) {
             if (sizeStr.endsWith(kv.getKey())) {
                 return Math.round(Double.parseDouble(sizeStr.replace(kv.getKey(), "")) * kv.getValue());
             }
