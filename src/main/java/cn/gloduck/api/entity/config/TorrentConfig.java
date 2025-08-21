@@ -14,6 +14,8 @@ public class TorrentConfig {
 
     private WebConfig nyaaSi;
 
+    private WebConfig tokyoToshokan;
+
     @Data
     public static class WebConfig {
         private String url;

@@ -42,6 +42,13 @@
       "connectTimeout": 5,
       "requestTimeout": 30,
       "proxy": null
+    },
+    "tokyoToshokan": {
+      "url": "https://www.tokyotosho.info",
+      "validStatusTimeout": 3,
+      "connectTimeout": 5,
+      "requestTimeout": 10,
+      "proxy": null
     }
   }
 }
