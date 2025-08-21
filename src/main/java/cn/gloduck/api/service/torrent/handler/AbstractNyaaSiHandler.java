@@ -132,7 +132,7 @@ public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
             torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, DASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
             torrentInfos.add(torrentInfo);
         }
-        boolean hasNext = !response.contains("class=\"next disabled\"");
+        boolean hasNext = response.contains("class=\"next\"");
         return new ScrollPageResult<>(index, hasNext, torrentInfos);
     }
 
