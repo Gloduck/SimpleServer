@@ -18,14 +18,27 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public abstract class AbstractTorrentHandler implements TorrentHandler {
+    private final Logger logger = Logger.getLogger(AbstractTorrentHandler.class.getName());
+    private static final Map<String, Long> UNIT_MAP = new HashMap<>(){{
+        put("b", 1L);
+        put("kb", 1024L);
+        put("mb", 1024L * 1024);
+        put("gb", 1024L * 1024 * 1024);
+        put("tb", 1024L * 1024 * 1024 * 1024);
+        put("pb", 1024L * 1024 * 1024 * 1024 * 1024);
+        put("bytes", 1L);
+        put("kib", 1024L);
+        put("mib", 1024L * 1024);
+        put("gib", 1024L * 1024 * 1024);
+        put("tib", 1024L * 1024 * 1024 * 1024);
+        put("pib", 1024L * 1024 * 1024 * 1024 * 1024);
+    }};
     protected static final DateTimeFormatter SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD = DateTimeFormatter.ofPattern("yyyy/MM/dd H:m");
     protected static final DateTimeFormatter SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm");
     protected static final DateTimeFormatter DASH_SEPARATED_DATE_TIME_FORMAT_PADDED = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
@@ -185,31 +198,22 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
             return null;
         }
         sizeStr = sizeStr.trim().replace(" ", "").toLowerCase();
-        if (sizeStr.endsWith("pb")) {
-            return Math.round(Double.parseDouble(sizeStr.replace("pb", "")) * 1024 * 1024 * 1024 * 1024);
-        } else if (sizeStr.endsWith("tb")) {
-            return Math.round(Double.parseDouble(sizeStr.replace("tb", "")) * 1024 * 1024 * 1024);
-        } else if (sizeStr.endsWith("gb")) {
-            return Math.round(Double.parseDouble(sizeStr.replace("gb", "")) * 1024 * 1024 * 1024);
-        } else if (sizeStr.endsWith("mb")) {
-            return Math.round(Double.parseDouble(sizeStr.replace("mb", "")) * 1024 * 1024);
-        } else if (sizeStr.endsWith("kb")) {
-            return Math.round(Double.parseDouble(sizeStr.replace("kb", "")) * 1024);
-        } else if (sizeStr.endsWith("pib")) {
-            return Math.round(Double.parseDouble(sizeStr.replace("pib", "")) * 1024 * 1024 * 1024 * 1024);
-        } else if (sizeStr.endsWith("tib")) {
-            return Math.round(Double.parseDouble(sizeStr.replace("tib", "")) * 1024 * 1024 * 1024);
-        } else if (sizeStr.endsWith("gib")) {
-            return Math.round(Double.parseDouble(sizeStr.replace("gib", "")) * 1024 * 1024 * 1024);
-        } else if (sizeStr.endsWith("mib")) {
-            return Math.round(Double.parseDouble(sizeStr.replace("mib", "")) * 1024 * 1024);
-        } else if (sizeStr.endsWith("kib")) {
-            return Math.round(Double.parseDouble(sizeStr.replace("kib", "")) * 1024);
-        } else if(sizeStr.endsWith("b")) {
-            return Math.round(Double.parseDouble(sizeStr.replace("b", "")));
-        } else {
-            return Math.round(Double.parseDouble(sizeStr));
+        for (Map.Entry<String, Long> kv : UNIT_MAP.entrySet()) {
+            if (sizeStr.endsWith(kv.getKey())) {
+                return Math.round(Double.parseDouble(sizeStr.replace(kv.getKey(), "")) * kv.getValue());
+            }
         }
+        String numericStr = sizeStr.replaceAll("[^-+0-9.]", "");
+        if (numericStr.indexOf('.') != numericStr.lastIndexOf('.')) {
+            numericStr = numericStr.substring(0, numericStr.lastIndexOf('.'));
+        }
+        if (!Objects.equals(numericStr, sizeStr)) {
+            logger.warning(String.format("Exist Unresolved units: %s", sizeStr));
+        }
+        if (numericStr.isEmpty() || numericStr.equals("-") || numericStr.equals("+")) {
+            return null;
+        }
+        return Math.round(Double.parseDouble(numericStr));
     }
 
     protected Date convertUploadTime(String uploadTimeStr, DateTimeFormatter formatter) {
