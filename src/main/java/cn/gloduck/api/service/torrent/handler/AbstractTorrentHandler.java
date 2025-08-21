@@ -25,7 +25,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public abstract class AbstractTorrentHandler implements TorrentHandler {
-    private final Logger logger = Logger.getLogger(AbstractTorrentHandler.class.getName());
+    private final static Logger LOGGER = Logger.getLogger(AbstractTorrentHandler.class.getName());
     private static final List<Pair<String, Long>> UNIT_MAP = new ArrayList<>() {{
         add(new Pair<>("pib", 1024L * 1024 * 1024 * 1024 * 1024));
         add(new Pair<>("tib", 1024L * 1024 * 1024 * 1024));
@@ -166,7 +166,7 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
             }
             return JsonUtils.readTree(body);
         } catch (Exception e) {
-            logger.warning(String.format("Request [%s] Error: %s, response: %s", request.uri(), e.getMessage(), body));
+            LOGGER.warning(String.format("Request [%s] Error: %s, response: %s", request.uri(), e.getMessage(), body));
             throw new ApiException("Request Api Error: " + e.getMessage());
         }
     }
@@ -181,7 +181,7 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
             }
             return body;
         } catch (Exception e) {
-            logger.warning(String.format("Request [%s] Error: %s, response: %s", request.uri(), e.getMessage(), body));
+            LOGGER.warning(String.format("Request [%s] Error: %s, response: %s", request.uri(), e.getMessage(), body));
             throw new ApiException("Request Api Error: " + e.getMessage());
         }
     }
@@ -214,7 +214,7 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
             numericStr = numericStr.substring(0, numericStr.lastIndexOf('.'));
         }
         if (!Objects.equals(numericStr, sizeStr)) {
-            logger.warning(String.format("Exist Unresolved units: %s", sizeStr));
+            LOGGER.warning(String.format("Exist Unresolved units: %s", sizeStr));
         }
         if (numericStr.isEmpty() || numericStr.equals("-") || numericStr.equals("+")) {
             return null;

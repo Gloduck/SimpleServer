@@ -12,8 +12,6 @@ import java.util.*;
 import java.util.logging.Logger;
 
 public class BtsowHandler extends AbstractTorrentHandler {
-    private final Logger logger = Logger.getLogger(BtsowHandler.class.getName());
-
     private static final int DEFAULT_PAGE_SIZE = 100;
 
     public BtsowHandler(TorrentConfig.WebConfig config) {

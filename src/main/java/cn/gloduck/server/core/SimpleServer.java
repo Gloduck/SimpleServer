@@ -13,7 +13,7 @@ import java.util.concurrent.Executors;
 import java.util.logging.Logger;
 
 public class SimpleServer {
-    private Logger logger = Logger.getLogger(SimpleServer.class.getName());
+    private final static Logger LOGGER = Logger.getLogger(SimpleServer.class.getName());
     private final HttpServer server;
     private final List<ControllerHandler> handlers = new ArrayList<>();
 
@@ -24,7 +24,7 @@ public class SimpleServer {
     }
 
     public void addHandler(ControllerHandler handler) {
-        logger.info(String.format("Register handler [%s] %s", handler.getHttpMethod(), handler.getRequestPath()));
+        LOGGER.info(String.format("Register handler [%s] %s", handler.getHttpMethod(), handler.getRequestPath()));
         handlers.add(handler);
     }
 
@@ -38,14 +38,14 @@ public class SimpleServer {
                 ControllerHandler handler = (ControllerHandler) method.invoke(controller);
                 addHandler(handler);
             } catch (ReflectiveOperationException e) {
-                logger.warning("Failed to register controller " + controller.getClass().getName() + " method " + method.getName() + " : " + e.getMessage());
+                LOGGER.warning("Failed to register controller " + controller.getClass().getName() + " method " + method.getName() + " : " + e.getMessage());
             }
         }
     }
 
     public void start() {
         server.start();
-        logger.info("Server started on port " + server.getAddress().getPort());
+        LOGGER.info("Server started on port " + server.getAddress().getPort());
     }
 
 }

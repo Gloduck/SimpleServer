@@ -14,7 +14,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class RouterHandler implements HttpHandler {
-    private Logger logger = Logger.getLogger(RouterHandler.class.getName());
+    private final static Logger LOGGER = Logger.getLogger(RouterHandler.class.getName());
     private final List<ControllerHandler> handlers;
 
     public RouterHandler(List<ControllerHandler> handlers) {
@@ -48,7 +48,7 @@ public class RouterHandler implements HttpHandler {
         } catch (FileNotFoundException e) {
             sendError(exchange, 404, "Resource Not Found");
         } catch (Exception e) {
-            logger.log(Level.SEVERE, "Internal Server Error", e);
+            LOGGER.log(Level.SEVERE, "Internal Server Error", e);
             sendError(exchange, 500, "Internal Server Error");
         } finally {
             exchange.close();
@@ -94,10 +94,10 @@ public class RouterHandler implements HttpHandler {
                     remoteAddress.getAddress().getHostAddress() :
                     "unknown";
         }
-        logger.warning(String.format("Request [%s] %s exist with code [%s] and message [%s], clientIp: [%s]", exchange.getRequestMethod(), exchange.getRequestURI(), code, message, clientIP));
+        LOGGER.warning(String.format("Request [%s] %s exist with code [%s] and message [%s], clientIp: [%s]", exchange.getRequestMethod(), exchange.getRequestURI(), code, message, clientIP));
     }
 
     private void logRequest(HttpExchange exchange) {
-        logger.info(String.format("Request [%s] %s", exchange.getRequestMethod(), exchange.getRequestURI()));
+        LOGGER.info(String.format("Request [%s] %s", exchange.getRequestMethod(), exchange.getRequestURI()));
     }
 }
