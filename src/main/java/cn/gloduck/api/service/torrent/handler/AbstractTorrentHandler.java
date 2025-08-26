@@ -14,7 +14,6 @@ import java.net.URL;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.Charset;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -161,7 +160,7 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
     public JsonNode sendJsonRequest(HttpRequest request) {
         String body = null;
         try {
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(Charset.defaultCharset()));
+            HttpResponse<String> response = httpClient.send(request, new StringBodyHandler());
             body = response.body();
             if (response.statusCode() != 200) {
                 throw new RuntimeException(String.format("Server response error code: %s, response: %s", response.statusCode(), response.body()));
@@ -176,7 +175,7 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
     public String sendRequest(HttpRequest request) {
         String body = null;
         try {
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(Charset.defaultCharset()));
+            HttpResponse<String> response = httpClient.send(request, new StringBodyHandler());
             body = response.body();
             if (response.statusCode() != 200) {
                 throw new RuntimeException(String.format("Server response error code: %s, response: %s", response.statusCode(), response.body()));

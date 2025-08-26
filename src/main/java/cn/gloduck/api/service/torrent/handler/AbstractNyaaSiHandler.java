@@ -24,8 +24,6 @@ public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
         String requestUrl = String.format("%s/view/%s", baseUrl, id);
         HttpRequest request = requestBuilder()
                 .uri(URI.create(requestUrl))
-                // HttpClient不处理gzip，所以禁用
-                .header("Accept-Encoding", "identity")
                 .GET()
                 .build();
         String response = sendRequest(request);
