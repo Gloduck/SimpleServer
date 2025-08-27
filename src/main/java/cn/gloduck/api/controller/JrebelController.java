@@ -17,7 +17,7 @@ public class JrebelController {
     private JRebelService jRebelService = JRebelService.instance();
 
     public ControllerHandler htmlHandler() {
-        return new ClassPathFileHandler(HttpMethod.GET, "/jrebel", "static/jrebel/index.html");
+        return new ClassPathFileHandler("/jrebel", "static/jrebel/index.html");
     }
 
     public ControllerHandler leasesHandler() {

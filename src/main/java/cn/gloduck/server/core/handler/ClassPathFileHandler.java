@@ -10,17 +10,18 @@ import java.io.InputStream;
 import java.lang.reflect.Array;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class ClassPathFileHandler implements ControllerHandler {
     private final List<ApiEndpoint> apiEndpoints;
     private final String filePath;
 
-    public ClassPathFileHandler(HttpMethod method, String requestPath, String filePath) {
-        this(Arrays.asList(new ApiEndpoint(method, requestPath)), filePath);
+    public ClassPathFileHandler(String requestPath, String filePath) {
+        this(Arrays.asList(requestPath), filePath);
     }
 
-    public ClassPathFileHandler(List<ApiEndpoint> apiEndpoints, String filePath) {
-        this.apiEndpoints = apiEndpoints;
+    public ClassPathFileHandler(List<String> requestPaths, String filePath) {
+        this.apiEndpoints = requestPaths.stream().map(requestPath -> new ApiEndpoint(HttpMethod.GET, requestPath)).collect(Collectors.toList());
         this.filePath = filePath;
     }
 

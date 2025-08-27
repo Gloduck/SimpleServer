@@ -10,6 +10,7 @@ import cn.gloduck.server.core.handler.styles.classes.JsonControllerHandler;
 import cn.gloduck.server.core.util.HttpExchangeUtils;
 import cn.gloduck.server.core.util.JsonUtils;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -41,15 +42,11 @@ public class OnlineClipBoardController {
         });
     }
 
-    public ControllerHandler index2() {
-        return new ClassPathFileHandler(HttpMethod.GET, "/clipboard/", "static/clipboard/index.html");
-    }
-
-    public ControllerHandler index1() {
-        return new ClassPathFileHandler(HttpMethod.GET, "/clipboard", "static/clipboard/index.html");
+    public ControllerHandler index() {
+        return new ClassPathFileHandler(Arrays.asList("/clipboard", "/clipboard/"), "static/clipboard/index.html");
     }
 
     public ControllerHandler clipboard() {
-        return new ClassPathFileHandler(HttpMethod.GET, "/clipboard/*", "static/clipboard/clipboard.html");
+        return new ClassPathFileHandler("/clipboard/*", "static/clipboard/clipboard.html");
     }
 }

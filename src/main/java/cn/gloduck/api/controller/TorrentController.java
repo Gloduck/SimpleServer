@@ -8,6 +8,7 @@ import cn.gloduck.server.core.handler.ControllerHandler;
 import cn.gloduck.server.core.handler.styles.classes.JsonControllerHandler;
 import cn.gloduck.server.core.util.HttpExchangeUtils;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -40,12 +41,8 @@ public class TorrentController {
         });
     }
 
-    public ControllerHandler index2() {
-        return new ClassPathFileHandler(HttpMethod.GET, "/torrent/index2", "static/torrent/index.html");
-    }
-
-    public ControllerHandler index1() {
-        return new ClassPathFileHandler(HttpMethod.GET, "/torrent", "static/torrent/index.html");
+    public ControllerHandler index() {
+        return new ClassPathFileHandler(Arrays.asList("/torrent", "/torrent/"), "static/torrent/index.html");
     }
 
 }

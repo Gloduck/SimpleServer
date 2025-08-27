@@ -7,11 +7,11 @@ import cn.gloduck.server.core.handler.ControllerHandler;
 public class IndexController {
 
     public ControllerHandler index() {
-        return new ClassPathFileHandler(HttpMethod.GET, "/", "static/index/index.html");
+        return new ClassPathFileHandler("/", "static/index/index.html");
     }
 
     public ControllerHandler favicon() {
-        return new ClassPathFileHandler(HttpMethod.GET, "/favicon.ico", "static/favicon.ico");
+        return new ClassPathFileHandler("/favicon.ico", "static/favicon.ico");
     }
 }
 
