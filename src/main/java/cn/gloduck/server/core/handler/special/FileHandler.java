@@ -6,11 +6,14 @@ import com.sun.net.httpserver.HttpExchange;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Optional;
 
 public abstract class FileHandler implements ControllerHandler {
     protected abstract InputStream getFileInputStream(HttpExchange exchange) throws IOException;
 
     protected abstract String getContentType(HttpExchange exchange);
+
+    protected abstract Long getContentLength(HttpExchange exchange);
 
     @Override
     public void handleRequest(HttpExchange exchange) throws IOException {
@@ -22,7 +25,7 @@ public abstract class FileHandler implements ControllerHandler {
                 throw new FileNotFoundException("Resource not found");
             }
 
-            exchange.sendResponseHeaders(200, 0);
+            exchange.sendResponseHeaders(200, Optional.ofNullable(getContentLength(exchange)).orElse(0L));
 
             byte[] buffer = new byte[8192];
             int bytesRead;

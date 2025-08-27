@@ -46,23 +46,36 @@ public class StaticFileHandler extends FileHandler {
     }
 
     @Override
-    protected InputStream getFileInputStream(HttpExchange exchange) throws IOException {
+    protected Long getContentLength(HttpExchange exchange) {
+        Long size = null;
+        try {
+            size = Files.size(getFilePath(exchange));
+        } catch (IOException ignore) {
+        }
+        return size;
+    }
+
+    private Path getFilePath(HttpExchange exchange) {
         String requestPath = exchange.getRequestURI().getPath();
         if (ignoreUrlPathPrefix != null) {
             requestPath = requestPath.substring(ignoreUrlPathPrefix.length());
         }
-        Path filePath = Paths.get(fileBaseDir, requestPath);
-        if (!Files.exists(filePath)) {
+        return Paths.get(fileBaseDir, requestPath);
+    }
+
+    @Override
+    protected InputStream getFileInputStream(HttpExchange exchange) throws IOException {
+        Path path = getFilePath(exchange);
+        if (!Files.exists(path)) {
             return null;
         }
-        return Files.newInputStream(filePath);
+        return Files.newInputStream(path);
     }
 
     @Override
     public String getContentType(HttpExchange exchange) {
-        String requestPath = exchange.getRequestURI().getPath();
-        String fileExt = FileUtils.getFileExtensionFromUrl(requestPath);
+        Path path = getFilePath(exchange);
+        String fileExt = FileUtils.getFileExtensionFromPath(path.toString());
         return FileUtils.getContentTypeFromExtension(fileExt);
     }
-
 }
