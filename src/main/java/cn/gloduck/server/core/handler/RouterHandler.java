@@ -29,8 +29,9 @@ public class RouterHandler implements HttpHandler {
             String requestMethod = exchange.getRequestMethod();
 
             for (ControllerHandler handler : handlers) {
-                boolean matchHandler = isPathMatch(handler.getRequestPath(), requestPath) &&
-                        handler.getHttpMethod().name().equals(requestMethod);
+                List<ApiEndpoint> apiEndpoints = handler.getApiEndpoints();
+                boolean matchHandler = apiEndpoints.stream().anyMatch(apiEndpoint -> isPathMatch(apiEndpoint.getPath(), requestPath) &&
+                        apiEndpoint.getMethod().name().equals(requestMethod));
                 if (!matchHandler) {
                     continue;
                 }

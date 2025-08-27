@@ -9,18 +9,25 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 public class StaticFileHandler implements ControllerHandler {
-    private final String fileBaseDir;
+    private final List<ApiEndpoint> apiEndpoints;
 
-    private final String matchPath;
+    private final String fileBaseDir;
 
     private final String ignoreUrlPathPrefix;
 
     public StaticFileHandler(String fileBaseDir, String mathUrlPath) {
+        this(fileBaseDir, Arrays.asList(mathUrlPath));
+    }
+
+    public StaticFileHandler(String fileBaseDir, List<String> mathUrlPaths) {
         this.fileBaseDir = fileBaseDir;
-        this.matchPath = mathUrlPath;
         this.ignoreUrlPathPrefix = null;
+        this.apiEndpoints = mathUrlPaths.stream().map(path -> new ApiEndpoint(HttpMethod.GET, path)).collect(Collectors.toList());
     }
 
     public StaticFileHandler(String fileBaseDir, String mathUrlPath, String ignoreMathUrlPathPrefix) {
@@ -28,18 +35,13 @@ public class StaticFileHandler implements ControllerHandler {
             throw new IllegalArgumentException("ignoreMathUrlPathPrefix must be start with mathUrlPath");
         }
         this.fileBaseDir = fileBaseDir;
-        this.matchPath = mathUrlPath;
         this.ignoreUrlPathPrefix = ignoreMathUrlPathPrefix;
+        this.apiEndpoints = Arrays.asList(new ApiEndpoint(HttpMethod.GET, mathUrlPath));
     }
 
     @Override
-    public HttpMethod getHttpMethod() {
-        return HttpMethod.GET;
-    }
-
-    @Override
-    public String getRequestPath() {
-        return matchPath;
+    public List<ApiEndpoint> getApiEndpoints() {
+        return apiEndpoints;
     }
 
     @Override

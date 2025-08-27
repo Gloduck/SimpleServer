@@ -7,28 +7,26 @@ import com.sun.net.httpserver.HttpExchange;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Array;
+import java.util.Arrays;
+import java.util.List;
 
 public class ClassPathFileHandler implements ControllerHandler {
-    private final HttpMethod method;
-
-    private final String requestPath;
-
+    private final List<ApiEndpoint> apiEndpoints;
     private final String filePath;
 
     public ClassPathFileHandler(HttpMethod method, String requestPath, String filePath) {
-        this.method = method;
-        this.requestPath = requestPath;
+        this(Arrays.asList(new ApiEndpoint(method, requestPath)), filePath);
+    }
+
+    public ClassPathFileHandler(List<ApiEndpoint> apiEndpoints, String filePath) {
+        this.apiEndpoints = apiEndpoints;
         this.filePath = filePath;
     }
 
     @Override
-    public HttpMethod getHttpMethod() {
-        return method;
-    }
-
-    @Override
-    public String getRequestPath() {
-        return requestPath;
+    public List<ApiEndpoint> getApiEndpoints() {
+        return apiEndpoints;
     }
 
     @Override
@@ -40,8 +38,8 @@ public class ClassPathFileHandler implements ControllerHandler {
     @Override
     public byte[] handleRequest(HttpExchange exchange) throws IOException {
         byte[] readBytes;
-        try (InputStream in = ClassLoader.getSystemResourceAsStream(filePath)){
-            if(in == null){
+        try (InputStream in = ClassLoader.getSystemResourceAsStream(filePath)) {
+            if (in == null) {
                 throw new FileNotFoundException("File not found: " + filePath);
             }
             readBytes = in.readAllBytes();

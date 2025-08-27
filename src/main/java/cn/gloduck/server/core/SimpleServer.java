@@ -1,5 +1,6 @@
 package cn.gloduck.server.core;
 
+import cn.gloduck.server.core.handler.ApiEndpoint;
 import cn.gloduck.server.core.handler.ControllerHandler;
 import cn.gloduck.server.core.handler.RouterHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -24,7 +25,10 @@ public class SimpleServer {
     }
 
     public void addHandler(ControllerHandler handler) {
-        LOGGER.info(String.format("Register handler [%s] %s", handler.getHttpMethod(), handler.getRequestPath()));
+        List<ApiEndpoint> apiEndpoints = handler.getApiEndpoints();
+        for (ApiEndpoint apiEndpoint : apiEndpoints) {
+            LOGGER.info(String.format("Register handler [%s] %s", apiEndpoint.getMethod(), apiEndpoint.getPath()));
+        }
         handlers.add(handler);
     }
 
