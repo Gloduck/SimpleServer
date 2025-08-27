@@ -20,10 +20,6 @@ public class HtmlControllerHandler extends AbstractControllerHandler<String> {
         super(method, requestPaths, handler);
     }
 
-    public HtmlControllerHandler(List<ApiEndpoint> endpoints, Function<HttpExchange, String> handler) {
-        super(endpoints, handler);
-    }
-
     @Override
     protected byte[] convertResult(String result) throws IOException {
         return result.getBytes(StandardCharsets.UTF_8);

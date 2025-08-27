@@ -20,10 +20,6 @@ public class JsonControllerHandler<R> extends AbstractControllerHandler<R>{
         super(method, requestPaths, handler);
     }
 
-    public JsonControllerHandler(List<ApiEndpoint> endpoints, Function<HttpExchange, R> handler) {
-        super(endpoints, handler);
-    }
-
     @Override
     protected byte[] convertResult(R result) throws IOException {
         return JsonUtils.writeValueAsBytes(result);
