@@ -6,6 +6,7 @@ import cn.gloduck.server.core.handler.ControllerHandler;
 import com.sun.net.httpserver.HttpExchange;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.util.Arrays;
 import java.util.List;
 import java.util.function.Function;
@@ -36,10 +37,22 @@ public abstract class AbstractControllerHandler<R> implements ControllerHandler 
 
     protected abstract byte[] convertResult(R result) throws IOException;
 
+    protected abstract String getContentType(HttpExchange exchange);
+
     @Override
-    public byte[] handleRequest(HttpExchange exchange) throws IOException {
+    public final void handleRequest(HttpExchange exchange) throws IOException {
         R result = this.handler.apply(exchange);
-        return convertResult(result);
+        byte[] resultBytes = convertResult(result);
+        sendResponse(exchange, getContentType(exchange), resultBytes);
+    }
+
+
+    private void sendResponse(HttpExchange exchange, String contentType, byte[] data) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type", contentType);
+        exchange.sendResponseHeaders(200, data.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(data);
+        }
     }
 
 }

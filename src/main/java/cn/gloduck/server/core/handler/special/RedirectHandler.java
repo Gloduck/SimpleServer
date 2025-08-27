@@ -6,7 +6,6 @@ import cn.gloduck.server.core.handler.ControllerHandler;
 import com.sun.net.httpserver.HttpExchange;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -32,12 +31,9 @@ public abstract class RedirectHandler implements ControllerHandler {
     }
 
     @Override
-    public final String getContentType(HttpExchange exchange) {
-        return null;
+    public void handleRequest(HttpExchange exchange) throws IOException {
+        exchange.getResponseHeaders().set("Location", redirectPath);
+        exchange.sendResponseHeaders(getRedirectCode(), 0);
     }
 
-    @Override
-    public final byte[] handleRequest(HttpExchange exchange) throws IOException {
-        return redirectPath.getBytes(StandardCharsets.UTF_8);
-    }
 }

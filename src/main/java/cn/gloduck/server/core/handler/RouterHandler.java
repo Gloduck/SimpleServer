@@ -1,6 +1,5 @@
 package cn.gloduck.server.core.handler;
 
-import cn.gloduck.server.core.handler.special.RedirectHandler;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 
@@ -36,14 +35,7 @@ public class RouterHandler implements HttpHandler {
                 if (!matchHandler) {
                     continue;
                 }
-                if (handler instanceof RedirectHandler) {
-                    String location = new String(handler.handleRequest(exchange), StandardCharsets.UTF_8);
-                    exchange.getResponseHeaders().set("Location", location);
-                    exchange.sendResponseHeaders(((RedirectHandler) handler).getRedirectCode(), 0);
-                } else {
-                    byte[] response = handler.handleRequest(exchange);
-                    sendResponse(exchange, handler.getContentType(exchange), response);
-                }
+                handler.handleRequest(exchange);
                 return;
             }
             sendError(exchange, 404, "Not Found");
@@ -71,13 +63,7 @@ public class RouterHandler implements HttpHandler {
         return Objects.equals(pattern, actualPath);
     }
 
-    private void sendResponse(HttpExchange exchange, String contentType, byte[] data) throws IOException {
-        exchange.getResponseHeaders().set("Content-Type", contentType);
-        exchange.sendResponseHeaders(200, data.length);
-        try (OutputStream os = exchange.getResponseBody()) {
-            os.write(data);
-        }
-    }
+
 
     private void sendError(HttpExchange exchange, int code, String message) throws IOException {
         byte[] bytes = message.getBytes(StandardCharsets.UTF_8);

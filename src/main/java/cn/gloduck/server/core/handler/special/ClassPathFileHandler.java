@@ -2,18 +2,16 @@ package cn.gloduck.server.core.handler.special;
 
 import cn.gloduck.server.core.enums.HttpMethod;
 import cn.gloduck.server.core.handler.ApiEndpoint;
-import cn.gloduck.server.core.handler.ControllerHandler;
 import cn.gloduck.server.core.util.FileUtils;
 import com.sun.net.httpserver.HttpExchange;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-public class ClassPathFileHandler implements ControllerHandler {
+public class ClassPathFileHandler extends FileHandler {
     private final List<ApiEndpoint> apiEndpoints;
     private final String filePath;
 
@@ -32,20 +30,13 @@ public class ClassPathFileHandler implements ControllerHandler {
     }
 
     @Override
-    public String getContentType(HttpExchange exchange) {
-        String fileExt = FileUtils.getFileExtensionFromPath(filePath);
-        return FileUtils.getContentTypeFromExtension(fileExt);
+    protected InputStream getFileInputStream(HttpExchange exchange) throws IOException {
+        return ClassLoader.getSystemResourceAsStream(filePath);
     }
 
     @Override
-    public byte[] handleRequest(HttpExchange exchange) throws IOException {
-        byte[] readBytes;
-        try (InputStream in = ClassLoader.getSystemResourceAsStream(filePath)) {
-            if (in == null) {
-                throw new FileNotFoundException("File not found: " + filePath);
-            }
-            readBytes = in.readAllBytes();
-        }
-        return readBytes;
+    protected String getContentType(HttpExchange exchange) {
+        String fileExt = FileUtils.getFileExtensionFromPath(filePath);
+        return FileUtils.getContentTypeFromExtension(fileExt);
     }
 }

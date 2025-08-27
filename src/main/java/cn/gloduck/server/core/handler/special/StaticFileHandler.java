@@ -2,12 +2,11 @@ package cn.gloduck.server.core.handler.special;
 
 import cn.gloduck.server.core.enums.HttpMethod;
 import cn.gloduck.server.core.handler.ApiEndpoint;
-import cn.gloduck.server.core.handler.ControllerHandler;
 import cn.gloduck.server.core.util.FileUtils;
 import com.sun.net.httpserver.HttpExchange;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -15,7 +14,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-public class StaticFileHandler implements ControllerHandler {
+public class StaticFileHandler extends FileHandler {
     private final List<ApiEndpoint> apiEndpoints;
 
     private final String fileBaseDir;
@@ -47,24 +46,23 @@ public class StaticFileHandler implements ControllerHandler {
     }
 
     @Override
+    protected InputStream getFileInputStream(HttpExchange exchange) throws IOException {
+        String requestPath = exchange.getRequestURI().getPath();
+        if (ignoreUrlPathPrefix != null) {
+            requestPath = requestPath.substring(ignoreUrlPathPrefix.length());
+        }
+        Path filePath = Paths.get(fileBaseDir, requestPath);
+        if (!Files.exists(filePath)) {
+            return null;
+        }
+        return Files.newInputStream(filePath);
+    }
+
+    @Override
     public String getContentType(HttpExchange exchange) {
         String requestPath = exchange.getRequestURI().getPath();
         String fileExt = FileUtils.getFileExtensionFromUrl(requestPath);
         return FileUtils.getContentTypeFromExtension(fileExt);
     }
 
-    @Override
-    public byte[] handleRequest(HttpExchange exchange) throws IOException {
-        String requestPath = exchange.getRequestURI().getPath();
-        if (ignoreUrlPathPrefix != null) {
-            requestPath = requestPath.substring(ignoreUrlPathPrefix.length());
-        }
-        Path filePath = Paths.get(fileBaseDir, requestPath);
-
-        if (!Files.exists(filePath)) {
-            throw new FileNotFoundException("Resource not found");
-        }
-
-        return Files.readAllBytes(filePath);
-    }
 }
