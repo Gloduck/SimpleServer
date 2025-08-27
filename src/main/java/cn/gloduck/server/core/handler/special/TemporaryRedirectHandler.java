@@ -1,4 +1,4 @@
-package cn.gloduck.server.core.handler;
+package cn.gloduck.server.core.handler.special;
 
 import java.util.List;
 

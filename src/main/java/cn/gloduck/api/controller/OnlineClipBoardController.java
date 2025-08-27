@@ -4,7 +4,7 @@ import cn.gloduck.api.entity.db.OnlineClipBoard;
 import cn.gloduck.api.service.clipboard.OnlineClipBoardService;
 import cn.gloduck.common.entity.base.Result;
 import cn.gloduck.server.core.enums.HttpMethod;
-import cn.gloduck.server.core.handler.ClassPathFileHandler;
+import cn.gloduck.server.core.handler.special.ClassPathFileHandler;
 import cn.gloduck.server.core.handler.ControllerHandler;
 import cn.gloduck.server.core.handler.styles.classes.JsonControllerHandler;
 import cn.gloduck.server.core.util.HttpExchangeUtils;

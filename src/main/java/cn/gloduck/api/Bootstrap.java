@@ -8,7 +8,7 @@ import cn.gloduck.api.entity.config.ServerConfig;
 import cn.gloduck.api.log.SpringBootStyleFormatter;
 import cn.gloduck.api.utils.ConfigUtils;
 import cn.gloduck.server.core.SimpleServer;
-import cn.gloduck.server.core.handler.StaticFileHandler;
+import cn.gloduck.server.core.handler.special.StaticFileHandler;
 
 import java.io.IOException;
 import java.util.Arrays;

@@ -3,7 +3,7 @@ package cn.gloduck.api.controller;
 import cn.gloduck.api.entity.model.jrebel.JrebelLeasesV1Model;
 import cn.gloduck.api.service.jrebel.JRebelService;
 import cn.gloduck.server.core.enums.HttpMethod;
-import cn.gloduck.server.core.handler.ClassPathFileHandler;
+import cn.gloduck.server.core.handler.special.ClassPathFileHandler;
 import cn.gloduck.server.core.handler.ControllerHandler;
 import cn.gloduck.server.core.handler.styles.classes.JsonControllerHandler;
 import cn.gloduck.server.core.util.HttpExchangeUtils;
