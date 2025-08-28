@@ -69,6 +69,6 @@ public class ClassPathFileHandler extends FileHandler {
             }
         } catch (IOException ignore) {
         }
-        return null;
+        return size;
     }
 }
