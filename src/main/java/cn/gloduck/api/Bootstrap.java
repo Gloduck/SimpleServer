@@ -1,9 +1,6 @@
 package cn.gloduck.api;
 
-import cn.gloduck.api.controller.IndexController;
-import cn.gloduck.api.controller.JrebelController;
-import cn.gloduck.api.controller.OnlineClipBoardController;
-import cn.gloduck.api.controller.TorrentController;
+import cn.gloduck.api.controller.*;
 import cn.gloduck.api.entity.config.ServerConfig;
 import cn.gloduck.api.log.SpringBootStyleFormatter;
 import cn.gloduck.api.utils.ConfigUtils;
@@ -25,6 +22,7 @@ public class Bootstrap {
         server.registerController(new JrebelController());
         server.registerController(new OnlineClipBoardController());
         server.registerController(new TorrentController());
+        server.registerController(new ForwardController());
         server.addHandler(new StaticFileHandler("./", "/static/**"));
         server.start();
     }

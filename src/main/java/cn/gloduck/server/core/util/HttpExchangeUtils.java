@@ -158,6 +158,14 @@ public class HttpExchangeUtils {
         }
     }
 
+    public static void sendErrorResponse(HttpExchange exchange, int statusCode, String message) throws IOException {
+        byte[] response = message.getBytes(StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(statusCode, response.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(response);
+        }
+    }
+
     private static String urlDecode(String s) {
         return URLDecoder.decode(s, StandardCharsets.UTF_8);
     }
