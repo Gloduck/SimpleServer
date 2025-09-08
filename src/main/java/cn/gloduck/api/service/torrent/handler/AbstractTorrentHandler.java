@@ -2,6 +2,7 @@ package cn.gloduck.api.service.torrent.handler;
 
 import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.exceptions.ApiException;
+import cn.gloduck.api.utils.NetUtils;
 import cn.gloduck.common.entity.base.Pair;
 import cn.gloduck.server.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -72,7 +73,7 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
 
     @Override
     public boolean checkAvailable() {
-        InetSocketAddress inetSocketAddress = buildProxyAddress();
+        InetSocketAddress inetSocketAddress = NetUtils.buildProxyAddress(proxyAddress);
         Proxy proxy = inetSocketAddress != null ? new Proxy(Proxy.Type.HTTP, inetSocketAddress) : null;
         return isWebsiteReachable(baseUrl, proxy, validStatusTimeout);
     }
@@ -125,32 +126,11 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
         }
     }
 
-    private InetSocketAddress buildProxyAddress() {
-        if (proxyAddress == null || proxyAddress.isEmpty()) {
-            return null;
-        }
-        String proxy = proxyAddress.replace("http://", "").replace("https://", "");
-        String[] split = proxy.split(":");
-        if (split.length == 2) {
-            String host = split[0];
-            Integer port = null;
-            try {
-                port = Integer.parseInt(split[1]);
-            } catch (Exception ignore) {
-            }
-            if (port != null) {
-                return new InetSocketAddress(host, port);
-            }
-        }
-        return null;
-    }
-
-
     private HttpClient buildClient(TorrentConfig.WebConfig config) {
         HttpClient.Builder builder = HttpClient.newBuilder();
         Integer timeout = Optional.ofNullable(config.getConnectTimeout()).orElse(5);
         builder.connectTimeout(java.time.Duration.ofSeconds(timeout));
-        InetSocketAddress proxyAddress = buildProxyAddress();
+        InetSocketAddress proxyAddress = NetUtils.buildProxyAddress(config.getProxy());
         if (proxyAddress != null) {
             builder.proxy(java.net.ProxySelector.of(proxyAddress));
         }
