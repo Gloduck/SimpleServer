@@ -17,7 +17,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class ForwardHandler implements ControllerHandler {
-    private static final List<String> IGNORE_REQUEST_HEADERS = Arrays.asList("Host", "Connection", "Content-Length");
+    private static final List<String> IGNORE_REQUEST_HEADERS = Arrays.asList("Host", "Connection", "Content-Length", "Referer");
 
 
     private static final List<String> IGNORE_RESPONSE_HEADERS = Arrays.asList("Connection");
