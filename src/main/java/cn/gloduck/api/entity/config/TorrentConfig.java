@@ -2,30 +2,28 @@ package cn.gloduck.api.entity.config;
 
 import lombok.Data;
 
-@Data
 public class TorrentConfig {
-    private WebConfig btsow;
+    public WebConfig btsow;
 
-    private WebConfig dmhy;
+    public WebConfig dmhy;
 
-    private WebConfig mikan;
+    public WebConfig mikan;
 
-    private WebConfig sukebeiNyaaSi;
+    public WebConfig sukebeiNyaaSi;
 
-    private WebConfig nyaaSi;
+    public WebConfig nyaaSi;
 
-    private WebConfig tokyoToshokan;
+    public WebConfig tokyoToshokan;
 
-    @Data
     public static class WebConfig {
-        private String url;
+        public String url;
 
-        private Integer validStatusTimeout;
+        public Integer validStatusTimeout;
 
-        private Integer connectTimeout;
+        public Integer connectTimeout;
 
-        private Integer requestTimeout;
+        public Integer requestTimeout;
 
-        private String proxy;
+        public String proxy;
     }
 }

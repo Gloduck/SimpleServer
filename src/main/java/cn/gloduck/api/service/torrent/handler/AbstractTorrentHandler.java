@@ -128,9 +128,9 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
 
     private HttpClient buildClient(TorrentConfig.WebConfig config) {
         HttpClient.Builder builder = HttpClient.newBuilder();
-        Integer timeout = Optional.ofNullable(config.getConnectTimeout()).orElse(5);
+        Integer timeout = Optional.ofNullable(config.connectTimeout).orElse(5);
         builder.connectTimeout(java.time.Duration.ofSeconds(timeout));
-        InetSocketAddress proxyAddress = NetUtils.buildProxyAddress(config.getProxy());
+        InetSocketAddress proxyAddress = NetUtils.buildProxyAddress(config.proxy);
         if (proxyAddress != null) {
             builder.proxy(java.net.ProxySelector.of(proxyAddress));
         }
@@ -215,10 +215,10 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
     }
 
     public AbstractTorrentHandler(TorrentConfig.WebConfig config) {
-        this.baseUrl = config.getUrl();
-        this.proxyAddress = config.getProxy();
-        this.requestTimeout = Optional.ofNullable(config.getRequestTimeout()).orElse(5);
-        this.validStatusTimeout = Optional.ofNullable(config.getValidStatusTimeout()).orElse(1);
+        this.baseUrl = config.url;
+        this.proxyAddress = config.proxy;
+        this.requestTimeout = Optional.ofNullable(config.requestTimeout).orElse(5);
+        this.validStatusTimeout = Optional.ofNullable(config.validStatusTimeout).orElse(1);
         this.httpClient = buildClient(config);
     }
 

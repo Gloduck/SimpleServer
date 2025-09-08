@@ -161,17 +161,4 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
             return true;
         }
     }
-
-    public static void main(String[] args) {
-        TorrentConfig.WebConfig webConfig = new TorrentConfig.WebConfig();
-        webConfig.setUrl("https://www.tokyotosho.info");
-        webConfig.setConnectTimeout(3);
-        webConfig.setRequestTimeout(30);
-        webConfig.setProxy("http://127.0.0.1:7897");
-        TokyoToshokanHandler handler = new TokyoToshokanHandler(webConfig);
-/*        ScrollPageResult<TorrentInfo> result = handler.search("天使动漫", 20L, null, null);
-        System.out.println(JsonUtils.writeValueAsString(result));*/
-        TorrentInfo torrentInfo = handler.queryDetail("1948595");
-        System.out.println(torrentInfo);
-    }
 }

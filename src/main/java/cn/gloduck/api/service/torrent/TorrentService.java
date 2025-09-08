@@ -24,12 +24,12 @@ public class TorrentService {
         this.config = config;
         this.torrentHandlers = new ArrayList<>();
         this.scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
-        Optional.ofNullable(config.getBtsow()).ifPresent(btsow -> this.torrentHandlers.add(new BtsowHandler(btsow)));
-        Optional.ofNullable(config.getDmhy()).ifPresent(dmhy -> this.torrentHandlers.add(new DmhyHandler(dmhy)));
-        Optional.ofNullable(config.getMikan()).ifPresent(mikan -> this.torrentHandlers.add(new MikanHandler(mikan)));
-        Optional.ofNullable(config.getSukebeiNyaaSi()).ifPresent(nyaaSi -> this.torrentHandlers.add(new SukebeiNyaaSiHandler(nyaaSi)));
-        Optional.ofNullable(config.getNyaaSi()).ifPresent(nyaaSi -> this.torrentHandlers.add(new NyaaSiHandler(nyaaSi)));
-        Optional.ofNullable(config.getTokyoToshokan()).ifPresent(tokyoToshokan -> this.torrentHandlers.add(new TokyoToshokanHandler(tokyoToshokan)));
+        Optional.ofNullable(config.btsow).ifPresent(btsow -> this.torrentHandlers.add(new BtsowHandler(btsow)));
+        Optional.ofNullable(config.dmhy).ifPresent(dmhy -> this.torrentHandlers.add(new DmhyHandler(dmhy)));
+        Optional.ofNullable(config.mikan).ifPresent(mikan -> this.torrentHandlers.add(new MikanHandler(mikan)));
+        Optional.ofNullable(config.sukebeiNyaaSi).ifPresent(nyaaSi -> this.torrentHandlers.add(new SukebeiNyaaSiHandler(nyaaSi)));
+        Optional.ofNullable(config.nyaaSi).ifPresent(nyaaSi -> this.torrentHandlers.add(new NyaaSiHandler(nyaaSi)));
+        Optional.ofNullable(config.tokyoToshokan).ifPresent(tokyoToshokan -> this.torrentHandlers.add(new TokyoToshokanHandler(tokyoToshokan)));
         handlerStatusMap = new HashMap<>(torrentHandlers.size() / 3 * 4 + 1);
         scheduledExecutor.scheduleAtFixedRate(checkHandlerStatusTask(), 0, 30, TimeUnit.MINUTES);
     }
