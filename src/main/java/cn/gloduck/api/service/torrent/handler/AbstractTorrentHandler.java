@@ -7,12 +7,18 @@ import cn.gloduck.common.entity.base.Pair;
 import cn.gloduck.server.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -126,6 +132,29 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
         InetSocketAddress proxyAddress = NetUtils.buildProxyAddress(config.proxy);
         if (proxyAddress != null) {
             builder.proxy(java.net.ProxySelector.of(proxyAddress));
+        }
+        Boolean trustAllCertificates = Optional.ofNullable(config.trustAllCertificates).orElse(false);
+        if (trustAllCertificates) {
+            SSLContext sslContext = null;
+            try {
+                sslContext = SSLContext.getInstance("TLS");
+                sslContext.init(null, new TrustManager[]{
+                        new X509TrustManager() {
+                            public X509Certificate[] getAcceptedIssuers() {
+                                return null;
+                            }
+
+                            public void checkClientTrusted(X509Certificate[] certs, String authType) {
+                            }
+
+                            public void checkServerTrusted(X509Certificate[] certs, String authType) {
+                            }
+                        }
+                }, new java.security.SecureRandom());
+                builder.sslContext(sslContext);
+            } catch (NoSuchAlgorithmException | KeyManagementException e) {
+                throw new RuntimeException(e);
+            }
         }
         return builder.build();
     }

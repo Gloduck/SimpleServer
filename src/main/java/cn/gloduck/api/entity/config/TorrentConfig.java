@@ -1,7 +1,5 @@
 package cn.gloduck.api.entity.config;
 
-import lombok.Data;
-
 public class TorrentConfig {
     public WebConfig btsow;
 
@@ -25,5 +23,7 @@ public class TorrentConfig {
         public Integer requestTimeout;
 
         public String proxy;
+
+        public Boolean trustAllCertificates;
     }
 }
