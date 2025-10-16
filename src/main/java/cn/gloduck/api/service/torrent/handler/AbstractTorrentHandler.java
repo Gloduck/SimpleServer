@@ -8,13 +8,12 @@ import cn.gloduck.server.core.util.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
-import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
-import java.net.Proxy;
-import java.net.URL;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -59,8 +58,6 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
     protected final HttpClient httpClient;
     protected final String baseUrl;
 
-    private final String proxyAddress;
-
     private final int requestTimeout;
 
     private final int validStatusTimeout;
@@ -73,9 +70,7 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
 
     @Override
     public boolean checkAvailable() {
-        InetSocketAddress inetSocketAddress = NetUtils.buildProxyAddress(proxyAddress);
-        Proxy proxy = inetSocketAddress != null ? new Proxy(Proxy.Type.HTTP, inetSocketAddress) : null;
-        return isWebsiteReachable(baseUrl, proxy, validStatusTimeout);
+        return isWebsiteReachable(baseUrl);
     }
 
     protected boolean sortReverse(String order) {
@@ -110,18 +105,16 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
         return result;
     }
 
-
-    public static boolean isWebsiteReachable(String websiteUrl, Proxy proxy, int timeout) {
+    public boolean isWebsiteReachable(String websiteUrl) {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(websiteUrl))
+                .timeout(Duration.ofSeconds(validStatusTimeout))
+                .GET()
+                .build();
         try {
-            URL url = new URL(websiteUrl);
-            HttpURLConnection connection = proxy != null ? (HttpURLConnection) url.openConnection(proxy) : (HttpURLConnection) url.openConnection();
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(timeout * 1000);
-            connection.connect();
-
-            int responseCode = connection.getResponseCode();
-            return (responseCode == 200);
-        } catch (IOException e) {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            return response.statusCode() == 200;
+        } catch (IOException | InterruptedException e) {
             return false;
         }
     }
@@ -216,7 +209,6 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
 
     public AbstractTorrentHandler(TorrentConfig.WebConfig config) {
         this.baseUrl = config.url;
-        this.proxyAddress = config.proxy;
         this.requestTimeout = Optional.ofNullable(config.requestTimeout).orElse(5);
         this.validStatusTimeout = Optional.ofNullable(config.validStatusTimeout).orElse(1);
         this.httpClient = buildClient(config);
