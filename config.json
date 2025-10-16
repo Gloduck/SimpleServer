@@ -13,6 +13,7 @@
       "validStatusTimeout": 3,
       "connectTimeout": 5,
       "requestTimeout": 10,
+      "trustAllCertificates": true,
       "proxy": null
     },
     "dmhy": {
