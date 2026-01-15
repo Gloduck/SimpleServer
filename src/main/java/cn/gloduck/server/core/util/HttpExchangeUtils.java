@@ -16,14 +16,12 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 public class HttpExchangeUtils {
-    private static final Pattern IPv4_PATTERN =
-            Pattern.compile("((25[0-5]|2[0-4]\\d|[01]?\\d?\\d)(\\.|$)){4}");
-    private static final Pattern IPv6_PATTERN =
-            Pattern.compile("([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}");
+    private static final Pattern IPv4_PATTERN = Pattern.compile("((25[0-5]|2[0-4]\\d|[01]?\\d?\\d)(\\.|$)){4}");
+    private static final Pattern IPv6_PATTERN = Pattern.compile("([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}");
 
     public static byte[] getRequestBodyBytes(HttpExchange exchange) {
         try (InputStream is = exchange.getRequestBody();
-             ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[1024];
             int len;
             while ((len = is.read(buffer)) != -1) {
@@ -63,7 +61,7 @@ public class HttpExchangeUtils {
         return IPv4_PATTERN.matcher(host).matches()
                 || IPv6_PATTERN.matcher(host).matches()
                 || (host.startsWith("[") && host.endsWith("]")
-                && IPv6_PATTERN.matcher(host.substring(1, host.length() - 1)).matches());
+                        && IPv6_PATTERN.matcher(host.substring(1, host.length() - 1)).matches());
     }
 
     public static List<HttpCookie> getCookies(HttpExchange exchange) {
@@ -168,5 +166,31 @@ public class HttpExchangeUtils {
 
     private static String urlDecode(String s) {
         return URLDecoder.decode(s, StandardCharsets.UTF_8);
+    }
+
+    public static String getClientIp(HttpExchange exchange) {
+        String forwaredFor = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
+        if (forwaredFor != null && !forwaredFor.isEmpty()) {
+            String[] ips = forwaredFor.split(",");
+            for (String ip : ips) {
+                if (isIpAddress(ip)) {
+                    return ip;
+                }
+            }
+        }
+        String realIp = exchange.getRequestHeaders().getFirst("X-Real-IP");
+        if (realIp != null && isIpAddress(realIp)) {
+            return realIp;
+        }
+        String proxyClientIp = exchange.getRequestHeaders().getFirst("Proxy-Client-IP");
+        if (proxyClientIp != null && isIpAddress(proxyClientIp)) {
+            return proxyClientIp;
+        }
+
+        String remoteHost = exchange.getRemoteAddress().getAddress().getHostAddress();
+        if (remoteHost != null && isIpAddress(remoteHost)) {
+            return remoteHost;
+        }
+        return null;
     }
 }

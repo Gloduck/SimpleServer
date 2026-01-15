@@ -3,6 +3,8 @@ package cn.gloduck.server.core.handler;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 
+import cn.gloduck.server.core.util.HttpExchangeUtils;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -75,13 +77,11 @@ public class RouterHandler implements HttpHandler {
     }
 
     private void logError(HttpExchange exchange, int code, String message) {
-        InetSocketAddress remoteAddress = exchange.getRemoteAddress();
-        String clientIP = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
-        if (clientIP == null || clientIP.isEmpty()) {
-            clientIP = (remoteAddress != null) ?
-                    remoteAddress.getAddress().getHostAddress() :
-                    "unknown";
+        String clientIP = HttpExchangeUtils.getClientIp(exchange);
+        if(clientIP == null){
+            clientIP = "unknown";
         }
+
         LOGGER.warning(String.format("Request [%s] %s exist with code [%s] and message [%s], clientIp: [%s]", exchange.getRequestMethod(), exchange.getRequestURI(), code, message, clientIP));
     }
 
