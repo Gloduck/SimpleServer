@@ -77,12 +77,12 @@ public class RouterHandler implements HttpHandler {
     }
 
     private void logError(HttpExchange exchange, int code, String message) {
-        String clientIP = HttpExchangeUtils.getClientIp(exchange);
-        if(clientIP == null){
-            clientIP = "unknown";
+        String clientIp = HttpExchangeUtils.getClientIp(exchange);
+        if(clientIp == null){
+            clientIp = "unknown";
         }
 
-        LOGGER.warning(String.format("Request [%s] %s exist with code [%s] and message [%s], clientIp: [%s]", exchange.getRequestMethod(), exchange.getRequestURI(), code, message, clientIP));
+        LOGGER.warning(String.format("Request [%s] %s exist with code [%s] and message [%s], clientIp: [%s]", exchange.getRequestMethod(), exchange.getRequestURI(), code, message, clientIp));
     }
 
     private void logRequest(HttpExchange exchange) {

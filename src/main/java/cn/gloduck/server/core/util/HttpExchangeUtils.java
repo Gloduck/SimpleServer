@@ -169,9 +169,9 @@ public class HttpExchangeUtils {
     }
 
     public static String getClientIp(HttpExchange exchange) {
-        String forwaredFor = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
-        if (forwaredFor != null && !forwaredFor.isEmpty()) {
-            String[] ips = forwaredFor.split(",");
+        String forwardFor = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
+        if (forwardFor != null && !forwardFor.isEmpty()) {
+            String[] ips = forwardFor.split(",");
             for (String ip : ips) {
                 if (isIpAddress(ip)) {
                     return ip;
