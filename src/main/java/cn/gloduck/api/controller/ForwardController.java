@@ -14,7 +14,7 @@ import java.util.Arrays;
 public class ForwardController {
     public ControllerHandler forwardHandler() {
         ForwardConfig forwardConfig = ConfigUtils.loadConfig("forward", ForwardConfig.class);
-        ForwardHandler handler = new ForwardHandler("/forward/proxy", "url");
+        ForwardHandler handler = new ForwardHandler("/forward/v1/proxy", "url");
         InetSocketAddress proxyAddress = NetUtils.buildProxyAddress(forwardConfig.proxy);
         if (proxyAddress != null) {
             handler.setProxy(new Proxy(Proxy.Type.HTTP, proxyAddress));

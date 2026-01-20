@@ -366,7 +366,7 @@
         // 获取所有搜索源
         getHandlers: async () => {
             try {
-                const response = await fetch('/torrent/listHandlers');
+                const response = await fetch('/torrent/v1/listHandlers');
                 const data = await utils.checkResponseStatus(response);
 
                 if (data.code === 200 && Array.isArray(data.data)) {
@@ -383,7 +383,7 @@
         // 搜索资源 - 新增排序参数
         searchTorrents: async (keyword, handlerCode, pageIndex, pageSize, sortField = '', sortOrder = 'asc') => {
             try {
-                const url = new URL('/torrent/search', window.location.origin);
+                const url = new URL('/torrent/v1/search', window.location.origin);
                 url.searchParams.append('pageIndex', pageIndex);
                 url.searchParams.append('pageSize', pageSize);
                 url.searchParams.append('code', handlerCode);
@@ -412,7 +412,7 @@
         // 获取详情
         getTorrentDetail: async (handlerCode, id) => {
             try {
-                const url = new URL('/torrent/queryDetail', window.location.origin);
+                const url = new URL('/torrent/v1/queryDetail', window.location.origin);
                 url.searchParams.append('code', handlerCode);
                 url.searchParams.append('id', id);
 
