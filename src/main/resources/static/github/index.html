@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub仓库搜索</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+    <!-- 添加Markdown渲染支持 -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/marked/15.0.12/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+
+    <!-- 配置Tailwind自定义颜色 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#249ffd',
+                        secondary: '#1a88e8',
+                        neutral: '#f0f4f8',
+                        dark: '#1e293b',
+                        github: '#24292f',
+                        githubBlue: '#0969da'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        mono: ['SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace']
+                    },
+                }
+            }
+        }
+    </script>
+
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+
+            .text-truncate {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .backdrop-blur {
+                backdrop-filter: blur(8px);
+            }
+
+            .transition-height {
+                transition: max-height 0.3s ease-in-out;
+            }
+
+            .text-wrap-multiline {
+                white-space: normal;
+                word-wrap: break-word;
+                word-break: break-all;
+            }
+
+            /* Markdown内容样式 */
+            .markdown-body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+                font-size: 16px;
+                line-height: 1.5;
+                word-wrap: break-word;
+            }
+
+            .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+                font-weight: 600;
+                margin-top: 24px;
+                margin-bottom: 16px;
+                padding-bottom: 0.3em;
+                border-bottom: 1px solid #eaecef;
+            }
+
+            .markdown-body h1 {
+                font-size: 2em;
+            }
+
+            .markdown-body h2 {
+                font-size: 1.5em;
+            }
+
+            .markdown-body h3 {
+                font-size: 1.25em;
+            }
+
+            .markdown-body p {
+                margin-top: 0;
+                margin-bottom: 16px;
+            }
+
+            .markdown-body ul, .markdown-body ol {
+                padding-left: 2em;
+                margin-top: 0;
+                margin-bottom: 16px;
+            }
+
+            .markdown-body code {
+                padding: 0.2em 0.4em;
+                margin: 0;
+                font-size: 85%;
+                background-color: rgba(175, 184, 193, 0.2);
+                border-radius: 6px;
+                font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+            }
+
+            .markdown-body pre {
+                padding: 16px;
+                overflow: auto;
+                font-size: 85%;
+                line-height: 1.45;
+                background-color: #f6f8fa;
+                border-radius: 6px;
+                margin-bottom: 16px;
+            }
+
+            .markdown-body pre code {
+                background-color: transparent;
+                padding: 0;
+                margin: 0;
+                font-size: 100%;
+            }
+
+            .markdown-body blockquote {
+                padding: 0 1em;
+                color: #6a737d;
+                border-left: 0.25em solid #dfe2e5;
+                margin: 0 0 16px 0;
+            }
+
+            .markdown-body table {
+                border-spacing: 0;
+                border-collapse: collapse;
+                margin-bottom: 16px;
+                width: 100%;
+            }
+
+            .markdown-body th, .markdown-body td {
+                padding: 6px 13px;
+                border: 1px solid #dfe2e5;
+            }
+
+            .markdown-body th {
+                font-weight: 600;
+                background-color: #f6f8fa;
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50 font-sans text-dark">
+<!-- 页面容器 -->
+<div class="min-h-screen flex flex-col">
+    <!-- 头部 -->
+    <header class="bg-white shadow-md">
+        <div class="container mx-auto px-4 py-6">
+            <div class="flex flex-col md:flex-row justify-between items-center">
+                <div class="flex items-center mb-4 md:mb-0">
+                    <i class="fab fa-github text-github text-3xl mr-3"></i>
+                    <h1 class="text-[clamp(1.5rem,3vw,2.5rem)] font-bold text-dark">
+                        <span class="text-primary">GitHub</span>仓库搜索
+                    </h1>
+                </div>
+                <p class="text-gray-600 text-sm md:text-base">
+                    GitHub仓库搜索
+                </p>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="flex-grow container mx-auto px-4 py-8">
+        <!-- 搜索区域 -->
+        <section
+                class="bg-white rounded-xl shadow-lg p-6 mb-8 transform transition-all duration-300 hover:shadow-xl">
+            <form id="searchForm" class="flex flex-col md:flex-row gap-4">
+                <div class="flex-grow relative">
+                    <i class="fab fa-github absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                    <input type="text" id="keyword" placeholder="输入GitHub仓库名称、描述或主题..."
+                           class="w-full pl-10 pr-4 py-3 rounded-lg border border-gray-300 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                           required>
+                </div>
+
+                <div class="w-full md:w-auto">
+                    <select id="sortSelect"
+                            class="w-full md:w-48 bg-white border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-no-repeat bg-right">
+                        <option value="stars">按星标排序</option>
+                        <option value="updated">按更新排序</option>
+                        <option value="forks">按复刻排序</option>
+                        <option value="help-wanted-issues">按所需帮助排序</option>
+                    </select>
+                </div>
+
+                <button type="submit" id="searchButton"
+                        class="w-full md:w-auto bg-primary hover:bg-secondary text-white font-medium py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2">
+                    <i class="fas fa-search"></i>
+                    <span>搜索</span>
+                </button>
+            </form>
+
+            <div class="mt-4">
+                <p class="text-sm text-gray-500 mb-2">提示：直接搜索仓库名称，如 "vuejs/vue" 或 "facebook/react"</p>
+                <div class="flex flex-wrap gap-2">
+                    <span class="text-sm text-gray-500">热门搜索:</span>
+                    <button
+                            class="keyword-example px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors">
+                        vuejs/vue
+                    </button>
+                    <button
+                            class="keyword-example px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors">
+                        facebook/react
+                    </button>
+                    <button
+                            class="keyword-example px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors">
+                        tailwindlabs/tailwindcss
+                    </button>
+                    <button
+                            class="keyword-example px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors">
+                        microsoft/vscode
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 搜索结果区域 -->
+        <section id="resultsSection" class="mb-8 hidden">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+                <h2 class="text-xl font-bold text-gray-800">
+                    搜索结果
+                    <span id="resultCount" class="text-primary font-normal text-base"></span>
+                </h2>
+                <div class="text-sm text-gray-500 w-full sm:w-auto flex justify-between items-center gap-4">
+                    <span id="searchInfo"></span>
+                </div>
+            </div>
+
+            <!-- 加载动画 -->
+            <div id="loadingIndicator" class="hidden flex justify-center items-center py-16">
+                <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+            </div>
+
+            <!-- 结果列表 -->
+            <div id="resultsList" class="space-y-4">
+                <!-- 结果项将在这里动态生成 -->
+            </div>
+
+            <!-- 无结果提示 -->
+            <div id="noResults" class="hidden py-16 text-center">
+                <i class="fab fa-github text-5xl text-gray-300 mb-4"></i>
+                <p class="text-gray-500 text-lg">未找到匹配的仓库</p>
+                <p class="text-gray-400 text-sm mt-2">尝试不同的关键词或检查拼写</p>
+            </div>
+
+            <!-- 分页控制 -->
+            <div id="pagination" class="mt-8 flex justify-center items-center gap-4 hidden">
+                <button id="prevPage"
+                        class="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1"
+                        disabled>
+                    <i class="fas fa-chevron-left"></i>
+                    <span>上一页</span>
+                </button>
+                <span id="pageInfo" class="text-gray-600">第 <span id="currentPage">1</span> 页</span>
+                <button id="nextPage"
+                        class="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1"
+                        disabled>
+                    <span>下一页</span>
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <!-- 页脚 -->
+    <footer class="bg-dark text-white py-6">
+        <div class="container mx-auto px-4 text-center text-sm">
+            <p class="mt-2 text-gray-400">基于GitHub API构建，有速率限制，请合理使用</p>
+        </div>
+    </footer>
+</div>
+
+<!-- 仓库详情弹窗 -->
+<div id="repoDetailModal" class="fixed inset-0 z-50 flex items-center justify-center hidden">
+    <div class="absolute inset-0 bg-black/50 backdrop-blur" id="repoModalOverlay"></div>
+    <div
+            class="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto transform transition-all">
+        <div class="p-6 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white z-10">
+            <div class="flex items-center gap-2">
+                <i class="fab fa-github text-github text-xl"></i>
+                <h3 id="repoModalTitle" class="text-xl font-bold text-gray-800 truncate"></h3>
+            </div>
+            <button id="closeRepoModal" class="text-gray-500 hover:text-gray-700 transition-colors">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+        </div>
+
+        <div id="repoDetailLoading" class="py-16 flex justify-center items-center">
+            <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-primary"></div>
+        </div>
+
+        <div id="repoDetailContent" class="p-6 space-y-6 hidden">
+            <!-- 标签页导航 -->
+            <div class="border-b border-gray-200">
+                <nav class="flex space-x-4">
+                    <button
+                            class="tab-btn active px-4 py-2 text-sm font-medium text-primary border-b-2 border-primary"
+                            data-tab="info">
+                        <i class="fas fa-info-circle mr-2"></i>仓库信息
+                    </button>
+                    <button
+                            class="tab-btn px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent"
+                            data-tab="releases">
+                        <i class="fas fa-tag mr-2"></i>发布版本
+                    </button>
+                    <button
+                            class="tab-btn px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 border-b-2 border-transparent"
+                            data-tab="readme">
+                        <i class="fas fa-book mr-2"></i>README
+                    </button>
+                </nav>
+            </div>
+
+            <!-- 仓库信息标签页内容 -->
+            <div id="infoTab" class="tab-content active">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="bg-neutral p-4 rounded-lg">
+                        <h4 class="text-sm text-gray-500 mb-1">仓库名称</h4>
+                        <p id="infoFullName" class="font-medium"></p>
+                    </div>
+                    <div class="bg-neutral p-4 rounded-lg">
+                        <h4 class="text-sm text-gray-500 mb-1">描述</h4>
+                        <p id="infoDescription"></p>
+                    </div>
+                    <div class="bg-neutral p-4 rounded-lg">
+                        <h4 class="text-sm text-gray-500 mb-1">星标数量</h4>
+                        <div class="flex items-center gap-1">
+                            <i class="fas fa-star text-yellow-500"></i>
+                            <p id="infoStars"></p>
+                        </div>
+                    </div>
+                    <div class="bg-neutral p-4 rounded-lg">
+                        <h4 class="text-sm text-gray-500 mb-1">复刻数量</h4>
+                        <div class="flex items-center gap-1">
+                            <i class="fas fa-code-branch text-blue-500"></i>
+                            <p id="infoForks"></p>
+                        </div>
+                    </div>
+                    <div class="bg-neutral p-4 rounded-lg">
+                        <h4 class="text-sm text-gray-500 mb-1">语言</h4>
+                        <p id="infoLanguage"></p>
+                    </div>
+                    <div class="bg-neutral p-4 rounded-lg">
+                        <h4 class="text-sm text-gray-500 mb-1">最后更新</h4>
+                        <p id="infoUpdated"></p>
+                    </div>
+                    <div class="bg-neutral p-4 rounded-lg md:col-span-2">
+                        <h4 class="text-sm text-gray-500 mb-1">仓库地址</h4>
+                        <a id="infoHtmlUrl" target="_blank" class="text-primary hover:underline break-all"></a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 发布版本标签页内容 -->
+            <div id="releasesTab" class="tab-content hidden">
+                <div id="releasesLoading" class="py-8 flex justify-center items-center">
+                    <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div>
+                </div>
+                <div id="releasesList" class="space-y-4">
+                    <!-- 发布版本将在这里动态生成 -->
+                </div>
+                <div id="noReleases" class="hidden py-8 text-center">
+                    <i class="fas fa-tag text-4xl text-gray-300 mb-4"></i>
+                    <p class="text-gray-500">此仓库没有发布版本</p>
+                </div>
+            </div>
+
+            <!-- README标签页内容 -->
+            <div id="readmeTab" class="tab-content hidden">
+                <div class="markdown-body" id="readmeContent"></div>
+                <div id="noReadme" class="hidden py-8 text-center">
+                    <i class="fas fa-file-alt text-4xl text-gray-300 mb-4"></i>
+                    <p class="text-gray-500">此仓库没有README文件</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 发布版本详情弹窗 -->
+<div id="releaseDetailModal" class="fixed inset-0 z-50 flex items-center justify-center hidden">
+    <div class="absolute inset-0 bg-black/50 backdrop-blur" id="releaseModalOverlay"></div>
+    <div
+            class="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto transform transition-all">
+        <div class="p-6 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white z-10">
+            <div class="flex items-center gap-2">
+                <i class="fas fa-tag text-primary text-xl"></i>
+                <h3 id="releaseModalTitle" class="text-xl font-bold text-gray-800 truncate"></h3>
+            </div>
+            <button id="closeReleaseModal" class="text-gray-500 hover:text-gray-700 transition-colors">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+        </div>
+
+        <div id="releaseDetailLoading" class="py-16 flex justify-center items-center">
+            <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-primary"></div>
+        </div>
+
+        <div id="releaseDetailContent" class="p-6 space-y-6 hidden">
+            <div class="bg-neutral p-4 rounded-lg">
+                <h4 class="text-sm text-gray-500 mb-1">版本说明</h4>
+                <div class="markdown-body text-sm" id="releaseBody"></div>
+                <div id="noReleaseBody" class="hidden text-gray-500 italic">此版本没有说明</div>
+            </div>
+
+            <div>
+                <h4 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                    <i class="fas fa-download text-primary"></i>
+                    发布文件
+                </h4>
+                <div id="assetsLoading" class="py-4 flex justify-center items-center">
+                    <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary"></div>
+                </div>
+                <ul id="assetsList" class="space-y-2 max-h-60 overflow-y-auto pr-2">
+                    <!-- 发布文件将在这里动态生成 -->
+                </ul>
+                <div id="noAssets" class="hidden py-4 text-center">
+                    <i class="fas fa-file-archive text-3xl text-gray-300 mb-2"></i>
+                    <p class="text-gray-500">此版本没有发布文件</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 下载链接弹窗 -->
+<div id="downloadModal" class="fixed inset-0 z-50 flex items-center justify-center hidden">
+    <div class="absolute inset-0 bg-black/50 backdrop-blur" id="downloadModalOverlay"></div>
+    <div
+            class="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto transform transition-all">
+        <div class="p-6 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white z-10">
+            <div class="flex items-center gap-2">
+                <i class="fas fa-download text-primary text-xl"></i>
+                <h3 id="downloadModalTitle" class="text-xl font-bold text-gray-800 truncate">下载链接</h3>
+            </div>
+            <button id="closeDownloadModal" class="text-gray-500 hover:text-gray-700 transition-colors">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+        </div>
+
+        <div class="p-6 space-y-6">
+            <div class="bg-neutral p-4 rounded-lg">
+                <h4 class="text-sm text-gray-500 mb-1">文件名</h4>
+                <p id="downloadFileName" class="font-medium break-all"></p>
+            </div>
+
+            <div>
+                <h4 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                    <i class="fas fa-link text-primary"></i>
+                    原始下载链接
+                </h4>
+                <div class="flex items-center gap-2">
+                    <input type="text" id="originalUrl" readonly
+                           class="flex-grow p-3 rounded-lg border border-gray-300 bg-gray-50 font-mono text-sm break-all">
+                    <button id="copyOriginalUrl"
+                            class="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-3 rounded-lg transition-colors flex items-center gap-2"
+                            title="复制链接">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                    <!-- 添加原始链接直接下载按钮 -->
+                    <button id="downloadOriginalUrl"
+                            class="bg-primary hover:bg-secondary text-white px-4 py-3 rounded-lg transition-colors flex items-center gap-2"
+                            title="直接下载">
+                        <i class="fas fa-download"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div>
+                <h4 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                    <i class="fas fa-bolt text-primary"></i>
+                    代理下载链接
+                </h4>
+                <div id="proxyLinksContainer" class="space-y-3">
+                    <!-- 代理链接将在这里动态生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 提示弹窗 -->
+<div id="toast"
+     class="fixed bottom-6 right-6 bg-dark text-white px-6 py-3 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-3 z-50">
+    <i id="toastIcon" class="fas fa-info-circle text-primary"></i>
+    <span id="toastMessage"></span>
+</div>
+
+<script>
+    // GitHub API基础URL
+    const GITHUB_API_BASE = 'https://api.github.com';
+    const GITHUB_RAW_API = 'https://raw.githubusercontent.com';
+
+    // 代理链接前缀
+    const PROXY_PREFIXES = [
+        {name: 'gh-proxy', url: 'https://gh-proxy.org'},
+        {name: 'hk-proxy', url: 'https://hk.gh-proxy.org'},
+        {name: 'cdn-proxy', url: 'https://cdn.gh-proxy.org'},
+        {name: 'edgeone-proxy', url: 'https://edgeone.gh-proxy.org'}
+    ];
+
+    // 全局状态
+    const state = {
+        currentPage: 1,
+        pageSize: 10,
+        hasNext: false,
+        currentKeyword: '',
+        currentSort: 'stars',
+        totalResults: 0,
+        currentRepo: null,
+        currentRelease: null
+    };
+
+    // DOM元素
+    const elements = {
+        // 搜索相关
+        searchForm: document.getElementById('searchForm'),
+        keywordInput: document.getElementById('keyword'),
+        sortSelect: document.getElementById('sortSelect'),
+        searchButton: document.getElementById('searchButton'),
+        resultsSection: document.getElementById('resultsSection'),
+        resultsList: document.getElementById('resultsList'),
+        resultCount: document.getElementById('resultCount'),
+        searchInfo: document.getElementById('searchInfo'),
+        loadingIndicator: document.getElementById('loadingIndicator'),
+        noResults: document.getElementById('noResults'),
+        pagination: document.getElementById('pagination'),
+        prevPageBtn: document.getElementById('prevPage'),
+        nextPageBtn: document.getElementById('nextPage'),
+        currentPageEl: document.getElementById('currentPage'),
+
+        // 仓库详情弹窗
+        repoDetailModal: document.getElementById('repoDetailModal'),
+        repoModalOverlay: document.getElementById('repoModalOverlay'),
+        closeRepoModal: document.getElementById('closeRepoModal'),
+        repoModalTitle: document.getElementById('repoModalTitle'),
+        repoDetailLoading: document.getElementById('repoDetailLoading'),
+        repoDetailContent: document.getElementById('repoDetailContent'),
+
+        // 标签页
+        readmeTab: document.getElementById('readmeTab'),
+        releasesTab: document.getElementById('releasesTab'),
+        infoTab: document.getElementById('infoTab'),
+        readmeContent: document.getElementById('readmeContent'),
+        noReadme: document.getElementById('noReadme'),
+        releasesList: document.getElementById('releasesList'),
+        releasesLoading: document.getElementById('releasesLoading'),
+        noReleases: document.getElementById('noReleases'),
+
+        // 仓库信息
+        infoFullName: document.getElementById('infoFullName'),
+        infoDescription: document.getElementById('infoDescription'),
+        infoStars: document.getElementById('infoStars'),
+        infoForks: document.getElementById('infoForks'),
+        infoLanguage: document.getElementById('infoLanguage'),
+        infoUpdated: document.getElementById('infoUpdated'),
+        infoHtmlUrl: document.getElementById('infoHtmlUrl'),
+
+        // 发布版本详情弹窗
+        releaseDetailModal: document.getElementById('releaseDetailModal'),
+        releaseModalOverlay: document.getElementById('releaseModalOverlay'),
+        closeReleaseModal: document.getElementById('closeReleaseModal'),
+        releaseModalTitle: document.getElementById('releaseModalTitle'),
+        releaseDetailLoading: document.getElementById('releaseDetailLoading'),
+        releaseDetailContent: document.getElementById('releaseDetailContent'),
+        releaseBody: document.getElementById('releaseBody'),
+        noReleaseBody: document.getElementById('noReleaseBody'),
+        assetsList: document.getElementById('assetsList'),
+        assetsLoading: document.getElementById('assetsLoading'),
+        noAssets: document.getElementById('noAssets'),
+
+        // 下载链接弹窗
+        downloadModal: document.getElementById('downloadModal'),
+        downloadModalOverlay: document.getElementById('downloadModalOverlay'),
+        closeDownloadModal: document.getElementById('closeDownloadModal'),
+        downloadModalTitle: document.getElementById('downloadModalTitle'),
+        downloadFileName: document.getElementById('downloadFileName'),
+        originalUrl: document.getElementById('originalUrl'),
+        copyOriginalUrl: document.getElementById('copyOriginalUrl'),
+        downloadOriginalUrl: document.getElementById('downloadOriginalUrl'),
+        proxyLinksContainer: document.getElementById('proxyLinksContainer'),
+
+        // 提示
+        toast: document.getElementById('toast'),
+        toastIcon: document.getElementById('toastIcon'),
+        toastMessage: document.getElementById('toastMessage')
+    };
+
+    // 工具函数
+    const utils = {
+        // 格式化时间
+        formatTime: (timeString) => {
+            const date = new Date(timeString);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        },
+
+        // 格式化相对时间
+        formatRelativeTime: (timeString) => {
+            const date = new Date(timeString);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+            if (diffDays === 0) {
+                return '今天';
+            } else if (diffDays === 1) {
+                return '昨天';
+            } else if (diffDays < 7) {
+                return `${diffDays}天前`;
+            } else if (diffDays < 30) {
+                const weeks = Math.floor(diffDays / 7);
+                return `${weeks}周前`;
+            } else if (diffDays < 365) {
+                const months = Math.floor(diffDays / 30);
+                return `${months}个月前`;
+            } else {
+                const years = Math.floor(diffDays / 365);
+                return `${years}年前`;
+            }
+        },
+
+        // 格式化文件大小
+        formatFileSize: (bytes) => {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        },
+
+        // 显示提示
+        showToast: (message, isError = false) => {
+            elements.toastMessage.textContent = message;
+            elements.toastIcon.className = isError ? 'fas fa-exclamation-circle text-red-500' : 'fas fa-check-circle text-green-500';
+            elements.toast.classList.remove('translate-y-20', 'opacity-0');
+            elements.toast.classList.add('translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                elements.toast.classList.remove('translate-y-0', 'opacity-100');
+                elements.toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        },
+
+        // 检查响应状态
+        checkJsonResponseStatus: async (response) => {
+            if (!response.ok) {
+                const errorText = await response.text();
+                let errorMessage = `HTTP错误，状态码: ${response.status}`;
+
+                try {
+                    const errorData = JSON.parse(errorText);
+                    if (errorData.message) {
+                        errorMessage = errorData.message;
+                    }
+                } catch (e) {
+                    // 忽略解析错误
+                }
+
+                throw new Error(errorMessage);
+            }
+            return response.json();
+        },
+
+        // 处理API错误
+        handleApiError: (error) => {
+            console.error('API请求错误:', error);
+
+            if (error.message.includes('API rate limit exceeded')) {
+                utils.showToast('GitHub API 速率限制，请稍后再试', true);
+            } else {
+                utils.showToast(`请求失败: ${error.message}`, true);
+            }
+        },
+
+        // 切换标签页
+        switchTab: (tabName) => {
+            // 移除所有标签页的active类
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active', 'text-primary', 'border-primary');
+                btn.classList.add('text-gray-500', 'border-transparent');
+            });
+
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+                content.classList.add('hidden');
+            });
+
+            // 激活选中的标签页
+            document.querySelector(`.tab-btn[data-tab="${tabName}"]`).classList.add('active', 'text-primary', 'border-primary');
+            document.querySelector(`.tab-btn[data-tab="${tabName}"]`).classList.remove('text-gray-500', 'border-transparent');
+            document.getElementById(`${tabName}Tab`).classList.add('active');
+            document.getElementById(`${tabName}Tab`).classList.remove('hidden');
+        },
+
+        // 渲染Markdown
+        renderMarkdown: (markdown) => {
+            if (!markdown) return '';
+
+            // 使用marked渲染Markdown
+            return marked.parse(markdown, {
+                gfm: true,
+                breaks: true
+            });
+        },
+
+        // 高亮代码块
+        highlightCodeBlocks: () => {
+            document.querySelectorAll('pre code').forEach((block) => {
+                hljs.highlightBlock(block);
+            });
+        }
+    };
+
+    // API调用函数
+    const api = {
+        // 搜索GitHub仓库
+        searchRepositories: async (keyword, page = 1, perPage = 10, sort = 'stars') => {
+            try {
+                const url = new URL(`${GITHUB_API_BASE}/search/repositories`);
+                url.searchParams.append('q', keyword);
+                url.searchParams.append('page', page);
+                url.searchParams.append('per_page', perPage);
+                url.searchParams.append('sort', sort);
+
+                const response = await fetch(url.toString());
+                const data = await utils.checkJsonResponseStatus(response);
+
+                return {
+                    items: data.items || [],
+                    totalCount: data.total_count || 0,
+                    hasNext: data.items && data.items.length === perPage
+                };
+            } catch (error) {
+                utils.handleApiError(error);
+                return {items: [], totalCount: 0, hasNext: false};
+            }
+        },
+
+        // 获取仓库README
+        getRepositoryReadme: async (owner, repo) => {
+            try {
+                const response = await fetch(`${GITHUB_RAW_API}/${owner}/${repo}/refs/heads/main/README.md`, {
+                    headers: {
+                        'Accept': 'application/vnd.github.v3.html+json'
+                    }
+                });
+
+                if (response.status === 404) {
+                    return null; // 没有README
+                }
+
+                return await response.text();
+            } catch (error) {
+                console.error('获取README失败:', error);
+                return null;
+            }
+        },
+
+        // 获取仓库发布版本
+        getRepositoryReleases: async (owner, repo) => {
+            try {
+                const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/releases`);
+                return await utils.checkJsonResponseStatus(response);
+            } catch (error) {
+                utils.handleApiError(error);
+                return [];
+            }
+        },
+
+        // 获取发布版本详情
+        getReleaseDetail: async (owner, repo, releaseId) => {
+            try {
+                const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/releases/${releaseId}`);
+                return await utils.checkJsonResponseStatus(response);
+            } catch (error) {
+                utils.handleApiError(error);
+                return null;
+            }
+        }
+    };
+
+    // 渲染函数
+    const render = {
+        // 渲染搜索结果
+        renderResults: (repositories) => {
+            elements.resultsList.innerHTML = '';
+
+            if (repositories.length === 0) {
+                elements.noResults.classList.remove('hidden');
+                elements.pagination.classList.add('hidden');
+                return;
+            }
+
+            elements.noResults.classList.add('hidden');
+
+            repositories.forEach(repo => {
+                const resultItem = document.createElement('div');
+                resultItem.className = 'bg-white rounded-lg shadow p-4 hover:shadow-md transition-all cursor-pointer transform hover:-translate-y-1 duration-200 border-l-4 border-githubBlue';
+                resultItem.setAttribute('data-owner', repo.owner.login);
+                resultItem.setAttribute('data-repo', repo.name);
+
+                // 确定主要语言颜色
+                const languageMap = new Map([
+                    ['JavaScript', '#f1e05a'],
+                    ['TypeScript', '#2b7489'],
+                    ['Python', '#3572A5'],
+                    ['Java', '#b07219'],
+                    ['HTML', '#e34c26'],
+                    ['CSS', '#563d7c'],
+                    ['Go', '#00ADD8'],
+                    ['Rust', '#dea584'],
+                    ['C++', '#f34b7d']
+                ]);
+                const languageColor = languageMap.get(repo.language) || '#ccc';
+
+                resultItem.innerHTML = `
+                    <div class="flex flex-col md:flex-row md:items-start justify-between gap-3">
+                        <div class="flex-grow min-w-0">
+                            <div class="flex items-center gap-2 mb-2">
+                                <i class="fab fa-github text-gray-500"></i>
+                                <h3 class="font-semibold text-gray-800 text-lg" title="${repo.full_name}">${repo.full_name}</h3>
+                                ${repo.private ? '<span class="px-2 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded-full">私有</span>' : ''}
+                            </div>
+                            <p class="text-gray-600 mb-3 text-wrap-multiline" title="${repo.description || '无描述'}">${repo.description || '此仓库没有描述'}</p>
+                            <div class="flex flex-wrap gap-x-4 gap-y-2 text-sm text-gray-500">
+                                ${repo.language ? `
+                                <div class="flex items-center gap-1">
+                                    <span class="w-3 h-3 rounded-full" style="background-color: ${languageColor}"></span>
+                                    <span>${repo.language}</span>
+                                </div>
+                                ` : ''}
+                                <div class="flex items-center gap-1">
+                                    <i class="fas fa-star text-yellow-500"></i>
+                                    <span>${repo.stargazers_count.toLocaleString()}</span>
+                                </div>
+                                <div class="flex items-center gap-1">
+                                    <i class="fas fa-code-branch text-blue-500"></i>
+                                    <span>${repo.forks_count.toLocaleString()}</span>
+                                </div>
+                                <div class="flex items-center gap-1">
+                                    <i class="fas fa-circle text-gray-400"></i>
+                                    <span>${utils.formatRelativeTime(repo.updated_at)}更新</span>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="view-repo-btn text-primary hover:text-secondary transition-colors px-3 py-1 rounded flex items-center gap-1 mt-2 md:mt-0">
+                            <span>详情</span>
+                            <i class="fas fa-chevron-right text-xs"></i>
+                        </button>
+                    </div>
+                `;
+
+                elements.resultsList.appendChild(resultItem);
+
+                // 添加点击事件
+                resultItem.addEventListener('click', () => {
+                    render.showRepoDetailModal(repo);
+                });
+            });
+        },
+
+        // 更新结果计数
+        updateResultCount: (count, total) => {
+            if (!count) {
+                elements.resultCount.textContent = "";
+            } else {
+                elements.resultCount.textContent = `(${count.toLocaleString()} 个结果，显示 ${Math.min(state.pageSize, count)} 个)`;
+            }
+
+            if (total !== undefined) {
+                elements.searchInfo.textContent = `总共找到 ${total.toLocaleString()} 个仓库`;
+            }
+        },
+
+        // 更新分页状态
+        updatePagination: () => {
+            elements.currentPageEl.textContent = state.currentPage;
+            elements.prevPageBtn.disabled = state.currentPage === 1;
+            elements.nextPageBtn.disabled = !state.hasNext;
+            elements.pagination.classList.remove('hidden');
+        },
+
+        // 显示仓库详情弹窗
+        showRepoDetailModal: async (repo) => {
+            // 显示弹窗和加载状态
+            elements.repoDetailModal.classList.remove('hidden');
+            elements.repoDetailLoading.classList.remove('hidden');
+            elements.repoDetailContent.classList.add('hidden');
+            elements.repoModalTitle.textContent = `${repo.owner.login}/${repo.name}`;
+
+            // 存储当前仓库信息
+            state.currentRepo = {"owner": repo.owner.login, "repo": repo.name};
+            // 默认显示仓库信息标签页
+            utils.switchTab('info');
+            // 更新仓库信息标签页
+            render.updateRepoInfo(repo);
+
+            // 隐藏加载状态，显示详情内容
+            elements.repoDetailLoading.classList.add('hidden');
+            elements.repoDetailContent.classList.remove('hidden');
+        },
+
+        // 更新仓库信息
+        updateRepoInfo: (repoDetail) => {
+            elements.infoFullName.textContent = repoDetail.full_name;
+            elements.infoDescription.textContent = repoDetail.description || '无描述';
+            elements.infoStars.textContent = repoDetail.stargazers_count.toLocaleString();
+            elements.infoForks.textContent = repoDetail.forks_count.toLocaleString();
+            elements.infoLanguage.textContent = repoDetail.language || '未知';
+            elements.infoUpdated.textContent = utils.formatTime(repoDetail.updated_at);
+            elements.infoHtmlUrl.href = repoDetail.html_url;
+            elements.infoHtmlUrl.textContent = repoDetail.html_url;
+        },
+
+        // 显示仓库README
+        showRepoReadme: async (owner, repo) => {
+            const readme = await api.getRepositoryReadme(owner, repo);
+
+            if (readme) {
+                elements.readmeContent.innerHTML = utils.renderMarkdown(readme);
+                utils.highlightCodeBlocks();
+                elements.readmeContent.classList.remove('hidden');
+                elements.noReadme.classList.add('hidden');
+            } else {
+                elements.readmeContent.classList.add('hidden');
+                elements.noReadme.classList.remove('hidden');
+            }
+        },
+
+        // 显示仓库发布版本
+        showRepoReleases: async (owner, repo) => {
+            // 显示加载状态
+            elements.releasesLoading.classList.remove('hidden');
+            elements.releasesList.classList.add('hidden');
+            elements.noReleases.classList.add('hidden');
+
+            const releases = await api.getRepositoryReleases(owner, repo);
+
+            if (releases && releases.length > 0) {
+                elements.releasesList.innerHTML = '';
+
+                releases.forEach(release => {
+                    const releaseItem = document.createElement('div');
+                    releaseItem.className = 'bg-white rounded-lg border border-gray-200 p-4 hover:shadow transition-all cursor-pointer';
+                    releaseItem.setAttribute('data-release-id', release.id);
+                    releaseItem.setAttribute('data-owner', owner);
+                    releaseItem.setAttribute('data-repo', repo);
+
+                    const isPrerelease = release.prerelease;
+                    const assetsCount = release.assets ? release.assets.length : 0;
+
+                    releaseItem.innerHTML = `
+                        <div class="flex flex-col md:flex-row md:items-start justify-between gap-3">
+                            <div class="flex-grow min-w-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <h4 class="font-semibold text-gray-800">${release.tag_name}</h4>
+                                    ${release.name && release.name !== release.tag_name ?
+                        `<span class="text-gray-600">${release.name}</span>` : ''}
+                                    ${isPrerelease ?
+                        '<span class="px-2 py-0.5 text-xs bg-purple-100 text-purple-800 rounded-full">预发布</span>' :
+                        '<span class="px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">正式版</span>'}
+                                </div>
+                                <p class="text-gray-600 text-sm mb-2 line-clamp-2">${release.body ? release.body.substring(0, 100) + (release.body.length > 100 ? '...' : '') : '无说明'}</p>
+                                <div class="flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-500">
+                                    <div class="flex items-center gap-1">
+                                        <i class="fas fa-calendar-alt"></i>
+                                        <span>${utils.formatTime(release.published_at)}</span>
+                                    </div>
+                                    <div class="flex items-center gap-1">
+                                        <i class="fas fa-download"></i>
+                                        <span>${assetsCount} 个文件</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button class="view-release-btn text-primary hover:text-secondary transition-colors px-3 py-1 rounded flex items-center gap-1 mt-2 md:mt-0">
+                                <span>查看</span>
+                                <i class="fas fa-chevron-right text-xs"></i>
+                            </button>
+                        </div>
+                    `;
+
+                    elements.releasesList.appendChild(releaseItem);
+
+                    // 添加点击事件
+                    releaseItem.addEventListener('click', (e) => {
+                        if (!e.target.closest('.view-release-btn')) return;
+
+                        const releaseId = releaseItem.getAttribute('data-release-id');
+                        render.showReleaseDetailModal(owner, repo, releaseId);
+                    });
+                });
+
+                elements.releasesLoading.classList.add('hidden');
+                elements.releasesList.classList.remove('hidden');
+            } else {
+                elements.releasesLoading.classList.add('hidden');
+                elements.noReleases.classList.remove('hidden');
+            }
+        },
+
+        // 显示发布版本详情弹窗
+        showReleaseDetailModal: async (owner, repo, releaseId) => {
+            // 显示弹窗和加载状态
+            elements.releaseDetailModal.classList.remove('hidden');
+            elements.releaseDetailLoading.classList.remove('hidden');
+            elements.releaseDetailContent.classList.add('hidden');
+
+            // 获取发布版本详情
+            const releaseDetail = await api.getReleaseDetail(owner, repo, releaseId);
+
+            if (releaseDetail) {
+                // 存储当前发布版本
+                state.currentRelease = releaseDetail;
+
+                // 更新弹窗标题
+                elements.releaseModalTitle.textContent = `${owner}/${repo} - ${releaseDetail.tag_name}`;
+
+                // 更新发布说明
+                if (releaseDetail.body) {
+                    elements.releaseBody.innerHTML = utils.renderMarkdown(releaseDetail.body);
+                    elements.releaseBody.classList.remove('hidden');
+                    elements.noReleaseBody.classList.add('hidden');
+                } else {
+                    elements.releaseBody.classList.add('hidden');
+                    elements.noReleaseBody.classList.remove('hidden');
+                }
+
+                // 更新发布文件列表
+                render.updateReleaseAssets(releaseDetail.assets);
+
+                // 隐藏加载状态，显示详情内容
+                elements.releaseDetailLoading.classList.add('hidden');
+                elements.releaseDetailContent.classList.remove('hidden');
+            } else {
+                // 加载失败，关闭弹窗
+                elements.releaseDetailModal.classList.add('hidden');
+                utils.showToast('获取发布版本详情失败', true);
+            }
+        },
+
+        // 更新发布文件列表
+        updateReleaseAssets: (assets) => {
+            elements.assetsLoading.classList.add('hidden');
+
+            if (assets && assets.length > 0) {
+                elements.assetsList.innerHTML = '';
+                elements.noAssets.classList.add('hidden');
+
+                assets.forEach(asset => {
+                    const assetItem = document.createElement('li');
+                    assetItem.className = 'flex justify-between items-center p-3 bg-neutral rounded hover:bg-gray-100 transition-colors cursor-pointer';
+                    assetItem.setAttribute('data-download-url', asset.browser_download_url);
+                    assetItem.setAttribute('data-asset-name', asset.name);
+
+                    const fileIcon = asset.name.endsWith('.zip') ? 'file-archive' :
+                        asset.name.endsWith('.tar.gz') || asset.name.endsWith('.tgz') ? 'file-archive' :
+                            asset.name.endsWith('.exe') ? 'file-code' :
+                                'file';
+
+                    assetItem.innerHTML = `
+                        <div class="flex items-center gap-3">
+                            <i class="fas fa-${fileIcon} text-primary"></i>
+                            <div>
+                                <span class="font-medium block" title="${asset.name}">${asset.name}</span>
+                                <span class="text-xs text-gray-500">${utils.formatFileSize(asset.size)}</span>
+                            </div>
+                        </div>
+                        <i class="fas fa-download text-gray-400"></i>
+                    `;
+
+                    elements.assetsList.appendChild(assetItem);
+
+                    // 添加点击事件
+                    assetItem.addEventListener('click', () => {
+                        const downloadUrl = assetItem.getAttribute('data-download-url');
+                        const assetName = assetItem.getAttribute('data-asset-name');
+                        render.showDownloadModal(downloadUrl, assetName);
+                    });
+                });
+
+                elements.assetsList.classList.remove('hidden');
+            } else {
+                elements.assetsList.classList.add('hidden');
+                elements.noAssets.classList.remove('hidden');
+            }
+        },
+
+        // 显示下载链接弹窗
+        showDownloadModal: (downloadUrl, fileName) => {
+            // 显示弹窗
+            elements.downloadModal.classList.remove('hidden');
+            elements.downloadFileName.textContent = fileName;
+            elements.originalUrl.value = downloadUrl;
+
+            // 清空之前的代理链接
+            elements.proxyLinksContainer.innerHTML = '';
+
+            // 生成代理链接
+            PROXY_PREFIXES.forEach(proxyInfo => {
+                const proxyUrl = `${proxyInfo.url}/${downloadUrl}`;
+
+                const proxyItem = document.createElement('div');
+                proxyItem.className = 'flex items-center gap-2';
+
+                proxyItem.innerHTML = `
+                    <div class="flex items-center gap-1 w-36">
+                        <i class="fas fa-server text-gray-400"></i>
+                        <span class="text-sm text-gray-600 truncate" title="${proxyInfo.name}">${proxyInfo.name}</span>
+                    </div>
+                    <input type="text" value="${proxyUrl}" readonly
+                           class="flex-grow p-3 rounded-lg border border-gray-300 bg-gray-50 font-mono text-sm break-all">
+                    <button class="copy-proxy-url bg-gray-200 hover:bg-gray-300 text-gray-800 px-3 py-3 rounded-lg transition-colors flex items-center gap-2" title="复制链接">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                    <button class="download-proxy-url bg-green-500 hover:bg-green-600 text-white px-3 py-3 rounded-lg transition-colors flex items-center gap-2" title="直接下载">
+                        <i class="fas fa-download"></i>
+                    </button>
+                `;
+
+                elements.proxyLinksContainer.appendChild(proxyItem);
+
+                // 为复制按钮添加事件
+                const copyBtn = proxyItem.querySelector('.copy-proxy-url');
+                copyBtn.addEventListener('click', () => {
+                    navigator.clipboard.writeText(proxyUrl)
+                        .then(() => {
+                            utils.showToast('代理链接已复制到剪贴板');
+                        })
+                        .catch(err => {
+                            console.error('复制失败:', err);
+                            utils.showToast('复制失败，请手动复制', true);
+                        });
+                });
+
+                // 为下载按钮添加事件
+                const downloadBtn = proxyItem.querySelector('.download-proxy-url');
+                downloadBtn.addEventListener('click', () => {
+                    // 在新标签页打开下载链接
+                    window.open(proxyUrl, '_blank');
+                    utils.showToast('正在下载文件...');
+                });
+            });
+        }
+    };
+
+    // 事件监听器
+    const setupEventListeners = () => {
+        // 搜索表单提交
+        elements.searchForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const keyword = elements.keywordInput.value.trim();
+            const sort = elements.sortSelect.value;
+
+            if (!keyword) {
+                utils.showToast('请输入搜索关键词', true);
+                return;
+            }
+
+            // 更新状态
+            state.currentKeyword = keyword;
+            state.currentSort = sort;
+            state.currentPage = 1;
+
+            // 显示结果区域和加载状态
+            elements.resultsSection.classList.remove('hidden');
+            elements.loadingIndicator.classList.remove('hidden');
+            elements.resultsList.classList.add('hidden');
+            elements.noResults.classList.add('hidden');
+            elements.pagination.classList.add('hidden');
+            render.updateResultCount(null);
+
+            // 执行搜索
+            const results = await api.searchRepositories(
+                keyword,
+                state.currentPage,
+                state.pageSize,
+                sort
+            );
+
+            if (results) {
+                state.hasNext = results.hasNext;
+                state.totalResults = results.totalCount;
+
+                // 更新结果计数
+                render.updateResultCount(results.items.length, results.totalCount);
+
+                // 渲染结果和分页
+                render.renderResults(results.items);
+                render.updatePagination();
+            }
+
+            // 隐藏加载状态，显示结果列表
+            elements.loadingIndicator.classList.add('hidden');
+            elements.resultsList.classList.remove('hidden');
+        });
+
+        // 热门搜索关键词点击
+        document.querySelectorAll('.keyword-example').forEach(btn => {
+            btn.addEventListener('click', () => {
+                elements.keywordInput.value = btn.textContent.trim();
+                elements.searchForm.dispatchEvent(new Event('submit', {cancelable: true}));
+            });
+        });
+
+        // 上一页按钮
+        elements.prevPageBtn.addEventListener('click', async () => {
+            if (state.currentPage <= 1) return;
+
+            // 更新状态
+            state.currentPage--;
+
+            // 显示加载状态
+            elements.loadingIndicator.classList.remove('hidden');
+            elements.resultsList.classList.add('hidden');
+            render.updateResultCount(null);
+
+            // 执行搜索
+            const results = await api.searchRepositories(
+                state.currentKeyword,
+                state.currentPage,
+                state.pageSize,
+                state.currentSort
+            );
+
+            if (results) {
+                state.hasNext = results.hasNext;
+
+                // 更新结果计数
+                render.updateResultCount(results.items.length, results.totalCount);
+
+                // 渲染结果和分页
+                render.renderResults(results.items);
+                render.updatePagination();
+            }
+
+            // 隐藏加载状态，显示结果列表
+            elements.loadingIndicator.classList.add('hidden');
+            elements.resultsList.classList.remove('hidden');
+        });
+
+        // 下一页按钮
+        elements.nextPageBtn.addEventListener('click', async () => {
+            if (!state.hasNext) return;
+
+            // 更新状态
+            state.currentPage++;
+
+            // 显示加载状态
+            elements.loadingIndicator.classList.remove('hidden');
+            elements.resultsList.classList.add('hidden');
+            render.updateResultCount(null);
+
+            // 执行搜索
+            const results = await api.searchRepositories(
+                state.currentKeyword,
+                state.currentPage,
+                state.pageSize,
+                state.currentSort
+            );
+
+            if (results) {
+                state.hasNext = results.hasNext;
+
+                // 更新结果计数
+                render.updateResultCount(results.items.length, results.totalCount);
+
+                // 渲染结果和分页
+                render.renderResults(results.items);
+                render.updatePagination();
+            }
+
+            // 隐藏加载状态，显示结果列表
+            elements.loadingIndicator.classList.add('hidden');
+            elements.resultsList.classList.remove('hidden');
+        });
+
+        // 仓库详情弹窗标签页切换
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tabName = btn.getAttribute('data-tab');
+                utils.switchTab(tabName);
+
+                // 如果切换到发布版本标签页，加载发布版本
+                if (tabName === 'releases' && state.currentRepo) {
+                    render.showRepoReleases(state.currentRepo.owner, state.currentRepo.repo);
+                }
+                // 如果切换到README标签页，加载README
+                else if (tabName === 'readme' && state.currentRepo) {
+                    render.showRepoReadme(state.currentRepo.owner, state.currentRepo.repo);
+                }
+            });
+        });
+
+        // 关闭仓库详情弹窗
+        elements.closeRepoModal.addEventListener('click', () => {
+            elements.repoDetailModal.classList.add('hidden');
+        });
+
+        // 点击弹窗背景关闭弹窗
+        elements.repoModalOverlay.addEventListener('click', () => {
+            elements.repoDetailModal.classList.add('hidden');
+        });
+
+        // 关闭发布版本弹窗
+        elements.closeReleaseModal.addEventListener('click', () => {
+            elements.releaseDetailModal.classList.add('hidden');
+        });
+
+        // 点击弹窗背景关闭弹窗
+        elements.releaseModalOverlay.addEventListener('click', () => {
+            elements.releaseDetailModal.classList.add('hidden');
+        });
+
+        // 关闭下载链接弹窗
+        elements.closeDownloadModal.addEventListener('click', () => {
+            elements.downloadModal.classList.add('hidden');
+        });
+
+        // 点击弹窗背景关闭弹窗
+        elements.downloadModalOverlay.addEventListener('click', () => {
+            elements.downloadModal.classList.add('hidden');
+        });
+
+        // 复制原始下载链接
+        elements.copyOriginalUrl.addEventListener('click', () => {
+            navigator.clipboard.writeText(elements.originalUrl.value)
+                .then(() => {
+                    utils.showToast('原始链接已复制到剪贴板');
+                })
+                .catch(err => {
+                    console.error('复制失败:', err);
+                    utils.showToast('复制失败，请手动复制', true);
+                });
+        });
+
+        // 原始链接直接下载按钮
+        elements.downloadOriginalUrl.addEventListener('click', () => {
+            const downloadUrl = elements.originalUrl.value;
+            if (downloadUrl) {
+                window.open(downloadUrl, '_blank');
+                utils.showToast('正在下载文件...');
+            }
+        });
+
+        // 按ESC键关闭弹窗
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                if (!elements.repoDetailModal.classList.contains('hidden')) {
+                    elements.repoDetailModal.classList.add('hidden');
+                } else if (!elements.releaseDetailModal.classList.contains('hidden')) {
+                    elements.releaseDetailModal.classList.add('hidden');
+                } else if (!elements.downloadModal.classList.contains('hidden')) {
+                    elements.downloadModal.classList.add('hidden');
+                }
+            }
+        });
+    };
+
+    // 初始化函数
+    const init = () => {
+        // 设置事件监听器
+        setupEventListeners();
+
+        // 配置marked
+        marked.setOptions({
+            gfm: true,
+            breaks: true,
+            highlight: function (code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, {language: lang}).value;
+                }
+                return hljs.highlightAuto(code).value;
+            }
+        });
+    };
+
+    // 启动应用
+    init();
+</script>
+</body>
+
+</html>

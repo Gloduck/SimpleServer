@@ -22,6 +22,7 @@ public class Bootstrap {
         server.registerController(new JrebelController());
         server.registerController(new OnlineClipBoardController());
         server.registerController(new TorrentController());
+        server.registerController(new GithubController());
         server.registerController(new ForwardController());
         server.addHandler(new StaticFileHandler("./", "/static/**"));
         server.start();
