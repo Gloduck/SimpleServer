@@ -1,13 +1,17 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>磁力聚合搜索</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.31/vue.global.prod.js"></script>
 
-    <!-- 配置Tailwind自定义颜色 -->
+    <!-- 引入公共JS -->
+    <script src="/static/js/common.js"></script>
+
     <script>
         tailwind.config = {
             theme: {
@@ -26,894 +30,514 @@
         }
     </script>
 
-    <style type="text/tailwindcss">
-        @layer utilities {
-            .content-auto {
-                content-visibility: auto;
-            }
+    <style>
+        .text-wrap-multiline {
+            white-space: normal;
+            word-wrap: break-word;
+            word-break: break-all;
+        }
 
-            .text-truncate {
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            }
+        .content-auto {
+            content-visibility: auto;
+        }
 
-            .backdrop-blur {
-                backdrop-filter: blur(8px);
-            }
-
-            .transition-height {
-                transition: max-height 0.3s ease-in-out;
-            }
-
-            .text-wrap-multiline {
-                white-space: normal;
-                word-wrap: break-word;
-                word-break: break-all;
-            }
+        .text-truncate {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
     </style>
 </head>
+
 <body class="bg-gray-50 font-sans text-dark">
-<!-- 页面容器 -->
-<div class="min-h-screen flex flex-col">
-    <!-- 头部 -->
-    <header class="bg-white shadow-md">
-        <div class="container mx-auto px-4 py-6">
-            <div class="flex flex-col md:flex-row justify-between items-center">
-                <div class="flex items-center mb-4 md:mb-0">
-                    <i class="fas fa-magnet text-primary text-3xl mr-3"></i>
-                    <h1 class="text-[clamp(1.5rem,3vw,2.5rem)] font-bold text-dark">
-                        <span class="text-primary">磁力</span>聚合搜索
-                    </h1>
-                </div>
-                <p class="text-gray-600 text-sm md:text-base">
+    <div id="app">
+        <!-- Toast提示 -->
+        <common-toast ref="toastRef"></common-toast>
+
+        <!-- 页面容器 -->
+        <div class="min-h-screen flex flex-col">
+            <!-- 头部 -->
+            <common-header title="磁力聚合搜索" icon="fas fa-magnet" link="/">
+                <template #right>
                     支持多个磁力网站的磁力搜索
-                </p>
-            </div>
-        </div>
-    </header>
+                </template>
+            </common-header>
 
-    <!-- 主内容区 -->
-    <main class="flex-grow container mx-auto px-4 py-8">
-        <!-- 搜索区域 -->
-        <section class="bg-white rounded-xl shadow-lg p-6 mb-8 transform transition-all duration-300 hover:shadow-xl">
-            <form id="searchForm" class="flex flex-col md:flex-row gap-4">
-                <div class="flex-grow relative">
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
-                    <input type="text" id="keyword" placeholder="输入搜索关键词..."
-                           class="w-full pl-10 pr-4 py-3 rounded-lg border border-gray-300 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all"
-                           required>
-                </div>
+            <!-- 主内容区 -->
+            <main class="flex-grow container mx-auto px-4 py-8">
+                <!-- 搜索区域 -->
+                <section
+                    class="bg-white rounded-xl shadow-lg p-6 mb-8 transform transition-all duration-300 hover:shadow-xl">
+                    <form @submit.prevent="searchTorrents" class="flex flex-col md:flex-row gap-4">
+                        <div class="flex-grow relative">
+                            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                            <input type="text" v-model="keyword" placeholder="输入搜索关键词..."
+                                class="w-full pl-10 pr-4 py-3 rounded-lg border border-gray-300 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                                required>
+                        </div>
 
-                <div class="w-full md:w-auto">
-                    <select
-                            id="handlerSelect"
-                            class="w-full md:w-48 bg-white border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-no-repeat bg-right"
-                    >
-                        <option value="">加载搜索源中...</option>
-                    </select>
-                </div>
+                        <div class="w-full md:w-auto">
+                            <select v-model="selectedHandler"
+                                class="w-full md:w-48 bg-white border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-no-repeat bg-right">
+                                <option value="" disabled>选择搜索源</option>
+                                <option v-for="handler in handlers" :key="handler.code" :value="handler.code"
+                                    :disabled="!handler.available">
+                                    {{ handler.code }} {{ handler.tags && handler.tags.length > 0 ?
+                                    `(${handler.tags.join(',')})` : '' }}
+                                </option>
+                            </select>
+                        </div>
 
-                <!-- 排序选择器 -->
-                <div id="sortContainer" class="w-full md:w-auto hidden">
-                    <select
-                            id="sortSelect"
-                            class="w-full md:w-48 bg-white border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-no-repeat bg-right"
-                    >
-                        <option value="">默认排序</option>
-                    </select>
-                </div>
+                        <!-- 排序选择器 -->
+                        <div v-if="currentHandlerInfo && currentHandlerInfo.supportSortFields && currentHandlerInfo.supportSortFields.length > 0"
+                            class="w-full md:w-auto">
+                            <select v-model="currentSort"
+                                class="w-full md:w-48 bg-white border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-no-repeat bg-right">
+                                <option value="">默认排序</option>
+                                <option
+                                    v-for="[field, order] in currentHandlerInfo.supportSortFields.flatMap(field => ['asc', 'desc'].map(order => [field, order]))"
+                                    :key="`${field}-${order}`" :value="`${field}-${order}`">
+                                    {{ getSortFieldLabel(field) }} {{ order === 'asc' ? '↑ 升序' : '↓ 降序' }}
+                                </option>
+                            </select>
+                        </div>
 
-                <button
-                        type="submit"
-                        id="searchButton"
-                        class="w-full md:w-auto bg-primary hover:bg-secondary text-white font-medium py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2"
-                >
-                    <i class="fas fa-search"></i>
-                    <span>搜索</span>
-                </button>
-            </form>
+                        <button type="submit" :disabled="isLoading"
+                            :class="['w-full md:w-auto text-white font-medium py-3 px-6 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center justify-center gap-2',
+                                         isLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary hover:bg-secondary']">
+                            <i class="fas fa-search"></i>
+                            <span>搜索</span>
+                        </button>
+                    </form>
 
-            <div class="mt-4 flex flex-wrap gap-2">
-                <span class="text-sm text-gray-500">可用搜索源:</span>
-                <div id="handlerBadges" class="flex flex-wrap gap-2">
-                    <!-- 搜索源徽章将在这里动态生成 -->
-                </div>
-            </div>
-        </section>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span class="text-sm text-gray-500">可用搜索源:</span>
+                        <div class="flex flex-wrap gap-2">
+                            <span v-for="handler in handlers" :key="handler.code"
+                                :class="['px-2 py-1 rounded-full text-xs', 
+                                         handler.available ? 'bg-primary/10 text-primary' : 'bg-gray-100 text-gray-500']">
+                                {{ handler.code }}
+                                <i v-if="handler.supportSortFields && handler.supportSortFields.length > 0"
+                                    class="fas fa-sort ml-1 text-xs"></i>
+                            </span>
+                        </div>
+                    </div>
+                </section>
 
-        <!-- 搜索结果区域 -->
-        <section id="resultsSection" class="mb-8 hidden">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
-                <h2 class="text-xl font-bold text-gray-800">
-                    搜索结果
-                    <span id="resultCount" class="text-primary font-normal text-base"></span>
-                </h2>
-                <div class="text-sm text-gray-500 w-full sm:w-auto flex justify-between items-center gap-4">
-                    <span id="currentHandlerInfo"></span>
-                    <span id="sortInfo" class="hidden italic"></span>
-                </div>
-            </div>
+                <!-- 搜索结果区域 -->
+                <section v-if="showResults" class="mb-8">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+                        <h2 class="text-xl font-bold text-gray-800">
+                            搜索结果
+                            <span v-if="results.length > 0" class="text-primary font-normal text-base">
+                                (当前页{{ results.length }} 个结果)
+                            </span>
+                        </h2>
+                        <div class="text-sm text-gray-500 w-full sm:w-auto flex justify-between items-center gap-4">
+                            <span v-if="currentHandlerInfo">当前搜索源: {{ currentHandlerInfo.code }} ({{
+                                currentHandlerInfo.url }})</span>
+                            <span v-if="sortInfo" class="italic">{{ sortInfo }}</span>
+                        </div>
+                    </div>
 
-            <!-- 加载动画 -->
-            <div id="loadingIndicator" class="hidden flex justify-center items-center py-16">
-                <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-            </div>
+                    <!-- 加载动画 -->
+                    <common-loading-spinner v-if="isLoading"></common-loading-spinner>
 
-            <!-- 结果列表 -->
-            <div id="resultsList" class="space-y-4">
-                <!-- 结果项将在这里动态生成 -->
-            </div>
+                    <!-- 结果列表 -->
+                    <div v-else>
+                        <!-- 无结果提示 -->
+                        <div v-if="results.length === 0" class="py-16 text-center">
+                            <i class="fas fa-search-minus text-5xl text-gray-300 mb-4"></i>
+                            <p class="text-gray-500 text-lg">未找到匹配的结果</p>
+                        </div>
 
-            <!-- 无结果提示 -->
-            <div id="noResults" class="hidden py-16 text-center">
-                <i class="fas fa-search-minus text-5xl text-gray-300 mb-4"></i>
-                <p class="text-gray-500 text-lg">未找到匹配的结果</p>
-            </div>
-
-            <!-- 分页控制 -->
-            <div id="pagination" class="mt-8 flex justify-center items-center gap-4 hidden">
-                <button
-                        id="prevPage"
-                        class="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1"
-                        disabled
-                >
-                    <i class="fas fa-chevron-left"></i>
-                    <span>上一页</span>
-                </button>
-                <span id="pageInfo" class="text-gray-600">第 <span id="currentPage">1</span> 页</span>
-                <button
-                        id="nextPage"
-                        class="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1"
-                        disabled
-                >
-                    <span>下一页</span>
-                    <i class="fas fa-chevron-right"></i>
-                </button>
-            </div>
-        </section>
-    </main>
-
-    <!-- 页脚 -->
-    <footer class="bg-dark text-white py-6">
-        <div class="container mx-auto px-4 text-center text-sm">
-            <p>仅供学习交流使用，请勿用于非法用途</p>
-        </div>
-    </footer>
-</div>
-
-<!-- 详情弹窗 -->
-<div id="detailModal" class="fixed inset-0 z-50 flex items-center justify-center hidden">
-    <div class="absolute inset-0 bg-black/50 backdrop-blur" id="modalOverlay"></div>
-    <div class="relative bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto transform transition-all">
-        <div class="p-6 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white z-10">
-            <h3 id="modalTitle" class="text-xl font-bold text-gray-800 truncate"></h3>
-            <button id="closeModal" class="text-gray-500 hover:text-gray-700 transition-colors">
-                <i class="fas fa-times text-xl"></i>
-            </button>
-        </div>
-
-        <div id="detailLoading" class="py-16 flex justify-center items-center">
-            <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-primary"></div>
-        </div>
-
-        <div id="detailContent" class="p-6 space-y-6 hidden">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="bg-neutral p-4 rounded-lg">
-                    <h4 class="text-sm text-gray-500 mb-1">哈希值</h4>
-                    <p id="detailHash" class="font-mono text-sm break-all"></p>
-                </div>
-                <div class="bg-neutral p-4 rounded-lg">
-                    <h4 class="text-sm text-gray-500 mb-1">大小</h4>
-                    <p id="detailSize"></p>
-                </div>
-                <div class="bg-neutral p-4 rounded-lg">
-                    <h4 class="text-sm text-gray-500 mb-1">上传时间</h4>
-                    <p id="detailUploadTime"></p>
-                </div>
-                <div class="bg-neutral p-4 rounded-lg">
-                    <h4 class="text-sm text-gray-500 mb-1">文件数量</h4>
-                    <p id="detailFileCount"></p>
-                </div>
-            </div>
-
-            <div>
-                <h4 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                    <i class="fas fa-file-alt text-primary"></i>
-                    包含文件
-                </h4>
-                <ul id="fileList" class="space-y-2 max-h-60 overflow-y-auto pr-2">
-                    <!-- 文件列表将在这里动态生成 -->
-                </ul>
-            </div>
-
-            <div class="pt-4 border-t border-gray-200">
-                <button id="copyMagnet"
-                        class="bg-primary hover:bg-secondary text-white font-medium py-2 px-4 rounded-lg transition-all duration-300 flex items-center gap-2">
-                    <i class="fas fa-magnet"></i>
-                    <span>复制磁力链接</span>
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- 提示弹窗 -->
-<div id="toast"
-     class="fixed bottom-6 right-6 bg-dark text-white px-6 py-3 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-3 z-50">
-    <i id="toastIcon" class="fas fa-info-circle text-primary"></i>
-    <span id="toastMessage"></span>
-</div>
-
-<script>
-    // 排序字段显示名称映射
-    const sortFieldLabels = {
-        'name': '名称',
-        'uploadTime': '上传时间',
-        'size': '文件大小'
-    };
-
-    const sortOrderLabels = {
-        'asc': '升序',
-        'desc': '降序'
-    };
-
-    // 全局状态
-    const state = {
-        handlers: [],
-        currentHandler: null,
-        currentHandlerInfo: null,
-        currentPage: 1,
-        pageSize: 50,
-        hasNext: false,
-        currentKeyword: '',
-        currentSortField: '',
-        currentSortOrder: 'asc', // asc 升序, desc 降序
-        totalResults: 0
-    };
-
-    // DOM元素
-    const elements = {
-        searchForm: document.getElementById('searchForm'),
-        keywordInput: document.getElementById('keyword'),
-        handlerSelect: document.getElementById('handlerSelect'),
-        handlerBadges: document.getElementById('handlerBadges'),
-        sortContainer: document.getElementById('sortContainer'),
-        sortSelect: document.getElementById('sortSelect'),
-        sortInfo: document.getElementById('sortInfo'),
-        searchButton: document.getElementById('searchButton'),
-        resultsSection: document.getElementById('resultsSection'),
-        resultsList: document.getElementById('resultsList'),
-        resultCount: document.getElementById('resultCount'),
-        currentHandlerInfo: document.getElementById('currentHandlerInfo'),
-        loadingIndicator: document.getElementById('loadingIndicator'),
-        noResults: document.getElementById('noResults'),
-        pagination: document.getElementById('pagination'),
-        prevPageBtn: document.getElementById('prevPage'),
-        nextPageBtn: document.getElementById('nextPage'),
-        currentPageEl: document.getElementById('currentPage'),
-        detailModal: document.getElementById('detailModal'),
-        modalOverlay: document.getElementById('modalOverlay'),
-        closeModalBtn: document.getElementById('closeModal'),
-        modalTitle: document.getElementById('modalTitle'),
-        detailLoading: document.getElementById('detailLoading'),
-        detailContent: document.getElementById('detailContent'),
-        detailHash: document.getElementById('detailHash'),
-        detailSize: document.getElementById('detailSize'),
-        detailUploadTime: document.getElementById('detailUploadTime'),
-        detailFileCount: document.getElementById('detailFileCount'),
-        fileList: document.getElementById('fileList'),
-        copyMagnetBtn: document.getElementById('copyMagnet'),
-        toast: document.getElementById('toast'),
-        toastIcon: document.getElementById('toastIcon'),
-        toastMessage: document.getElementById('toastMessage')
-    };
-
-    // 工具函数
-    const utils = {
-        // 格式化文件大小
-        formatSize: (bytes) => {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        },
-
-        // 格式化时间戳
-        formatTime: (timestamp) => {
-            const date = new Date(timestamp);
-            return date.toLocaleString('zh-CN', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        },
-
-        // 显示提示
-        showToast: (message, isError = false) => {
-            elements.toastMessage.textContent = message;
-            elements.toastIcon.className = isError ? 'fas fa-exclamation-circle text-red-500' : 'fas fa-check-circle text-green-500';
-            elements.toast.classList.remove('translate-y-20', 'opacity-0');
-            elements.toast.classList.add('translate-y-0', 'opacity-100');
-
-            setTimeout(() => {
-                elements.toast.classList.remove('translate-y-0', 'opacity-100');
-                elements.toast.classList.add('translate-y-20', 'opacity-0');
-            }, 3000);
-        },
-
-        // 检查响应状态
-        checkResponseStatus: (response) => {
-            if (!response.ok) {
-                throw new Error(`HTTP错误，状态码: ${response.status}`);
-            }
-            return response.json();
-        },
-
-        // 处理API错误
-        handleApiError: (error) => {
-            console.error('API请求错误:', error);
-            utils.showToast('请求失败，请稍后重试', true);
-        }
-    };
-
-    // API调用函数
-    const api = {
-        // 获取所有搜索源
-        getHandlers: async () => {
-            try {
-                const response = await fetch('/torrent/v1/listHandlers');
-                const data = await utils.checkResponseStatus(response);
-
-                if (data.code === 200 && Array.isArray(data.data)) {
-                    return data.data;
-                } else {
-                    throw new Error('获取搜索源失败');
-                }
-            } catch (error) {
-                utils.handleApiError(error);
-                return [];
-            }
-        },
-
-        // 搜索资源 - 新增排序参数
-        searchTorrents: async (keyword, handlerCode, pageIndex, pageSize, sortField = '', sortOrder = 'asc') => {
-            try {
-                const url = new URL('/torrent/v1/search', window.location.origin);
-                url.searchParams.append('pageIndex', pageIndex);
-                url.searchParams.append('pageSize', pageSize);
-                url.searchParams.append('code', handlerCode);
-                url.searchParams.append('keyword', keyword);
-
-                // 只有当排序字段有效时才添加排序参数
-                if (sortField) {
-                    url.searchParams.append('sortField', sortField);
-                    url.searchParams.append('sortOrder', sortOrder);
-                }
-
-                const response = await fetch(url.toString());
-                const data = await utils.checkResponseStatus(response);
-
-                if (data.code === 200 && data.data) {
-                    return data.data;
-                } else {
-                    throw new Error('搜索失败');
-                }
-            } catch (error) {
-                utils.handleApiError(error);
-                return null;
-            }
-        },
-
-        // 获取详情
-        getTorrentDetail: async (handlerCode, id) => {
-            try {
-                const url = new URL('/torrent/v1/queryDetail', window.location.origin);
-                url.searchParams.append('code', handlerCode);
-                url.searchParams.append('id', id);
-
-                const response = await fetch(url.toString());
-                const data = await utils.checkResponseStatus(response);
-
-                if (data.code === 200 && data.data) {
-                    return data.data;
-                } else {
-                    throw new Error('获取详情失败');
-                }
-            } catch (error) {
-                utils.handleApiError(error);
-                return null;
-            }
-        }
-    };
-
-    // 渲染函数
-    const render = {
-        // 渲染搜索源选择器
-        renderHandlers: (handlers) => {
-            // 清空现有内容
-            elements.handlerSelect.innerHTML = '';
-            elements.handlerBadges.innerHTML = '';
-
-            // 添加默认选项
-            const defaultOption = document.createElement('option');
-            defaultOption.value = '';
-            defaultOption.textContent = '选择搜索源';
-            defaultOption.disabled = true;
-            defaultOption.selected = true;
-            elements.handlerSelect.appendChild(defaultOption);
-
-            // 添加搜索源选项
-            handlers.forEach(handler => {
-                // 标签
-                const tags = handler.tags || [];
-                const showName = handler.code + (tags.length > 0 ? ` (${tags.join(',')})` : '');
-                // 下拉选项
-                const option = document.createElement('option');
-                option.value = handler.code;
-                option.textContent = showName;
-                option.disabled = !handler.available;
-                // 存储支持的排序字段
-                option.dataset.supportedSorts = JSON.stringify(handler.supportSortFields || []);
-                elements.handlerSelect.appendChild(option);
-
-                // 徽章 - 显示是否支持排序
-                const sortIndicator = handler.supportSortFields && handler.supportSortFields.length > 0
-                    ? '<i class="fas fa-sort ml-1 text-xs"></i>'
-                    : '';
-
-                const badge = document.createElement('span');
-                badge.className = `px-2 py-1 rounded-full text-xs ${handler.available ? 'bg-primary/10 text-primary' : 'bg-gray-100 text-gray-500'}`;
-                badge.innerHTML = `${handler.code} ${handler.available ? '<i class="fas fa-check-circle"></i>' : '<i class="fas fa-times-circle"></i>'} ${sortIndicator}`;
-                elements.handlerBadges.appendChild(badge);
-            });
-        },
-
-        // 根据选中的搜索源更新排序选项
-        updateSortOptions: (handlerCode) => {
-            const handler = state.handlers.find(h => h.code === handlerCode);
-            if (handler && handler.supportSortFields && handler.supportSortFields.length > 0) {
-                // 清空现有排序选项
-                elements.sortSelect.innerHTML = '';
-
-                // 添加默认选项
-                const defaultOption = document.createElement('option');
-                defaultOption.value = '';
-                defaultOption.textContent = '默认排序';
-                defaultOption.selected = true;
-                elements.sortSelect.appendChild(defaultOption);
-
-                // 添加支持的排序字段
-                handler.supportSortFields.forEach(field => {
-                    Object.keys(sortOrderLabels).forEach(order => {
-                        const option = document.createElement('option');
-                        option.value = field + '-' + order;
-                        option.textContent = (sortFieldLabels[field] || field) + '-' + sortOrderLabels[order];
-                        elements.sortSelect.appendChild(option);
-                    })
-                });
-
-                // 显示排序选择器
-                elements.sortContainer.classList.remove('hidden');
-                elements.sortContainer.classList.add('flex');
-            } else {
-                // 隐藏排序选择器
-                elements.sortContainer.classList.add('hidden');
-                elements.sortContainer.classList.remove('flex');
-                elements.sortSelect.value = '';
-                state.currentSortField = '';
-                state.currentSortOrder = 'asc';
-                elements.sortInfo.classList.add('hidden');
-            }
-        },
-
-        updateResultCount: (count) => {
-            if(!count){
-                elements.resultCount.textContent = "";
-            } else {
-                elements.resultCount.textContent = `(当前页${count} 个结果)`;
-            }
-        },
-
-        // 渲染搜索结果
-        renderResults: (items) => {
-            elements.resultsList.innerHTML = '';
-
-            if (items.length === 0) {
-                elements.noResults.classList.remove('hidden');
-                elements.pagination.classList.add('hidden');
-                return;
-            }
-
-            elements.noResults.classList.add('hidden');
-
-            items.forEach(item => {
-                const resultItem = document.createElement('div');
-                resultItem.className = 'bg-white rounded-lg shadow p-4 hover:shadow-md transition-all cursor-pointer transform hover:-translate-y-1 duration-200 border-l-4 border-primary';
-                resultItem.setAttribute('data-id', item.id);
-                resultItem.setAttribute('data-handler', state.currentHandler);
-
-                resultItem.innerHTML = `
-                        <div class="flex flex-col md:flex-row md:items-start justify-between gap-3">
-                            <div class="flex-grow min-w-0">
-                                <h3 class="font-semibold text-gray-800 mb-2 text-wrap-multiline" title="${item.name}">${item.name}</h3>
-                                <div class="flex flex-wrap gap-x-4 gap-y-2 text-sm text-gray-500">
-                                    <div class="flex items-center gap-1">
-                                        <i class="fas fa-hashtag text-primary/70"></i>
-                                        <span class="truncate max-w-[180px] md:max-w-[250px]" title="${item.hash}">${item.hash}</span>
+                        <!-- 结果项 -->
+                        <div v-else class="space-y-4">
+                            <div v-for="item in results" :key="item.id" @click="showDetailModal(item)"
+                                class="bg-white rounded-lg shadow p-4 hover:shadow-md transition-all cursor-pointer transform hover:-translate-y-1 duration-200 border-l-4 border-primary">
+                                <div class="flex flex-col md:flex-row md:items-start justify-between gap-3">
+                                    <div class="flex-grow min-w-0">
+                                        <h3 class="font-semibold text-gray-800 mb-2 text-wrap-multiline"
+                                            :title="item.name">
+                                            {{ item.name }}
+                                        </h3>
+                                        <div class="flex flex-wrap gap-x-4 gap-y-2 text-sm text-gray-500">
+                                            <div class="flex items-center gap-1">
+                                                <i class="fas fa-hashtag text-primary/70"></i>
+                                                <span class="truncate max-w-[180px] md:max-w-[250px]"
+                                                    :title="item.hash">{{ item.hash }}</span>
+                                            </div>
+                                            <div class="flex items-center gap-1">
+                                                <i class="fas fa-file-size text-primary/70"></i>
+                                                <span>{{ formatFileSize(item.size) }}</span>
+                                            </div>
+                                            <div class="flex items-center gap-1">
+                                                <i class="fas fa-clock text-primary/70"></i>
+                                                <span>{{ formatTime(item.uploadTime) }}</span>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div class="flex items-center gap-1">
-                                        <i class="fas fa-file-size text-primary/70"></i>
-                                        <span>${utils.formatSize(item.size)}</span>
-                                    </div>
-                                    <div class="flex items-center gap-1">
-                                        <i class="fas fa-clock text-primary/70"></i>
-                                        <span>${utils.formatTime(item.uploadTime)}</span>
-                                    </div>
+                                    <button
+                                        class="text-primary hover:text-secondary transition-colors px-3 py-1 rounded flex items-center gap-1 mt-2 md:mt-0">
+                                        <span>详情</span>
+                                        <i class="fas fa-chevron-right text-xs"></i>
+                                    </button>
                                 </div>
                             </div>
-                            <button class="view-detail-btn text-primary hover:text-secondary transition-colors px-3 py-1 rounded flex items-center gap-1 mt-2 md:mt-0">
-                                <span>详情</span>
-                                <i class="fas fa-chevron-right text-xs"></i>
-                            </button>
                         </div>
-                    `;
 
-                elements.resultsList.appendChild(resultItem);
+                        <!-- 分页控制 -->
+                        <common-pagination v-if="results.length > 0" :current-page="currentPage" :has-next="hasNextPage"
+                            @prev-page="prevPage" @next-page="nextPage">
+                        </common-pagination>
+                    </div>
+                </section>
+            </main>
 
-                // 添加点击事件
-                resultItem.addEventListener('click', () => {
-                    const id = resultItem.getAttribute('data-id');
-                    const handlerCode = resultItem.getAttribute('data-handler');
-                    render.showDetailModal(handlerCode, id, item.name);
+            <!-- 页脚 -->
+            <common-footer description="基于三方平台的API抓取，仅供学习交流使用，请勿用于非法用途" copyright="© 2025 Gloduck"></common-footer>
+        </div>
+
+        <!-- 详情弹窗 -->
+        <common-modal v-model:visible="showDetailModalVisible" :title="selectedItem ? selectedItem.name : ''">
+            <div v-if="selectedItem">
+                <common-loading-spinner v-if="loadingDetail"></common-loading-spinner>
+                <div v-else class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="bg-neutral p-4 rounded-lg">
+                            <h4 class="text-sm text-gray-500 mb-1">哈希值</h4>
+                            <p id="detailHash" class="font-mono text-sm break-all">{{ detailData?.hash || '未知' }}</p>
+                        </div>
+                        <div class="bg-neutral p-4 rounded-lg">
+                            <h4 class="text-sm text-gray-500 mb-1">大小</h4>
+                            <p>{{ formatFileSize(detailData?.size || 0) }}</p>
+                        </div>
+                        <div class="bg-neutral p-4 rounded-lg">
+                            <h4 class="text-sm text-gray-500 mb-1">上传时间</h4>
+                            <p>{{ formatTime(detailData?.uploadTime) }}</p>
+                        </div>
+                        <div class="bg-neutral p-4 rounded-lg">
+                            <h4 class="text-sm text-gray-500 mb-1">文件数量</h4>
+                            <p>{{ detailData?.fileCount !== null ? detailData?.fileCount : '未知' }}</p>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 class="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                            <i class="fas fa-file-alt text-primary"></i>
+                            包含文件
+                        </h4>
+                        <div v-if="!detailData?.files || detailData.files.length === 0"
+                            class="text-center py-4 text-gray-500">
+                            <i class="fas fa-file-excel-o mr-2"></i>无法获取文件列表
+                        </div>
+                        <ul v-else class="space-y-2 max-h-60 overflow-y-auto pr-2">
+                            <li v-for="file in detailData.files" :key="file.name"
+                                class="flex justify-between items-center p-2 bg-neutral rounded hover:bg-gray-100 transition-colors">
+                                <span class="text-truncate max-w-[80%]" :title="file.name">{{ file.name }}</span>
+                                <span class="text-sm text-gray-500 whitespace-nowrap">{{ formatFileSize(file.size)
+                                    }}</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="pt-4 border-t border-gray-200">
+                        <button @click="copyMagnetLink" v-if="detailData?.hash"
+                            class="bg-primary hover:bg-secondary text-white font-medium py-2 px-4 rounded-lg transition-all duration-300 flex items-center gap-2">
+                            <i class="fas fa-magnet"></i>
+                            <span>复制磁力链接</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </common-modal>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, watch } = Vue;
+
+        const app = createApp({
+            components: {
+                'common-header': CommonComponents.Header,
+                'common-footer': CommonComponents.Footer,
+                'common-toast': CommonComponents.Toast,
+                'common-loading-spinner': CommonComponents.LoadingSpinner,
+                'common-pagination': CommonComponents.Pagination,
+                'common-modal': CommonComponents.Modal
+            },
+
+            setup() {
+                // API基础URL
+                const API_BASE = '/torrent/v1';
+
+                // 排序字段显示名称映射
+                const sortFieldLabels = {
+                    'name': '名称',
+                    'uploadTime': '上传时间',
+                    'size': '文件大小'
+                };
+
+                const sortOrderLabels = {
+                    'asc': '升序',
+                    'desc': '降序'
+                };
+
+                // 搜索相关
+                const toastRef = ref(null);
+                const keyword = ref('');
+                const selectedHandler = ref('');
+                const currentSort = ref('');
+                const results = ref([]);
+                const isLoading = ref(false);
+                const showResults = ref(false);
+                const currentPage = ref(1);
+                const pageSize = 50;
+                const hasNextPage = ref(false);
+
+                // 弹窗相关
+                const showDetailModalVisible = ref(false);
+                const loadingDetail = ref(false);
+
+                // 选中的数据
+                const selectedItem = ref(null);
+                const detailData = ref(null);
+
+                // 搜索源数据
+                const handlers = ref([]);
+                const currentHandlerInfo = ref(null);
+
+                // 公共工具函数
+                const formatTime = CommonUtils.formatTime;
+                const formatFileSize = CommonUtils.formatFileSize;
+                const copyToClipboard = (text) => CommonUtils.copyToClipboard(text, showToast);
+                const checkJsonResponseStatus = CommonUtils.checkJsonResponseStatus;
+                const handleTorrentApiError = CommonUtils.handleTorrentApiError;
+
+                // 排序信息
+                const sortInfo = computed(() => {
+                    if (!currentSort.value) return '';
+                    const [field, order] = currentSort.value.split('-');
+                    const fieldLabel = sortFieldLabels[field] || field;
+                    const orderLabel = sortOrderLabels[order] || order;
+                    return `排序: ${fieldLabel} ${orderLabel}`;
                 });
-            });
-        },
 
-        // 更新排序信息显示
-        updateSortInfo: () => {
-            if (state.currentSortField) {
-                const fieldLabel = sortFieldLabels[state.currentSortField] || state.currentSortField;
-                const orderLabel = sortOrderLabels[state.currentSortOrder] || state.currentSortOrder;
-                elements.sortInfo.textContent = `排序: ${fieldLabel} ${orderLabel}`;
-                elements.sortInfo.classList.remove('hidden');
-            } else {
-                elements.sortInfo.classList.add('hidden');
-            }
-        },
+                // 获取排序字段标签
+                const getSortFieldLabel = (field) => {
+                    return sortFieldLabels[field] || field;
+                };
 
-        // 更新分页状态
-        updatePagination: () => {
-            elements.currentPageEl.textContent = state.currentPage;
-            elements.prevPageBtn.disabled = state.currentPage === 1;
-            elements.nextPageBtn.disabled = !state.hasNext;
-            elements.pagination.classList.remove('hidden');
-        },
+                // 获取排序顺序标签
+                const getSortOrderLabel = (order) => {
+                    return sortOrderLabels[order] || order;
+                };
 
-        // 显示详情弹窗
-        showDetailModal: async (handlerCode, id, name) => {
-            // 显示弹窗和加载状态
-            elements.detailModal.classList.remove('hidden');
-            elements.detailLoading.classList.remove('hidden');
-            elements.detailContent.classList.add('hidden');
-            elements.modalTitle.textContent = name;
+                // 显示提示
+                const showToast = (message, type) => {
+                    if (toastRef.value) {
+                        toastRef.value.show(message, type);
+                    } else {
+                        alert(message);
+                    }
+                };
 
-            // 获取详情数据
-            const detail = await api.getTorrentDetail(handlerCode, id);
+                // 加载搜索源
+                const loadHandlers = async () => {
+                    try {
+                        const response = await fetch(`${API_BASE}/listHandlers`);
+                        const data = await checkJsonResponseStatus(response);
 
-            if (detail) {
-                // 填充详情数据
-                elements.detailHash.textContent = detail.hash;
-                elements.detailSize.textContent = utils.formatSize(detail.size);
-                elements.detailUploadTime.textContent = utils.formatTime(detail.uploadTime);
-                elements.detailFileCount.textContent = detail.fileCount !== null ? detail.fileCount : '未知';
+                        if (data.code === 200 && Array.isArray(data.data)) {
+                            handlers.value = data.data;
+                            if (handlers.value.length > 0) {
+                                selectedHandler.value = handlers.value[0].available ? handlers.value[0].code : '';
+                            }
+                        } else {
+                            throw new Error('获取搜索源失败');
+                        }
+                    } catch (error) {
+                        handleTorrentApiError(error, showToast);
+                        handlers.value = [];
+                    }
+                };
 
-                // 渲染文件列表
-                elements.fileList.innerHTML = '';
-                if (detail.files && detail.files.length > 0) {
-                    // 有文件列表时正常渲染
-                    detail.files.forEach(file => {
-                        const fileItem = document.createElement('li');
-                        fileItem.className = 'flex justify-between items-center p-2 bg-neutral rounded hover:bg-gray-100 transition-colors';
+                const updateCurrentHandlerInfo = () => {
+                    currentHandlerInfo.value = handlers.value.find(h => h.code === selectedHandler.value);
+                    // 如果当前handler不支持排序，清空排序选择
+                    if (!currentHandlerInfo.value || !currentHandlerInfo.value.supportSortFields || currentHandlerInfo.value.supportSortFields.length === 0) {
+                        currentSort.value = '';
+                    }
+                };
 
-                        const fileName = document.createElement('span');
-                        fileName.className = 'text-truncate max-w-[80%]';
-                        fileName.title = file.name;
-                        fileName.textContent = file.name;
+                // 搜索磁力资源
+                const searchTorrents = async () => {
+                    if (!keyword.value.trim()) {
+                        showToast('请输入搜索关键词', 'warning');
+                        return;
+                    }
 
-                        const fileSize = document.createElement('span');
-                        fileSize.className = 'text-sm text-gray-500 whitespace-nowrap';
-                        fileSize.textContent = utils.formatSize(file.size);
+                    if (!selectedHandler.value) {
+                        showToast('请选择搜索源', 'warning');
+                        return;
+                    }
 
-                        fileItem.appendChild(fileName);
-                        fileItem.appendChild(fileSize);
-                        elements.fileList.appendChild(fileItem);
-                    });
-                } else {
-                    // 文件列表为空时显示提示
-                    const emptyItem = document.createElement('li');
-                    emptyItem.className = 'text-center py-4 text-gray-500';
-                    emptyItem.innerHTML = '<i class="fas fa-file-excel-o mr-2"></i>无法获取文件列表';
-                    elements.fileList.appendChild(emptyItem);
+                    isLoading.value = true;
+                    showResults.value = true;
+
+                    try {
+                        const url = new URL(`${API_BASE}/search`, window.location.origin);
+                        url.searchParams.append('pageIndex', currentPage.value);
+                        url.searchParams.append('pageSize', pageSize);
+                        url.searchParams.append('code', selectedHandler.value);
+                        url.searchParams.append('keyword', keyword.value);
+
+                        // 添加排序参数
+                        if (currentSort.value) {
+                            const [sortField, sortOrder] = currentSort.value.split('-');
+                            if (sortField) {
+                                url.searchParams.append('sortField', sortField);
+                                url.searchParams.append('sortOrder', sortOrder);
+                            }
+                        }
+
+                        const response = await fetch(url.toString());
+                        const data = await checkJsonResponseStatus(response);
+
+                        if (data.code === 200 && data.data) {
+                            results.value = data.data.items || [];
+                            hasNextPage.value = data.data.hasNext || false;
+                        } else {
+                            throw new Error('搜索失败');
+                        }
+                    } catch (error) {
+                        handleTorrentApiError(error, showToast);
+                        results.value = [];
+                        hasNextPage.value = false;
+                    } finally {
+                        isLoading.value = false;
+                    }
+                };
+
+                // 分页
+                const prevPage = () => {
+                    if (currentPage.value > 1) {
+                        currentPage.value--;
+                        searchTorrents();
+                    }
+                };
+
+                const nextPage = () => {
+                    if (hasNextPage.value) {
+                        currentPage.value++;
+                        searchTorrents();
+                    }
+                };
+
+                // 显示详情弹窗
+                const showDetailModal = async (item) => {
+                    selectedItem.value = item;
+                    detailData.value = null;
+                    showDetailModalVisible.value = true;
+                    loadingDetail.value = true;
+
+                    try {
+                        const url = new URL(`${API_BASE}/queryDetail`, window.location.origin);
+                        url.searchParams.append('code', selectedHandler.value);
+                        url.searchParams.append('id', item.id);
+
+                        const response = await fetch(url.toString());
+                        const data = await checkJsonResponseStatus(response);
+
+                        if (data.code === 200 && data.data) {
+                            detailData.value = data.data;
+                        } else {
+                            throw new Error('获取详情失败');
+                        }
+                    } catch (error) {
+                        handleTorrentApiError(error, showToast);
+                        detailData.value = null;
+                    } finally {
+                        loadingDetail.value = false;
+                    }
+                };
+
+                // 复制磁力链接
+                const copyMagnetLink = () => {
+                    if (!detailData.value?.hash) {
+                        showToast('没有可用的磁力链接', 'warning');
+                        return;
+                    }
+
+                    const magnetLink = `magnet:?xt=urn:btih:${detailData.value.hash}`;
+                    copyToClipboard(magnetLink);
+                };
+
+                const searchTorrentsIfNecessary = () => {
+                    if (keyword.value.trim() && selectedHandler.value) {
+                        currentPage.value = 1;
+                        searchTorrents();
+                    }
                 }
 
-                // 存储磁力链接信息，供复制使用
-                elements.copyMagnetBtn.setAttribute('data-magnet', `magnet:?xt=urn:btih:${detail.hash}`);
+                // 页面加载时初始化
+                onMounted(async () => {
+                    await loadHandlers();
+                    updateCurrentHandlerInfo(); // 初始加载后更新handler信息
 
-                // 显示详情内容，隐藏加载状态
-                elements.detailLoading.classList.add('hidden');
-                elements.detailContent.classList.remove('hidden');
-            } else {
-                // 加载失败，关闭弹窗
-                elements.detailModal.classList.add('hidden');
-                utils.showToast('获取详情失败', true);
-            }
-        }
-    };
-
-    // 事件监听器
-    const setupEventListeners = () => {
-        // 搜索源变更时更新排序选项
-        elements.handlerSelect.addEventListener('change', () => {
-            const handlerCode = elements.handlerSelect.value;
-            render.updateSortOptions(handlerCode);
-        });
-
-        // 排序方式变更时重新搜索
-        elements.sortSelect.addEventListener('change', async () => {
-            const sortValue = elements.sortSelect.value ? elements.sortSelect.value : '';
-            const sortField = sortValue ? sortValue.split('-')[0] : '';
-            const sortOrder = sortValue ? sortValue.split('-')[1] : 'asc';
-
-            state.currentSortField = sortField;
-            state.currentSortOrder = sortOrder;
-
-            // 更新排序信息显示
-            render.updateSortInfo();
-
-            // 如果已经有搜索条件，重新搜索
-            if (state.currentKeyword && state.currentHandler) {
-                // 重置到第一页
-                state.currentPage = 1;
-
-                // 显示加载状态
-                elements.loadingIndicator.classList.remove('hidden');
-                elements.resultsList.classList.add('hidden');
-                render.updateResultCount(null);
-                // 执行搜索
-                const results = await api.searchTorrents(
-                    state.currentKeyword,
-                    state.currentHandler,
-                    state.currentPage,
-                    state.pageSize,
-                    state.currentSortField,
-                    state.currentSortOrder
-                );
-
-                if (results) {
-                    state.hasNext = results.hasNext;
-                    state.totalResults = results.items.length;
-
-                    // 更新结果计数
-                    render.updateResultCount(state.totalResults);
-
-                    // 渲染结果和分页
-                    render.renderResults(results.items);
-                    render.updatePagination();
-                }
-
-                // 隐藏加载状态，显示结果列表
-                elements.loadingIndicator.classList.add('hidden');
-                elements.resultsList.classList.remove('hidden');
-            }
-        });
-
-        // 搜索表单提交
-        elements.searchForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const keyword = elements.keywordInput.value.trim();
-            const handlerCode = elements.handlerSelect.value;
-
-            if (!keyword) {
-                utils.showToast('请输入搜索关键词', true);
-                return;
-            }
-
-            if (!handlerCode) {
-                utils.showToast('请选择搜索源', true);
-                return;
-            }
-
-            // 更新状态
-            state.currentKeyword = keyword;
-            state.currentHandler = handlerCode;
-            state.currentPage = 1;
-
-            // 获取当前选择的排序方式
-            const sortValue = elements.sortSelect.value ? elements.sortSelect.value : '';
-            const sortField = sortValue ? sortValue.split('-')[0] : '';
-            const sortOrder = sortValue ? sortValue.split('-')[1] : 'asc';
-            state.currentSortField = sortField;
-            state.currentSortOrder = sortOrder;
-
-            // 更新排序信息
-            render.updateSortInfo();
-
-            // 显示结果区域和加载状态
-            elements.resultsSection.classList.remove('hidden');
-            elements.loadingIndicator.classList.remove('hidden');
-            elements.resultsList.classList.add('hidden');
-            elements.noResults.classList.add('hidden');
-            elements.pagination.classList.add('hidden');
-
-            // 更新当前搜索源信息
-            const currentHandler = state.handlers.find(h => h.code === handlerCode);
-            elements.currentHandlerInfo.textContent = `当前搜索源: ${handlerCode} (${currentHandler.url})`;
-            render.updateResultCount(null);
-
-            // 执行搜索 - 传入排序参数
-            const results = await api.searchTorrents(
-                keyword,
-                handlerCode,
-                state.currentPage,
-                state.pageSize,
-                state.currentSortField,
-                state.currentSortOrder
-            );
-
-            if (results) {
-                state.hasNext = results.hasNext;
-                state.totalResults = results.items.length;
-
-                // 更新结果计数
-                render.updateResultCount(state.totalResults);
-
-                // 渲染结果和分页
-                render.renderResults(results.items);
-                render.updatePagination();
-            }
-
-            // 隐藏加载状态，显示结果列表
-            elements.loadingIndicator.classList.add('hidden');
-            elements.resultsList.classList.remove('hidden');
-        });
-
-        // 上一页按钮
-        elements.prevPageBtn.addEventListener('click', async () => {
-            if (state.currentPage <= 1) return;
-
-            // 更新状态
-            state.currentPage--;
-
-            // 显示加载状态
-            elements.loadingIndicator.classList.remove('hidden');
-            elements.resultsList.classList.add('hidden');
-            render.updateResultCount(null);
-
-            // 执行搜索 - 传入排序参数
-            const results = await api.searchTorrents(
-                state.currentKeyword,
-                state.currentHandler,
-                state.currentPage,
-                state.pageSize,
-                state.currentSortField,
-                state.currentSortOrder
-            );
-
-            if (results) {
-                state.hasNext = results.hasNext;
-                state.totalResults = results.items.length;
-
-                // 更新结果计数
-                render.updateResultCount(state.totalResults);
-
-                // 渲染结果和分页
-                render.renderResults(results.items);
-                render.updatePagination();
-            }
-
-            // 隐藏加载状态，显示结果列表
-            elements.loadingIndicator.classList.add('hidden');
-            elements.resultsList.classList.remove('hidden');
-        });
-
-        // 下一页按钮
-        elements.nextPageBtn.addEventListener('click', async () => {
-            if (!state.hasNext) return;
-
-            // 更新状态
-            state.currentPage++;
-
-            // 显示加载状态
-            elements.loadingIndicator.classList.remove('hidden');
-            elements.resultsList.classList.add('hidden');
-            render.updateResultCount(null);
-
-            // 执行搜索 - 传入排序参数
-            const results = await api.searchTorrents(
-                state.currentKeyword,
-                state.currentHandler,
-                state.currentPage,
-                state.pageSize,
-                state.currentSortField,
-                state.currentSortOrder
-            );
-
-            if (results) {
-                state.hasNext = results.hasNext;
-                state.totalResults = results.items.length;
-
-                // 更新结果计数
-                render.updateResultCount(state.totalResults);
-
-                // 渲染结果和分页
-                render.renderResults(results.items);
-                render.updatePagination();
-            }
-
-            // 隐藏加载状态，显示结果列表
-            elements.loadingIndicator.classList.add('hidden');
-            elements.resultsList.classList.remove('hidden');
-        });
-
-        // 关闭详情弹窗
-        elements.closeModalBtn.addEventListener('click', () => {
-            elements.detailModal.classList.add('hidden');
-        });
-
-        // 点击弹窗背景关闭弹窗
-        elements.modalOverlay.addEventListener('click', () => {
-            elements.detailModal.classList.add('hidden');
-        });
-
-        // 复制磁力链接
-        elements.copyMagnetBtn.addEventListener('click', () => {
-            const magnetLink = elements.copyMagnetBtn.getAttribute('data-magnet');
-
-            navigator.clipboard.writeText(magnetLink)
-                .then(() => {
-                    utils.showToast('磁力链接已复制到剪贴板');
-                })
-                .catch(err => {
-                    console.error('复制失败:', err);
-                    utils.showToast('复制失败，请手动复制', true);
                 });
-        });
 
-        // 按ESC键关闭弹窗
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && !elements.detailModal.classList.contains('hidden')) {
-                elements.detailModal.classList.add('hidden');
+                // 监听搜索源变化，更新handler信息并清空不支持的排序
+                watch(selectedHandler, () => {
+                    updateCurrentHandlerInfo();
+                    searchTorrentsIfNecessary();
+                });
+
+                // 监听排序方式变化，自动执行搜索（重置页码）
+                watch(currentSort, () => {
+                    searchTorrentsIfNecessary();
+                });
+
+
+
+                return {
+                    // 数据
+                    toastRef,
+                    keyword,
+                    selectedHandler,
+                    currentSort,
+                    results,
+                    isLoading,
+                    showResults,
+                    currentPage,
+                    hasNextPage,
+                    handlers,
+                    currentHandlerInfo,
+                    sortInfo,
+
+                    // 弹窗
+                    showDetailModalVisible,
+                    loadingDetail,
+                    selectedItem,
+                    detailData,
+
+                    // 方法
+                    searchTorrents,
+                    prevPage,
+                    nextPage,
+                    showDetailModal,
+                    copyMagnetLink,
+                    getSortFieldLabel,
+                    getSortOrderLabel,
+
+                    // 工具函数
+                    formatTime,
+                    formatFileSize
+                };
             }
         });
-    };
 
-    // 初始化函数
-    const init = async () => {
-        // 设置事件监听器
-        setupEventListeners();
-
-        // 获取并渲染搜索源
-        const handlers = await api.getHandlers();
-        if (handlers.length > 0) {
-            state.handlers = handlers;
-            render.renderHandlers(handlers);
-        } else {
-            // 如果没有搜索源，显示错误提示
-            elements.handlerSelect.innerHTML = '<option value="" disabled selected>无法获取搜索源</option>';
-            elements.searchButton.disabled = true;
-            elements.searchButton.classList.add('opacity-50', 'cursor-not-allowed');
-            utils.showToast('无法获取搜索源，请稍后重试', true);
-        }
-    };
-
-    // 启动应用
-    init();
-</script>
+        app.mount('#app');
+    </script>
 </body>
+
 </html>
