@@ -6,8 +6,10 @@
     <title>转发下载工具</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.31/vue.global.prod.js"></script>
+    <!-- 引入公共JS -->
+    <script src="/static/js/common.js"></script>
 
-    <!-- 配置Tailwind自定义颜色 -->
     <script>
         tailwind.config = {
             theme: {
@@ -16,6 +18,7 @@
                         primary: '#249ffd',
                         secondary: '#0d47a1',
                         neutral: '#f0f4f8',
+                        dark: '#1e293b'
                     },
                     fontFamily: {
                         inter: ['Inter', 'system-ui', 'sans-serif'],
@@ -30,406 +33,546 @@
             .content-auto {
                 content-visibility: auto;
             }
-
             .shadow-soft {
                 box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
             }
-
             .gradient-bg {
                 background: linear-gradient(135deg, #249ffd 0%, #0d6efd 100%);
             }
-
             .transition-custom {
                 transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            .line-clamp-2 {
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
             }
         }
     </style>
 </head>
 <body class="font-inter bg-gray-50 min-h-screen">
-<!-- 顶部导航 -->
-<header class="gradient-bg text-white shadow-md">
-    <div class="container mx-auto px-4 py-4 flex justify-between items-center">
-        <div class="flex items-center space-x-2">
-            <i class="fas fa-download text-2xl"></i>
-            <h1 class="text-xl md:text-2xl font-bold">转发下载工具</h1>
-        </div>
-    </div>
-</header>
+    <div id="app">
+        <!-- Toast提示 -->
+        <common-toast ref="toastRef"></common-toast>
 
-<!-- 主要内容 -->
-<main class="container mx-auto px-4 py-8 md:py-16">
-    <div class="max-w-3xl mx-auto">
-        <!-- 介绍卡片 -->
-        <div class="bg-white rounded-xl shadow-soft p-6 mb-8">
-            <h2 class="text-xl font-semibold text-gray-800 mb-3">通过转发下载文件</h2>
-            <p class="text-gray-600 mb-4">
-                输入您想要下载的文件链接，系统将通过转发服务器为您下载该文件。支持各种类型的文件，包括文档、图片、视频等。</p>
+        <!-- 页面容器 -->
+        <div class="min-h-screen flex flex-col">
+            <!-- 头部 -->
+            <common-header title="转发下载工具" icon="fas fa-download" link="/">
+                <template #right>
+                    通过转发服务器下载文件
+                </template>
+            </common-header>
 
-            <!-- 输入区域 -->
-            <div class="relative mt-6">
-                <div class="flex">
-                    <input
-                            type="url"
-                            id="fileUrl"
-                            placeholder="请输入文件下载链接..."
-                            class="flex-1 px-4 py-3 rounded-l-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-custom"
-                    >
-                    <button
-                            id="downloadBtn"
-                            class="bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-r-lg font-medium transition-custom flex items-center"
-                    >
-                        <i class="fas fa-download mr-2"></i>开始下载
-                    </button>
-                </div>
-                <p id="urlError" class="text-red-500 text-sm mt-2 hidden">请输入有效的URL地址</p>
-            </div>
-        </div>
+            <!-- 主内容区 -->
+            <main class="flex-grow container mx-auto px-4 py-8 md:py-16">
+                <div class="max-w-3xl mx-auto">
+                    <!-- 介绍卡片 -->
+                    <div class="bg-white rounded-xl shadow-soft p-6 mb-8">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-3">通过转发下载文件</h2>
+                        <p class="text-gray-600 mb-4">
+                            输入您想要下载的文件链接，系统将通过转发服务器为您下载该文件。支持各种类型的文件，包括文档、图片、视频等。
+                        </p>
 
-        <!-- 下载状态卡片 -->
-        <div id="downloadStatus" class="bg-white rounded-xl shadow-soft p-6 mb-8 hidden">
-            <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-                <i class="fas fa-circle-notch fa-spin mr-2 text-primary"></i>
-                <span id="statusText">准备下载...</span>
-            </h2>
+                        <!-- 输入区域 -->
+                        <div class="relative mt-6">
+                            <div class="flex">
+                                <input
+                                    type="url"
+                                    v-model="fileUrl"
+                                    placeholder="请输入文件下载链接..."
+                                    class="flex-1 px-4 py-3 rounded-l-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-custom"
+                                    @keyup.enter="startDownload"
+                                >
+                                <button
+                                    @click="startDownload"
+                                    :disabled="isDownloading"
+                                    :class="[
+                                        'text-white px-6 py-3 rounded-r-lg font-medium transition-custom flex items-center',
+                                        isDownloading ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary hover:bg-primary/90'
+                                    ]"
+                                >
+                                    <i class="fas fa-download mr-2"></i>
+                                    {{ isDownloading ? '下载中...' : '开始下载' }}
+                                </button>
+                            </div>
+                            <p v-if="urlError" class="text-red-500 text-sm mt-2">{{ urlError }}</p>
+                        </div>
+                    </div>
 
-            <!-- 文件名 -->
-            <div class="mb-4">
-                <p class="text-sm text-gray-500">文件名</p>
-                <p id="fileName" class="text-gray-800 font-medium break-all">-</p>
-            </div>
+                    <!-- 下载状态卡片 -->
+                    <div v-if="showDownloadStatus" class="bg-white rounded-xl shadow-soft p-6 mb-8">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                            <i :class="['mr-2', downloadStatusIcon]"></i>
+                            <span>{{ statusText }}</span>
+                        </h2>
 
-            <!-- 进度条 -->
-            <div class="mb-4">
-                <div class="flex justify-between text-sm mb-1">
-                    <span class="text-gray-600">下载进度</span>
-                    <span id="progressPercent" class="text-primary font-medium">0%</span>
-                </div>
-                <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <div id="progressBar" class="h-full bg-primary rounded-full w-0 transition-all duration-300"></div>
-                </div>
-            </div>
+                        <!-- 文件名 -->
+                        <div class="mb-4">
+                            <p class="text-sm text-gray-500">文件名</p>
+                            <p class="text-gray-800 font-medium break-all">{{ fileName }}</p>
+                        </div>
 
-            <!-- 下载信息 -->
-            <div class="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                    <p class="text-gray-500">已下载</p>
-                    <p id="downloadedSize" class="text-gray-800 font-medium">0 KB</p>
-                </div>
-                <div>
-                    <p class="text-gray-500">速度</p>
-                    <p id="downloadSpeed" class="text-gray-800 font-medium">-</p>
-                </div>
-            </div>
+                        <!-- 进度条 -->
+                        <div v-if="showProgress" class="mb-4">
+                            <div class="flex justify-between text-sm mb-1">
+                                <span class="text-gray-600">下载进度</span>
+                                <span class="text-primary font-medium">{{ progressPercent }}%</span>
+                            </div>
+                            <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+                                <div 
+                                    class="h-full bg-primary rounded-full transition-all duration-300"
+                                    :style="{ width: progressPercent + '%' }"
+                                ></div>
+                            </div>
+                        </div>
 
-            <!-- 取消按钮 -->
-            <div class="mt-6">
-                <button id="cancelBtn"
-                        class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2 rounded-lg font-medium transition-custom">
-                    <i class="fas fa-times mr-2"></i>取消下载
-                </button>
-            </div>
-        </div>
+                        <!-- 下载信息 -->
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <p class="text-gray-500">已下载</p>
+                                <p class="text-gray-800 font-medium">{{ downloadedSize }}</p>
+                            </div>
+                            <div>
+                                <p class="text-gray-500">速度</p>
+                                <p class="text-gray-800 font-medium">{{ downloadSpeed }}</p>
+                            </div>
+                        </div>
 
-        <!-- 下载历史 -->
-        <div class="bg-white rounded-xl shadow-soft p-6">
-            <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-                <i class="fas fa-history mr-2 text-primary"></i>下载历史
-            </h2>
+                        <!-- 取消按钮 -->
+                        <div class="mt-6">
+                            <button 
+                                @click="cancelDownload"
+                                class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2 rounded-lg font-medium transition-custom"
+                            >
+                                <i class="fas fa-times mr-2"></i>取消下载
+                            </button>
+                        </div>
+                    </div>
 
-            <div id="downloadHistory" class="space-y-3">
-                <div class="text-center text-gray-500 py-8 border border-dashed border-gray-200 rounded-lg">
-                    <i class="fas fa-file-download text-3xl mb-2 text-gray-300"></i>
-                    <p>暂无下载历史</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</main>
+                    <!-- 下载历史 -->
+                    <div class="bg-white rounded-xl shadow-soft p-6">
+                        <!-- 修改点1：添加清除按钮的标题栏 -->
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-xl font-semibold text-gray-800 flex items-center">
+                                <i class="fas fa-history mr-2 text-primary"></i>
+                                <span>下载历史</span>
+                            </h2>
+                            <!-- 清除下载历史按钮：仅当有历史记录时显示 -->
+                            <button 
+                                v-if="downloadHistory.length > 0"
+                                @click="clearDownloadHistory"
+                                class="text-sm text-red-500 hover:text-red-600 flex items-center transition-custom"
+                            >
+                                <i class="fas fa-trash-alt mr-1"></i>
+                                清除历史
+                            </button>
+                        </div>
 
-<script>
-
-    // DOM元素
-    const fileUrlInput = document.getElementById('fileUrl');
-    const downloadBtn = document.getElementById('downloadBtn');
-    const urlError = document.getElementById('urlError');
-    const downloadStatus = document.getElementById('downloadStatus');
-    const statusText = document.getElementById('statusText');
-    const fileNameElement = document.getElementById('fileName');
-    const progressBar = document.getElementById('progressBar');
-    const progressPercent = document.getElementById('progressPercent');
-    const downloadedSize = document.getElementById('downloadedSize');
-    const downloadSpeed = document.getElementById('downloadSpeed');
-    const cancelBtn = document.getElementById('cancelBtn');
-    const downloadHistory = document.getElementById('downloadHistory');
-
-    // 变量
-    let abortController = null;
-    let downloadStartTime = 0;
-    let lastDownloadedBytes = 0;
-    let speedInterval = null;
-
-    // 格式化文件大小
-    function formatFileSize(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    }
-
-    // 从URL解析文件名
-    function getFileNameFromUrl(url) {
-        try {
-            const urlObj = new URL(url);
-            const pathname = urlObj.pathname;
-            const fileName = pathname.split('/').pop();
-            return fileName || 'downloaded_file';
-        } catch (e) {
-            return 'downloaded_file';
-        }
-    }
-
-    // 添加到下载历史
-    function addToHistory(fileName, status, url) {
-        const historyItem = document.createElement('div');
-        historyItem.className = 'flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-custom';
-
-        const statusClass = status === 'success' ? 'text-green-500' : 'text-red-500';
-        const statusIcon = status === 'success' ? 'check-circle' : 'times-circle';
-
-        historyItem.innerHTML = `
-                <div class="flex items-center">
-                    <i class="fas fa-file mr-3 text-primary"></i>
-                    <div>
-                        <p class="font-medium text-gray-800 break-all">${fileName}</p>
-                        <p class="text-xs text-gray-500 mt-0.5">${new Date().toLocaleString()}</p>
+                        <div class="space-y-3">
+                            <div v-if="downloadHistory.length === 0" 
+                                 class="text-center text-gray-500 py-8 border border-dashed border-gray-200 rounded-lg">
+                                <i class="fas fa-file-download text-3xl mb-2 text-gray-300"></i>
+                                <p>暂无下载历史</p>
+                            </div>
+                            
+                            <div v-for="item in downloadHistory" :key="item.id" 
+                                 class="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-custom">
+                                <div class="flex items-center">
+                                    <i class="fas fa-file mr-3 text-primary"></i>
+                                    <div>
+                                        <p class="font-medium text-gray-800 break-all">{{ item.fileName }}</p>
+                                        <p class="text-xs text-gray-500 mt-0.5">{{ formatTime(item.timestamp) }}</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center">
+                                    <span :class="['text-xs mr-3', 
+                                                  item.status === 'success' ? 'text-green-500' : 'text-red-500']">
+                                        <i :class="[item.status === 'success' ? 'fas fa-check-circle' : 'fas fa-times-circle']"></i>
+                                        {{ item.status === 'success' ? '完成' : '取消' }}
+                                    </span>
+                                    <button @click="copyUrl(item.url)" 
+                                            class="text-gray-400 hover:text-primary transition-custom">
+                                        <i class="fas fa-link"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="flex items-center">
-                    <span class="text-xs ${statusClass} mr-3"><i class="fas fa-${statusIcon}"></i> ${status === 'success' ? '完成' : '取消'}</span>
-                    <button class="text-gray-400 hover:text-primary transition-custom copy-url" data-url="${url}">
-                        <i class="fas fa-link"></i>
-                    </button>
-                </div>
-            `;
+            </main>
 
-        // 如果是第一个历史项，先清空"暂无历史"提示
-        if (downloadHistory.querySelector('.border-dashed')) {
-            downloadHistory.innerHTML = '';
-        }
+            <!-- 页脚 -->
+            <common-footer 
+                description="通过转发服务器下载文件，支持多种文件类型" 
+                copyright="© 2025 Gloduck">
+            </common-footer>
+        </div>
+    </div>
 
-        downloadHistory.prepend(historyItem);
+    <script>
+        const { createApp, ref, computed, onMounted } = Vue;
 
-        // 添加复制URL事件
-        historyItem.querySelector('.copy-url').addEventListener('click', function () {
-            const url = this.getAttribute('data-url');
-            navigator.clipboard.writeText(url).then(() => {
-                const originalIcon = this.innerHTML;
-                this.innerHTML = '<i class="fas fa-check"></i>';
-                this.classList.add('text-green-500');
-                setTimeout(() => {
-                    this.innerHTML = originalIcon;
-                    this.classList.remove('text-green-500');
-                }, 2000);
-            });
-        });
-    }
+        const app = createApp({
+            components: {
+                'common-header': CommonComponents.Header,
+                'common-footer': CommonComponents.Footer,
+                'common-toast': CommonComponents.Toast,
+            },
 
-    // 验证URL
-    function isValidUrl(url) {
-        try {
-            new URL(url);
-            return true;
-        } catch (e) {
-            return false;
-        }
-    }
-
-    // 开始下载
-    downloadBtn.addEventListener('click', startDownload);
-    fileUrlInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            startDownload();
-        }
-    });
-
-    function startDownload() {
-        const fileUrl = fileUrlInput.value.trim();
-
-        // 验证输入
-        if (!fileUrl || !isValidUrl(fileUrl)) {
-            urlError.classList.remove('hidden');
-            fileUrlInput.focus();
-            return;
-        }
-
-        urlError.classList.add('hidden');
-
-        // 编码目标URL，使用固定的转发服务器地址
-        const encodedUrl = encodeURIComponent(fileUrl);
-        const proxyUrl = `/forward/v1/proxy?url=${encodedUrl}`;
-
-        // 显示下载状态面板
-        downloadStatus.classList.remove('hidden');
-        statusText.textContent = '连接中...';
-        fileNameElement.textContent = getFileNameFromUrl(fileUrl);
-        progressBar.style.width = '0%';
-        progressPercent.textContent = '0%';
-        downloadedSize.textContent = '0 KB';
-        downloadSpeed.textContent = '-';
-
-        // 禁用下载按钮
-        downloadBtn.disabled = true;
-        downloadBtn.classList.add('opacity-70', 'cursor-not-allowed');
-
-        // 创建AbortController用于取消请求
-        abortController = new AbortController();
-
-        // 记录开始时间
-        downloadStartTime = Date.now();
-        lastDownloadedBytes = 0;
-
-        // 启动速度计算定时器
-        speedInterval = setInterval(calculateSpeed, 1000);
-
-        // 发送请求
-        fetch(proxyUrl, {
-            method: 'GET',
-            signal: abortController.signal,
-            headers: {
-                'Accept': '*/*'
-            }
-        }).then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP错误: ${response.status}`);
-            }
-
-            // 从响应头获取文件名
-            let fileName = getFileNameFromUrl(fileUrl);
-            const contentDisposition = response.headers.get('Content-Disposition');
-
-            if (contentDisposition && contentDisposition.includes('filename=')) {
-                // 提取文件名（处理可能的编码）
-                const fileNameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-                if (fileNameMatch && fileNameMatch[1]) {
-                    fileName = fileNameMatch[1].replace(/['"]/g, '');
-                    // 处理URL编码的文件名
-                    try {
-                        fileName = decodeURIComponent(fileName);
-                    } catch (e) {
-                        console.log('无法解码文件名:', e);
+            setup() {
+                // 公共工具函数
+                const formatTime = CommonUtils.formatTime;
+                const formatFileSize = CommonUtils.formatFileSize;
+                const showToast = (message, type) => {
+                    if (toastRef.value) {
+                        toastRef.value.show(message, type);
+                    } else {
+                        alert(message);
                     }
-                }
-            }
+                };
 
-            // 更新UI
-            fileNameElement.textContent = fileName;
-            statusText.textContent = '正在下载...';
+                // 响应式数据
+                const toastRef = ref(null);
+                const fileUrl = ref('');
+                const urlError = ref('');
+                const isDownloading = ref(false);
+                const showDownloadStatus = ref(false);
+                const showProgress = ref(false);
+                
+                // 下载状态
+                const statusText = ref('准备下载...');
+                const fileName = ref('-');
+                const progressPercent = ref(0);
+                const downloadedSize = ref('0 KB');
+                const downloadSpeed = ref('-');
+                
+                // 下载控制
+                let abortController = null;
+                let downloadStartTime = 0;
+                let lastDownloadedBytes = 0;
+                let speedInterval = null;
+                
+                // 下载历史
+                const downloadHistory = ref([]);
 
-            const contentLength = response.headers.get('Content-Length');
-            const totalBytes = contentLength ? parseInt(contentLength) : null;
+                // 计算下载状态图标
+                const downloadStatusIcon = computed(() => {
+                    if (statusText.value.includes('连接中') || statusText.value.includes('正在下载')) {
+                        return 'fas fa-circle-notch fa-spin text-primary';
+                    } else if (statusText.value.includes('完成')) {
+                        return 'fas fa-check-circle text-green-500';
+                    } else if (statusText.value.includes('失败') || statusText.value.includes('取消')) {
+                        return 'fas fa-times-circle text-red-500';
+                    }
+                    return 'fas fa-circle-notch text-primary';
+                });
 
-            // 处理响应流
-            const reader = response.body.getReader();
-            const chunks = [];
-            let receivedBytes = 0;
+                // 从URL解析文件名
+                const getFileNameFromUrl = (url) => {
+                    try {
+                        const urlObj = new URL(url);
+                        const pathname = urlObj.pathname;
+                        const fileName = pathname.split('/').pop();
+                        return fileName || 'downloaded_file';
+                    } catch (e) {
+                        return 'downloaded_file';
+                    }
+                };
 
-            function readChunk() {
-                return reader.read().then(({done, value}) => {
-                    if (done) {
-                        // 下载完成，创建Blob并下载
-                        const blob = new Blob(chunks);
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = fileName;
-                        document.body.appendChild(a);
-                        a.click();
-                        URL.revokeObjectURL(url);
-                        document.body.removeChild(a);
+                // 验证URL
+                const isValidUrl = (url) => {
+                    try {
+                        new URL(url);
+                        return true;
+                    } catch (e) {
+                        return false;
+                    }
+                };
 
-                        // 更新状态
-                        statusText.textContent = '下载完成';
-                        progressBar.style.width = '100%';
-                        progressPercent.textContent = '100%';
-                        downloadSpeed.textContent = '-';
+                // 添加到下载历史
+                const addToHistory = (fileName, status, url) => {
+                    const historyItem = {
+                        id: Date.now(),
+                        fileName: fileName,
+                        status: status,
+                        url: url,
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    downloadHistory.value.unshift(historyItem);
+                    
+                    // 限制历史记录数量
+                    if (downloadHistory.value.length > 20) {
+                        downloadHistory.value = downloadHistory.value.slice(0, 20);
+                    }
+                    
+                    // 保存到localStorage
+                    try {
+                        localStorage.setItem('downloadHistory', JSON.stringify(downloadHistory.value.slice(0, 10)));
+                    } catch (e) {
+                        console.error('保存历史记录失败:', e);
+                    }
+                };
 
-                        // 添加到历史记录
-                        addToHistory(fileName, 'success', fileUrl);
+                // 复制URL
+                const copyUrl = (url) => {
+                    CommonUtils.copyToClipboard(url, showToast);
+                };
 
+                // 计算下载速度
+                const calculateSpeed = () => {
+                    if (!isDownloading.value) return;
+                    
+                    const currentTime = Date.now();
+                    const elapsedTime = (currentTime - downloadStartTime) / 1000;
+                    
+                    if (elapsedTime > 0) {
+                        const currentBytesText = downloadedSize.value;
+                        const match = currentBytesText.match(/([\d.]+)\s*(\w+)/);
+                        
+                        if (match) {
+                            const value = parseFloat(match[1]);
+                            const unit = match[2];
+                            const bytes = value * {
+                                'Bytes': 1,
+                                'KB': 1024,
+                                'MB': 1024 * 1024,
+                                'GB': 1024 * 1024 * 1024
+                            }[unit] || 0;
+                            
+                            const bytesSinceLastCheck = bytes - lastDownloadedBytes;
+                            lastDownloadedBytes = bytes;
+                            
+                            downloadSpeed.value = formatFileSize(bytesSinceLastCheck) + '/s';
+                        }
+                    }
+                };
+
+                // 开始下载
+                const startDownload = async () => {
+                    const url = fileUrl.value.trim();
+                    
+                    // 验证输入
+                    if (!url || !isValidUrl(url)) {
+                        urlError.value = '请输入有效的URL地址';
                         return;
                     }
-
-                    chunks.push(value);
-                    receivedBytes += value.length;
-
-                    // 更新进度
-                    if (totalBytes) {
-                        const percent = Math.round((receivedBytes / totalBytes) * 100);
-                        progressBar.style.width = `${percent}%`;
-                        progressPercent.textContent = `${percent}%`;
+                    
+                    urlError.value = '';
+                    
+                    // 编码目标URL，使用固定的转发服务器地址
+                    const encodedUrl = encodeURIComponent(url);
+                    const proxyUrl = `/forward/v1/proxy?url=${encodedUrl}`;
+                    
+                    // 显示下载状态面板
+                    isDownloading.value = true;
+                    showDownloadStatus.value = true;
+                    showProgress.value = true;
+                    statusText.value = '连接中...';
+                    fileName.value = getFileNameFromUrl(url);
+                    progressPercent.value = 0;
+                    downloadedSize.value = '0 KB';
+                    downloadSpeed.value = '-';
+                    
+                    // 创建AbortController用于取消请求
+                    abortController = new AbortController();
+                    
+                    // 记录开始时间
+                    downloadStartTime = Date.now();
+                    lastDownloadedBytes = 0;
+                    
+                    // 启动速度计算定时器
+                    clearInterval(speedInterval);
+                    speedInterval = setInterval(calculateSpeed, 1000);
+                    
+                    try {
+                        const response = await fetch(proxyUrl, {
+                            method: 'GET',
+                            signal: abortController.signal,
+                            headers: {
+                                'Accept': '*/*'
+                            }
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error(`HTTP错误: ${response.status}`);
+                        }
+                        
+                        // 从响应头获取文件名
+                        let finalFileName = getFileNameFromUrl(url);
+                        const contentDisposition = response.headers.get('Content-Disposition');
+                        
+                        if (contentDisposition && contentDisposition.includes('filename=')) {
+                            const fileNameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                            if (fileNameMatch && fileNameMatch[1]) {
+                                finalFileName = fileNameMatch[1].replace(/['"]/g, '');
+                                try {
+                                    finalFileName = decodeURIComponent(finalFileName);
+                                } catch (e) {
+                                    console.log('无法解码文件名:', e);
+                                }
+                            }
+                        }
+                        
+                        // 更新UI
+                        fileName.value = finalFileName;
+                        statusText.value = '正在下载...';
+                        
+                        const contentLength = response.headers.get('Content-Length');
+                        const totalBytes = contentLength ? parseInt(contentLength) : null;
+                        
+                        // 处理响应流
+                        const reader = response.body.getReader();
+                        const chunks = [];
+                        let receivedBytes = 0;
+                        
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            
+                            if (done) {
+                                // 下载完成，创建Blob并下载
+                                const blob = new Blob(chunks);
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = finalFileName;
+                                document.body.appendChild(a);
+                                a.click();
+                                URL.revokeObjectURL(url);
+                                document.body.removeChild(a);
+                                
+                                // 更新状态
+                                statusText.value = '下载完成';
+                                progressPercent.value = 100;
+                                downloadSpeed.value = '-';
+                                
+                                // 添加到历史记录
+                                addToHistory(finalFileName, 'success', fileUrl.value);
+                                showToast('下载完成', 'success');
+                                
+                                break;
+                            }
+                            
+                            chunks.push(value);
+                            receivedBytes += value.length;
+                            
+                            // 更新进度
+                            if (totalBytes) {
+                                const percent = Math.round((receivedBytes / totalBytes) * 100);
+                                progressPercent.value = percent;
+                            }
+                            
+                            // 更新已下载大小
+                            downloadedSize.value = formatFileSize(receivedBytes);
+                        }
+                    } catch (error) {
+                        if (error.name !== 'AbortError') {
+                            console.error('下载错误:', error);
+                            statusText.value = `下载失败: ${error.message}`;
+                            downloadSpeed.value = '-';
+                            showToast(`下载失败: ${error.message}`, 'error');
+                            
+                            // 添加到历史记录
+                            addToHistory(fileName.value, 'failed', fileUrl.value);
+                        } else {
+                            statusText.value = '下载已取消';
+                            showToast('下载已取消', 'warning');
+                        }
+                    } finally {
+                        // 清理
+                        clearInterval(speedInterval);
+                        isDownloading.value = false;
+                        showProgress.value = false;
+                        abortController = null;
+                        
+                        // 3秒后自动隐藏下载状态
+                        setTimeout(() => {
+                            if (!isDownloading.value) {
+                                showDownloadStatus.value = false;
+                            }
+                        }, 3000);
                     }
+                };
 
-                    // 更新已下载大小
-                    downloadedSize.textContent = formatFileSize(receivedBytes);
+                // 取消下载
+                const cancelDownload = () => {
+                    if (abortController) {
+                        abortController.abort();
+                        statusText.value = '下载已取消';
+                        downloadSpeed.value = '-';
+                        
+                        // 添加到历史记录
+                        addToHistory(fileName.value, 'cancelled', fileUrl.value);
+                        showToast('下载已取消', 'warning');
+                    }
+                };
 
-                    return readChunk();
+                // 加载历史记录
+                const loadHistory = () => {
+                    try {
+                        const savedHistory = localStorage.getItem('downloadHistory');
+                        if (savedHistory) {
+                            downloadHistory.value = JSON.parse(savedHistory);
+                        }
+                    } catch (e) {
+                        console.error('加载历史记录失败:', e);
+                    }
+                };
+
+                // 修改点2：添加清除下载历史的方法
+                const clearDownloadHistory = () => {
+                    // 确认是否清除（可选：增加确认提示提升用户体验）
+                    if (confirm('确定要清除所有下载历史吗？此操作不可恢复！')) {
+                        // 清空内存中的历史记录
+                        downloadHistory.value = [];
+                        // 删除本地存储中的历史记录
+                        try {
+                            localStorage.removeItem('downloadHistory');
+                            showToast('下载历史已清空', 'success');
+                        } catch (e) {
+                            console.error('清除本地历史记录失败:', e);
+                            showToast('清除历史记录失败', 'error');
+                        }
+                    }
+                };
+
+                // 页面加载时初始化
+                onMounted(() => {
+                    loadHistory();
                 });
-            }
 
-            return readChunk();
-        }).catch(error => {
-            if (error.name !== 'AbortError') {
-                console.error('下载错误:', error);
-                statusText.textContent = `下载失败: ${error.message}`;
-                downloadSpeed.textContent = '-';
+                return {
+                    // 数据
+                    toastRef,
+                    fileUrl,
+                    urlError,
+                    isDownloading,
+                    showDownloadStatus,
+                    showProgress,
+                    statusText,
+                    fileName,
+                    progressPercent,
+                    downloadedSize,
+                    downloadSpeed,
+                    downloadHistory,
+                    
+                    // 计算属性
+                    downloadStatusIcon,
+                    
+                    // 方法
+                    formatTime,
+                    startDownload,
+                    cancelDownload,
+                    copyUrl,
+                    // 修改点3：暴露清除历史的方法
+                    clearDownloadHistory
+                };
             }
-        }).finally(() => {
-            // 清理
-            clearInterval(speedInterval);
-            downloadBtn.disabled = false;
-            downloadBtn.classList.remove('opacity-70', 'cursor-not-allowed');
-            abortController = null;
         });
-    }
 
-    // 计算下载速度
-    function calculateSpeed() {
-        if (!abortController) return;
-
-        const currentTime = Date.now();
-        const elapsedTime = (currentTime - downloadStartTime) / 1000; // 秒
-
-        if (elapsedTime > 0) {
-            const currentBytesText = downloadedSize.textContent;
-            // 提取数值部分并转换为字节
-            const [value, unit] = currentBytesText.split(' ');
-            const bytes = parseFloat(value) * {
-                'Bytes': 1,
-                'KB': 1024,
-                'MB': 1024 * 1024,
-                'GB': 1024 * 1024 * 1024
-            }[unit] || 0;
-
-            const bytesSinceLastCheck = bytes - lastDownloadedBytes;
-            lastDownloadedBytes = bytes;
-
-            const speed = bytesSinceLastCheck; // 每秒字节数
-            downloadSpeed.textContent = formatFileSize(speed) + '/s';
-        }
-    }
-
-    // 取消下载
-    cancelBtn.addEventListener('click', () => {
-        if (abortController) {
-            abortController.abort();
-            statusText.textContent = '下载已取消';
-            downloadSpeed.textContent = '-';
-
-            // 添加到历史记录
-            addToHistory(fileNameElement.textContent, 'cancelled', fileUrlInput.value.trim());
-        }
-    });
-</script>
+        app.mount('#app');
+    </script>
 </body>
 </html>
