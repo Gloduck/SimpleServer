@@ -126,7 +126,6 @@
                                 <div class="flex flex-wrap gap-4">
                                     <div class="flex items-center gap-2">
                                         <input type="checkbox" id="auto-copy" v-model="settings.autoCopy"
-                                            @change="saveSettings"
                                             class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500">
                                         <label for="auto-copy" class="text-gray-700 cursor-pointer select-none">
                                             服务器更新时自动复制到剪贴板
@@ -144,7 +143,6 @@
 
                                     <div class="flex items-center gap-2">
                                         <input type="checkbox" id="auto-save" v-model="settings.autoSave"
-                                            @change="saveSettings"
                                             class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500">
                                         <label for="auto-save" class="text-gray-700 cursor-pointer select-none">
                                             自动保存
@@ -153,23 +151,22 @@
                                 </div>
 
                                 <div class="flex flex-wrap gap-3">
-                                    <button @click="deleteClipboard" :disabled="isDeleted"
+                                    <button @click="deleteClipboard" :disabled="!editorExist"
                                         :class="['px-4 py-2 rounded-lg font-medium transition-all duration-300 flex items-center gap-2',
-                                                     isDeleted ? 'bg-gray-300 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 text-white']">
+                                                     !editorExist ? 'bg-gray-300 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 text-white']">
                                         <i class="fas fa-trash-alt"></i>
                                         删除剪贴板
                                     </button>
 
-                                    <button @click="saveContent" :disabled="isDeleted"
-                                        :class="['px-4 py-2 rounded-lg font-medium transition-all duration-300 flex items-center gap-2',
-                                                     isDeleted ? 'bg-gray-300 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600 text-white']">
+                                    <button @click="saveContent" :class="['px-4 py-2 rounded-lg font-medium transition-all duration-300 flex items-center gap-2',
+                                                    'bg-green-500 hover:bg-green-600 text-white']">
                                         <i class="fas fa-save"></i>
                                         保存内容
                                     </button>
 
-                                    <button @click="copyToClipboard" :disabled="isDeleted"
+                                    <button @click="copyToClipboard" :disabled="!editorExist"
                                         :class="['px-4 py-2 rounded-lg font-medium transition-all duration-300 flex items-center gap-2',
-                                                     isDeleted ? 'bg-gray-300 cursor-not-allowed' : 'bg-purple-500 hover:bg-purple-600 text-white']">
+                                                     !editorExist ? 'bg-gray-300 cursor-not-allowed' : 'bg-purple-500 hover:bg-purple-600 text-white']">
                                         <i class="fas fa-copy"></i>
                                         复制内容
                                     </button>
@@ -179,7 +176,7 @@
                             <!-- 右侧控制 -->
                             <div class="lg:w-48">
                                 <label class="block text-sm font-medium text-gray-700 mb-2">格式选择</label>
-                                <select v-model="settings.format" :disabled="isDeleted" @change="onFormatChange"
+                                <select v-model="settings.format"
                                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                                     <option value="text">纯文本</option>
                                     <option value="application/json">JSON</option>
@@ -200,7 +197,7 @@
                     <section class="bg-white rounded-xl shadow-lg p-6 mb-6">
                         <div class="mb-4 flex justify-between items-center">
                             <h3 class="text-lg font-semibold text-gray-800">内容编辑器</h3>
-                            <span class="text-sm text-gray-500">状态: {{ editorStatus }}</span>
+                            <span class="text-sm text-gray-500">状态: {{ editorStatusInfo }}</span>
                         </div>
 
                         <div id="editor-container" class="rounded-lg overflow-hidden border border-gray-200">
@@ -332,9 +329,9 @@
 
                 // 编辑器相关
                 let editor = null;
-                const editorStatus = ref('就绪');
+                const editorStatusInfo = ref('就绪');
+                const editorExist = ref(false);
                 const lastUpdated = ref('');
-                const isDeleted = ref(false);
 
                 // 默认设置
                 const defaultSettings = {
@@ -407,14 +404,14 @@
                     // 如果最近3秒内有用户编辑，跳过此次更新
                     const now = Date.now();
                     if (now - lastUserEditTime < 3000) {
-                        editorStatus.value = "跳过更新（编辑中）";
+                        editorStatusInfo.value = "跳过更新（编辑中）";
                         return;
                     }
 
 
                     try {
                         isUpdatingFromServer = true;
-                        editorStatus.value = "正在获取内容...";
+                        editorStatusInfo.value = "正在获取内容...";
                         const beforeValue = editor ? editor.getValue() : '';
 
                         const response = await fetch(`/api/clipboard/query?id=${clipboardId.value}`);
@@ -422,18 +419,20 @@
 
                         if (data.code === 200) {
                             if (data.data === null) {
-                                editorStatus.value = "新建";
+                                editorStatusInfo.value = "新建";
                                 lastUpdated.value = "从未更新";
+                                editorExist.value = false;
                                 return;
                             }
 
+                            editorExist.value = true;
                             // 只有在内容不同时才更新编辑器
                             const newValue = data.data.content;
                             if (beforeValue !== newValue) {
                                 if (editor) editor.setValue(newValue);
-                                editorStatus.value = "内容已更新";
+                                editorStatusInfo.value = "内容已更新";
                             } else {
-                                editorStatus.value = "内容已是最新";
+                                editorStatusInfo.value = "内容已是最新";
                             }
 
                             lastUpdated.value = formatTime(data.data.updateDate);
@@ -444,11 +443,11 @@
                             }
                         } else {
                             showToast(`错误: ${data.msg}`, 'error');
-                            editorStatus.value = "获取失败";
+                            editorStatusInfo.value = "获取失败";
                         }
                     } catch (error) {
                         showToast(`网络错误: ${error.message}`, 'error');
-                        editorStatus.value = "网络错误";
+                        editorStatusInfo.value = "网络错误";
                     } finally {
                         isUpdatingFromServer = false;
                     }
@@ -459,15 +458,12 @@
                     if (!clipboardId.value || !editor) {
                         return;
                     }
-                    if (isDeleted.value) {
-                        return;
-                    }
 
                     const content = editor.getValue();
                     const contentType = 'text';
 
                     try {
-                        editorStatus.value = "正在保存...";
+                        editorStatusInfo.value = "正在保存...";
                         const response = await fetch('/api/clipboard/save', {
                             method: 'POST',
                             headers: {
@@ -484,16 +480,17 @@
                         if (data.code === 200) {
                             showToast("内容保存成功!", 'success');
                             lastUpdated.value = formatTime(Date.now());
-                            editorStatus.value = "保存成功";
+                            editorExist.value = true;
+                            editorStatusInfo.value = "保存成功";
                             return true;
                         } else {
                             showToast(`保存失败: ${data.msg}`, 'error');
-                            editorStatus.value = "保存失败";
+                            editorStatusInfo.value = "保存失败";
                             return false;
                         }
                     } catch (error) {
                         showToast(`网络错误: ${error.message}`, 'error');
-                        editorStatus.value = "网络错误";
+                        editorStatusInfo.value = "网络错误";
                         return false;
                     }
                 };
@@ -507,7 +504,7 @@
                     }
 
                     try {
-                        editorStatus.value = "正在删除...";
+                        editorStatusInfo.value = "正在删除...";
                         const response = await fetch(`/api/clipboard/delete?id=${clipboardId.value}`, {
                             method: 'DELETE'
                         });
@@ -516,8 +513,8 @@
                         if (data.code === 200) {
                             showToast("剪贴板已成功删除", 'success');
                             if (editor) editor.setValue("");
-                            editorStatus.value = "已删除";
-                            isDeleted.value = true;
+                            editorStatusInfo.value = "已删除";
+                            editorExist.value = false;
 
                             // 禁用自动刷新
                             if (refreshInterval) {
@@ -526,11 +523,11 @@
                             }
                         } else {
                             showToast(`删除失败: ${data.msg}`, 'error');
-                            editorStatus.value = "删除失败";
+                            editorStatusInfo.value = "删除失败";
                         }
                     } catch (error) {
                         showToast(`网络错误: ${error.message}`, 'error');
-                        editorStatus.value = "网络错误";
+                        editorStatusInfo.value = "网络错误";
                     }
                 };
 
@@ -546,10 +543,8 @@
                 const onAutoRefreshChange = () => {
                     if (settings.value.autoRefresh) {
                         startAutoRefresh();
-                        showToast('自动刷新已开启', 'success');
                     } else {
                         stopAutoRefresh();
-                        showToast('自动刷新已关闭', 'info');
                     }
                 };
 
@@ -576,19 +571,14 @@
 
                     if (settings.value.autoSave) {
                         autoSaveTimeout = setTimeout(async () => {
+                            if (!editorExist.value && !editor.getValue()) {
+                                return;
+                            }
                             const success = await saveContent();
                             if (success) {
                                 showToast("内容已自动保存", 'success');
                             }
                         }, 1000);
-                    }
-                };
-
-                // 格式更改处理
-                const onFormatChange = () => {
-                    if (editor) {
-                        editor.setOption("mode", settings.value.format);
-                        showToast(`编辑器格式已切换为: ${settings.value.format}`, 'info');
                     }
                 };
 
@@ -701,9 +691,9 @@
                     clipboardId,
                     newClipboardId,
                     toastRef,
-                    editorStatus,
+                    editorExist,
+                    editorStatusInfo,
                     lastUpdated,
-                    isDeleted,
                     settings,
                     examples,
 
@@ -714,7 +704,6 @@
                     deleteClipboard,
                     copyToClipboard,
                     onAutoRefreshChange,
-                    onFormatChange,
                     saveSettings
                 };
             }
