@@ -43,10 +43,7 @@ public class OnlineClipBoardController {
     }
 
     public ControllerHandler index() {
-        return new ClassPathFileHandler(Arrays.asList("/clipboard", "/clipboard/"), "static/clipboard/index.html");
-    }
-
-    public ControllerHandler clipboard() {
-        return new ClassPathFileHandler("/clipboard/*", "static/clipboard/clipboard.html");
+        return new ClassPathFileHandler(Arrays.asList("/clipboard", "/clipboard/", "/clipboard/*"),
+                "static/clipboard/index.html");
     }
 }

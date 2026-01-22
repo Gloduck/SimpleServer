@@ -74,7 +74,7 @@ const CommonUtils = {
         }
     },
 
-    handleTorrentApiError: (error, resultHandler) => {
+    handleApiError: (error, resultHandler) => {
         console.error('API请求错误:', error);
         let message = '请求失败';
 
