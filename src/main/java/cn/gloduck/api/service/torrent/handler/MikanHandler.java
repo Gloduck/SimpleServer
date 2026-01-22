@@ -78,7 +78,7 @@ public class MikanHandler extends AbstractTorrentHandler{
             while (matcher.find()) {
                 tds.add(matcher.group(1));
             }
-            if (tds.size() != 5) {
+            if (tds.size() != 6) {
                 continue;
             }
             Matcher hashMatcher = MAGNET_HASH_PATTERN.matcher(tds.get(0));
@@ -86,16 +86,16 @@ public class MikanHandler extends AbstractTorrentHandler{
             if (hash == null) {
                 continue;
             }
-            String name = StringUtils.subBetween(tds.get(0), String.format("<a href=\"/Home/Episode/%s\" target=\"_blank\" class=\"magnet-link-wrap\">", hash), "</a>");
+            String name = StringUtils.subBetween(tds.get(1), String.format("class=\"magnet-link-wrap\">", hash), "</a>");
             name = unescapeHtml(name);
-            String sizeStr = tds.get(1).trim();
+            String sizeStr = tds.get(2).trim();
 
             TorrentInfo torrentInfo = new TorrentInfo();
             torrentInfo.setId(hash);
             torrentInfo.setName(name);
             torrentInfo.setHash(hash.toUpperCase());
             torrentInfo.setSize(convertSizeUnit(sizeStr));
-            torrentInfo.setUploadTime(convertUploadTime(tds.get(2).trim(), SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
+            torrentInfo.setUploadTime(convertUploadTime(tds.get(3).trim(), SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
             torrentInfos.add(torrentInfo);
         }
         if(sortField != null && !sortField.isEmpty()){
