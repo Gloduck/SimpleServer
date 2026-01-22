@@ -163,7 +163,6 @@ const CommonComponents = {
             <header class="bg-white shadow-md py-3">
                 <div class="container mx-auto px-4">
                     <div class="flex items-center justify-between">
-                        <!-- 标题+图标区域 -->
                         <div class="flex items-center cursor-pointer" 
                              :class="{ 'hover:text-primary transition-colors': link }"
                              @click="handleHeaderClick">
@@ -172,7 +171,6 @@ const CommonComponents = {
                                 <span class="text-primary">{{ title }}</span>
                             </h1>
                         </div>
-                        <!-- 右侧插槽（可选） -->
                         <p v-if="$slots.right" class="text-gray-600 text-sm">
                             <slot name="right"></slot>
                         </p>
@@ -200,15 +198,31 @@ const CommonComponents = {
             copyright: {
                 type: String,
                 default: ''
+            },
+            // 链接数组（可选，不传则不显示）
+            links: {
+                type: Array,
+                default: () => []
             }
         },
         template: `
-            <footer class="bg-dark text-white py-4">
-                <div class="container mx-auto px-4 text-center">
-                    <!-- 描述文本 -->
-                    <p v-if="description" class="text-gray-400 text-sm mb-2">{{ description }}</p>
-                    <!-- 版权信息 -->
-                    <p v-if="copyright" class="text-gray-500 text-xs">{{ copyright }}</p>
+            <footer class="bg-dark text-white py-6">
+                <div class="container mx-auto px-4">
+                    <p v-if="description" class="text-gray-400 text-sm text-center mb-4">{{ description }}</p>
+                    
+                    <div v-if="links && links.length > 0" class="flex justify-center items-center gap-6 mb-4">
+                        <a v-for="(link, index) in links" 
+                           :key="index"
+                           :href="link.url" 
+                           :title="link.name || link.icon"
+                           target="_blank"
+                           class="text-gray-300 hover:text-white transition-colors duration-300 transform hover:scale-110">
+                            <i v-if="link.icon" :class="[link.icon, 'text-2xl']"></i>
+                            <span v-else-if="link.name" class="text-sm">{{ link.name }}</span>
+                        </a>
+                    </div>
+                    
+                    <p v-if="copyright" class="text-gray-500 text-xs text-center">{{ copyright }}</p>
                 </div>
             </footer>
         `

@@ -1,537 +1,315 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>工具导航</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.31/vue.global.prod.js"></script>
+
+    <!-- 引入公共JS -->
+    <script src="/static/js/common.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#249ffd',
+                        secondary: '#1a88e8',
+                        neutral: '#f0f4f8',
+                        dark: '#1e293b'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+
     <style>
-        :root {
-            --primary-color: #249ffd;
-            --secondary-color: #31a3fc;
-            --light-bg: #f8f9fa;
-            --card-bg: #ffffff;
-            --text-color: #333333;
-            --text-light: #6c757d;
-            --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            --transition: all 0.3s ease;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #f5f7fa 0%, #e4e7f1 100%);
-            color: var(--text-color);
-            min-height: 100vh;
-            padding: 20px;
-            line-height: 1.6;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        /* 头部样式 */
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 20px;
-            padding: 20px 0;
-            margin-bottom: 30px;
-        }
-
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .logo i {
-            font-size: 2.2rem;
-            color: var(--primary-color);
-        }
-
-        .logo h1 {
-            font-size: 1.8rem;
-            font-weight: 700;
-            background: linear-gradient(45deg, var(--primary-color), var(--secondary-color));
+        .gradient-text {
+            background: linear-gradient(45deg, #249ffd, #31a3fc);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
-        .time-section {
+        .glass-effect {
             background: rgba(255, 255, 255, 0.7);
-            padding: 15px 25px;
-            border-radius: 50px;
-            box-shadow: var(--shadow);
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            backdrop-filter: blur(5px);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
         }
 
-        .time-display {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: var(--primary-color);
+        .card-hover {
+            transition: all 0.3s ease;
         }
 
-        .date-display {
-            font-size: 0.9rem;
-            color: var(--text-light);
-        }
-
-        /* 搜索区域 */
-        .search-section {
-            width: 100%;
-            margin: 20px 0 40px;
-        }
-
-        .search-box {
-            max-width: 600px;
-            margin: 0 auto;
-            position: relative;
-        }
-
-        .search-box input {
-            width: 100%;
-            padding: 16px 20px 16px 50px;
-            border: none;
-            border-radius: 50px;
-            font-size: 1rem;
-            box-shadow: var(--shadow);
-            background: rgba(255, 255, 255, 0.9);
-            transition: var(--transition);
-        }
-
-        .search-box input:focus {
-            outline: none;
-            box-shadow: 0 6px 16px rgba(67, 97, 238, 0.2);
-        }
-
-        .search-box i {
-            position: absolute;
-            left: 20px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--text-light);
-            font-size: 1.2rem;
-        }
-
-        /* 工具卡片区域 */
-        .tools-section {
-            margin-bottom: 40px;
-        }
-
-        .section-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 25px;
-        }
-
-        .section-title {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: var(--text-color);
-            position: relative;
-            padding-left: 15px;
-        }
-
-        .section-title::before {
-            content: '';
-            position: absolute;
-            left: 0;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 5px;
-            height: 70%;
-            background: var(--primary-color);
-            border-radius: 3px;
-        }
-
-        .tools-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 25px;
-        }
-
-        .tool-card {
-            background: var(--card-bg);
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: var(--shadow);
-            transition: var(--transition);
-            position: relative;
-            height: 180px;
-            display: flex;
-            flex-direction: column;
-            cursor: pointer;
-        }
-
-        .tool-card:hover {
+        .card-hover:hover {
             transform: translateY(-8px);
             box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
         }
 
-        .card-header {
-            height: 40px;
-            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
-            display: flex;
-            align-items: center;
-            padding: 0 20px;
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
         }
 
-        .card-header i {
-            color: white;
-            font-size: 1.2rem;
-        }
-
-        .card-body {
-            padding: 20px;
-            flex-grow: 1;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .tool-name {
-            font-size: 1.2rem;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: var(--text-color);
-        }
-
-        .tool-desc {
-            font-size: 0.9rem;
-            color: var(--text-light);
-            flex-grow: 1;
-        }
-
-        .card-footer {
-            padding: 0 20px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .tool-link {
-            color: var(--primary-color);
-            text-decoration: none;
-            font-weight: 500;
-            font-size: 0.9rem;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        .tool-link:hover {
-            text-decoration: underline;
-        }
-
-        .tool-badge {
-            background: #e9ecef;
-            color: var(--text-light);
-            font-size: 0.75rem;
-            padding: 4px 10px;
-            border-radius: 12px;
-        }
-
-        /* 其他组件区域 */
-        .widgets-section {
-            margin-bottom: 40px;
-        }
-
-        .widgets-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 25px;
-        }
-
-        .widget-card {
-            background: var(--card-bg);
-            border-radius: 16px;
-            padding: 25px;
-            box-shadow: var(--shadow);
-        }
-
-        .widget-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: var(--primary-color);
-        }
-
-        .quick-links {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-        }
-
-        .link-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 10px 15px;
-            border-radius: 12px;
-            background: var(--light-bg);
-            transition: var(--transition);
-            cursor: pointer;
-            text-decoration: none;
-            color: var(--text-color);
-        }
-
-        .link-item:hover {
-            background: #e9ecef;
-            transform: translateX(5px);
-        }
-
-        .link-item i {
-            color: var(--primary-color);
-            font-size: 1.1rem;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-        }
-
-        .stat-card {
-            background: var(--light-bg);
-            border-radius: 12px;
-            padding: 15px;
-            text-align: center;
-        }
-
-        .stat-value {
-            font-size: 1.8rem;
-            font-weight: 700;
-            color: var(--primary-color);
-            margin-bottom: 5px;
-        }
-
-        .stat-label {
-            font-size: 0.85rem;
-            color: var(--text-light);
-        }
-
-        /* 加载状态 */
-        .loader {
-            text-align: center;
-            padding: 40px;
-        }
-
-        .loader-spinner {
-            width: 50px;
-            height: 50px;
-            border: 5px solid rgba(67, 97, 238, 0.2);
-            border-top: 5px solid var(--primary-color);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /* 页脚 */
-        footer {
-            text-align: center;
-            padding: 30px 0;
-            color: var(--text-light);
-            font-size: 0.9rem;
-            border-top: 1px solid rgba(0, 0, 0, 0.05);
-            margin-top: 20px;
-        }
-
-        /* 响应式设计 */
-        @media (max-width: 768px) {
-            header {
-                flex-direction: column;
-                text-align: center;
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
             }
 
-            .logo {
-                justify-content: center;
-            }
-
-            .time-section {
-                width: 100%;
-                justify-content: center;
-            }
-
-            .tools-grid {
-                grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            }
-
-            .widgets-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .quick-links {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        @media (max-width: 480px) {
-            .tools-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .time-section {
-                flex-direction: column;
-                gap: 8px;
-                padding: 15px;
-                border-radius: 16px;
+            to {
+                opacity: 1;
+                transform: translateY(0);
             }
         }
     </style>
 </head>
-<body>
-<div class="container">
-    <!-- 头部区域 -->
-    <header>
-        <div class="logo">
-            <i class="fas fa-tools"></i>
-            <h1>工具导航</h1>
-        </div>
 
-        <div class="time-section">
-            <div class="date-display" id="dateDisplay">2023年10月15日 星期日</div>
-            <div class="time-display" id="timeDisplay">14:30:45</div>
-        </div>
-    </header>
+<body class="bg-gradient-to-br from-blue-50 to-gray-100 font-sans text-dark min-h-screen">
+    <div id="app">
+        <!-- 页面容器 -->
+        <div class="min-h-screen flex flex-col">
+            <!-- 头部 -->
+            <common-header title="工具导航" icon="fas fa-tools" link="/">
+                <template #right>
+                    常用小工具集合
+                </template>
+            </common-header>
 
-    <!-- 搜索区域 -->
-    <div class="search-section">
-        <div class="search-box">
-            <i class="fas fa-search"></i>
-            <input type="text" placeholder="搜索工具...">
+            <!-- 主内容区 -->
+            <main class="flex-grow container mx-auto px-4 py-8">
+                <!-- 搜索区域 -->
+                <div class="max-w-3xl mx-auto mb-12">
+                    <div class="relative">
+                        <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg"></i>
+                        <input type="text" v-model="searchKeyword" placeholder="搜索工具名称、描述或分类..."
+                            class="w-full pl-12 pr-4 py-4 rounded-xl border border-gray-300 focus:border-primary focus:ring-4 focus:ring-primary/20 outline-none transition-all shadow-lg bg-white/80">
+                        <div v-if="searchKeyword" class="absolute right-4 top-1/2 -translate-y-1/2">
+                            <button @click="searchKeyword = ''"
+                                class="text-gray-400 hover:text-gray-600 transition-colors">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <p class="text-gray-500 text-sm mt-2 ml-1">
+                        共 {{ filteredTools.length }} 个工具 {{ searchKeyword ? `(搜索到 ${filteredTools.length} 个结果)` : '' }}
+                    </p>
+                </div>
+
+                <!-- 工具分类筛选 -->
+                <div class="max-w-6xl mx-auto mb-8">
+                    <div class="flex flex-wrap gap-2">
+                        <button v-for="category in categories" :key="category" @click="toggleCategory(category)" :class="[
+                                'px-4 py-2 rounded-full transition-all duration-300 flex items-center gap-2',
+                                selectedCategories.includes(category) 
+                                    ? 'bg-primary text-white shadow-md' 
+                                    : 'bg-white text-gray-700 hover:bg-gray-100 shadow'
+                            ]">
+                            <i :class="getCategoryIcon(category)"></i>
+                            <span>{{ category }}</span>
+                            <span v-if="selectedCategories.includes(category)" class="text-xs opacity-90">
+                                <i class="fas fa-check"></i>
+                            </span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 工具卡片区域 -->
+                <div class="max-w-7xl mx-auto">
+                    <!-- 工具卡片网格 -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        <!-- 工具卡片 -->
+                        <div v-for="tool in filteredTools" :key="tool.id"
+                            class="bg-white rounded-2xl overflow-hidden shadow-lg card-hover fade-in">
+                            <!-- 卡片头部（颜色条） -->
+                            <div class="h-2" :style="{ backgroundColor: getCategoryColor(tool.category) }"></div>
+
+                            <!-- 卡片内容 -->
+                            <div class="p-6 flex flex-col h-full">
+                                <!-- 工具图标和名称 -->
+                                <div class="flex items-start gap-4 mb-4">
+                                    <div class="w-12 h-12 rounded-xl flex items-center justify-center text-white text-xl"
+                                        :style="{ backgroundColor: getCategoryColor(tool.category) }">
+                                        <i :class="getCategoryIcon(tool.category)"></i>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <h3 class="font-bold text-gray-800 text-lg truncate">{{ tool.name }}</h3>
+                                        <div class="flex items-center gap-2 mt-1">
+                                            <span class="px-3 py-1 rounded-full text-xs font-medium" :style="{ 
+                                                    backgroundColor: getCategoryColor(tool.category) + '20',
+                                                    color: getCategoryColor(tool.category) 
+                                                }">
+                                                {{ tool.category }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 工具描述 -->
+                                <p class="text-gray-600 mb-6 flex-grow">{{ tool.desc }}</p>
+
+                                <!-- 卡片底部 -->
+                                <div class="flex justify-between items-center pt-4 border-t border-gray-100">
+                                    <a :href="tool.href"
+                                        class="text-primary hover:text-secondary font-medium flex items-center gap-2 transition-colors">
+                                        <span>立即使用</span>
+                                        <i class="fas fa-arrow-right text-sm"></i>
+                                    </a>
+                                    <a :href="tool.href" target="_blank"
+                                        class="text-primary hover:text-secondary font-medium flex items-center gap-2 transition-colors">
+                                        <div class="text-gray-400 text-sm">
+                                            <i class="fas fa-external-link-alt"></i>
+                                        </div>
+                                    </a>
+
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </main>
+
+            <!-- 页脚 -->
+            <common-footer description="常用小工具集合，请勿用于非法用途" copyright="© 2025 Gloduck"
+                :links="[{ icon: 'fab fa-github', url: 'https://github.com/Gloduck', name: 'Github' },{ icon: 'fas fa-blog', url: 'https://mxecy.cn', name: 'Blog' }]"></common-footer>
         </div>
     </div>
 
-    <!-- 工具卡片区域 -->
-    <section class="tools-section">
-        <div class="section-header">
-            <h2 class="section-title">工具列表</h2>
-        </div>
+    <script>
+        const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
 
-        <div class="tools-grid" id="toolsGrid">
-            <!-- 工具卡片将通过JS动态加载 -->
-            <div class="loader">
-                <div class="loader-spinner"></div>
-                <p>加载工具中...</p>
-            </div>
-        </div>
-    </section>
-</div>
+        const app = createApp({
+            components: {
+                'common-header': CommonComponents.Header,
+                'common-footer': CommonComponents.Footer
+            },
 
-<script>
-    function updateDateTime() {
-        const now = new Date();
+            setup() {
+                // 工具数据
+                const tools = ref([]);
 
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
-        const day = now.getDate();
-        const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
-        const weekday = weekdays[now.getDay()];
+                // 搜索和筛选
+                const searchKeyword = ref('');
+                const selectedCategories = ref([]);
 
-        const hours = String(now.getHours()).padStart(2, '0');
-        const minutes = String(now.getMinutes()).padStart(2, '0');
-        const seconds = String(now.getSeconds()).padStart(2, '0');
+                // 分类颜色映射
+                const categoryColors = {
+                    '开发': '#249ffd',
+                    '工具': '#10b981',
+                    '设计': '#8b5cf6',
+                    '搜索': '#f59e0b',
+                    '网络': '#ef4444',
+                    '其他': '#6b7280'
+                };
 
-        document.getElementById('dateDisplay').textContent = `${year}年${month}月${day}日 ${weekday}`;
-        document.getElementById('timeDisplay').textContent = `${hours}:${minutes}:${seconds}`;
-    }
+                // 分类图标映射
+                const categoryIcons = {
+                    '开发': 'fas fa-code',
+                    '工具': 'fas fa-wrench',
+                    '设计': 'fas fa-palette',
+                    '搜索': 'fas fa-search',
+                    '网络': 'fas fa-network-wired',
+                    '其他': 'fas fa-tools'
+                };
 
-    function fetchTools() {
-        setTimeout(() => {
-            const response = {
-                code: 200,
-                msg: "成功",
-                data: [
-                    {name: "Jrebel激活", href: "/jrebel", desc: "一键激活Jrebel开发工具", category: "开发"},
-                    {name: "网络剪贴板", href: "/clipboard", desc: "多设备之间同步文本的网络剪贴板", category: "工具"},
-                    {name:"磁力聚合搜索", href: "/torrent", desc: "支持多个磁力网站的磁力搜索", category: "工具"},
-                    {name:"转发下载工具", href: "/forward", desc: "通过转发服务器下载文件", category: "工具"},
-                    {name:"Github项目搜索", href: "/github", desc: "搜索Github上的项目", category: "开发"}
-                ]
-            };
+                // 获取所有分类
+                const categories = computed(() => {
+                    const cats = new Set();
+                    tools.value.forEach(tool => {
+                        if (tool.category) cats.add(tool.category);
+                    });
+                    return Array.from(cats).sort();
+                });
 
-            renderTools(response.data);
-        }, 100);
-    }
+                // 过滤工具
+                const filteredTools = computed(() => {
+                    return tools.value.filter(tool => {
+                        // 搜索关键词过滤
+                        const keywordMatch = !searchKeyword.value ||
+                            tool.name.toLowerCase().includes(searchKeyword.value.toLowerCase()) ||
+                            tool.desc.toLowerCase().includes(searchKeyword.value.toLowerCase()) ||
+                            tool.category.toLowerCase().includes(searchKeyword.value.toLowerCase());
 
-    function renderTools(tools) {
-        const toolsGrid = document.getElementById('toolsGrid');
-        toolsGrid.innerHTML = '';
+                        // 分类过滤
+                        const categoryMatch = selectedCategories.value.length === 0 ||
+                            selectedCategories.value.includes(tool.category);
 
-        tools.forEach(tool => {
-            const card = document.createElement('div');
-            card.className = 'tool-card';
+                        return keywordMatch && categoryMatch;
+                    });
+                });
 
-            const iconMapping = {
-                "开发": "fa-code",
-                "工具": "fa-wrench",
-                "设计": "fa-palette",
-                "安全": "fa-lock",
-                "图像": "fa-image",
-                "网络": "fa-network-wired"
-            };
-            const icon = iconMapping[tool.category] || "fa-tools";
+                // 获取分类颜色
+                const getCategoryColor = (category) => {
+                    return categoryColors[category] || '#6b7280';
+                };
 
-            card.innerHTML = `
-                                            <div class="card-header">
-                                                <i class="fas ${icon}"></i>
-                                            </div>
-                                            <div class="card-body">
-                                                <div class="tool-name">${tool.name}</div>
-                                                <div class="tool-desc">${tool.desc}</div>
-                                            </div>
-                                            <div class="card-footer">
-                                                <a href="${tool.href}" class="tool-link">立即使用 <i class="fas fa-arrow-right"></i></a>
-                                                <span class="tool-badge">${tool.category}</span>
-                                            </div>
-                                        `;
+                // 获取分类图标
+                const getCategoryIcon = (category) => {
+                    return categoryIcons[category] || 'fas fa-tools';
+                };
 
-            toolsGrid.appendChild(card);
+                // 切换分类选择
+                const toggleCategory = (category) => {
+                    const index = selectedCategories.value.indexOf(category);
+                    if (index === -1) {
+                        selectedCategories.value.push(category);
+                    } else {
+                        selectedCategories.value.splice(index, 1);
+                    }
+                };
+
+
+                // 加载工具数据
+                const loadTools = () => {
+                    tools.value = [
+                        { id: 1, name: "Jrebel激活", href: "/jrebel", desc: "一键激活Jrebel开发工具", category: "开发" },
+                        { id: 2, name: "网络剪贴板", href: "/clipboard", desc: "多设备之间同步文本的网络剪贴板", category: "工具" },
+                        { id: 3, name: "磁力聚合搜索", href: "/torrent", desc: "支持多个磁力网站的磁力搜索", category: "搜索" },
+                        { id: 4, name: "转发下载工具", href: "/forward", desc: "通过转发服务器下载文件", category: "工具" },
+                        { id: 5, name: "Github项目搜索", href: "/github", desc: "搜索Github上的项目", category: "开发" }
+                    ]
+                };
+
+
+                // 页面加载时初始化
+                onMounted(() => {
+                    loadTools();
+                });
+
+                // 组件卸载时清理
+                onUnmounted(() => {
+                    if (timeInterval) {
+                        clearInterval(timeInterval);
+                    }
+                });
+
+                return {
+                    // 数据
+                    tools,
+                    searchKeyword,
+                    selectedCategories,
+
+                    // 计算属性
+                    categories,
+                    filteredTools,
+
+                    // 方法
+                    getCategoryColor,
+                    getCategoryIcon,
+                    toggleCategory
+                };
+            }
         });
-    }
 
-    document.addEventListener('DOMContentLoaded', () => {
-        updateDateTime();
-        setInterval(updateDateTime, 1000);
-
-        fetchTools();
-
-        const searchInput = document.querySelector('.search-box input');
-        searchInput.addEventListener('input', function() {
-            const searchTerm = this.value.toLowerCase();
-            const cards = document.querySelectorAll('.tool-card');
-
-            cards.forEach(card => {
-                const toolName = card.querySelector('.tool-name').textContent.toLowerCase();
-                if (toolName.includes(searchTerm)) {
-                    card.style.display = 'flex';
-                } else {
-                    card.style.display = 'none';
-                }
-            });
-        });
-    });
-</script>
+        app.mount('#app');
+    </script>
 </body>
+
 </html>

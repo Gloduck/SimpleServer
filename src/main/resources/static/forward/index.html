@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -51,6 +52,7 @@
         }
     </style>
 </head>
+
 <body class="font-inter bg-gray-50 min-h-screen">
     <div id="app">
         <!-- Toast提示 -->
@@ -59,11 +61,7 @@
         <!-- 页面容器 -->
         <div class="min-h-screen flex flex-col">
             <!-- 头部 -->
-            <common-header title="转发下载工具" icon="fas fa-download" link="/">
-                <template #right>
-                    通过转发服务器下载文件
-                </template>
-            </common-header>
+            <common-header title="转发下载工具" icon="fas fa-download" link="/"></common-header>
 
             <!-- 主内容区 -->
             <main class="flex-grow container mx-auto px-4 py-8 md:py-16">
@@ -78,21 +76,13 @@
                         <!-- 输入区域 -->
                         <div class="relative mt-6">
                             <div class="flex">
-                                <input
-                                    type="url"
-                                    v-model="fileUrl"
-                                    placeholder="请输入文件下载链接..."
+                                <input type="url" v-model="fileUrl" placeholder="请输入文件下载链接..."
                                     class="flex-1 px-4 py-3 rounded-l-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-custom"
-                                    @keyup.enter="startDownload"
-                                >
-                                <button
-                                    @click="startDownload"
-                                    :disabled="isDownloading"
-                                    :class="[
+                                    @keyup.enter="startDownload">
+                                <button @click="startDownload" :disabled="isDownloading" :class="[
                                         'text-white px-6 py-3 rounded-r-lg font-medium transition-custom flex items-center',
                                         isDownloading ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary hover:bg-primary/90'
-                                    ]"
-                                >
+                                    ]">
                                     <i class="fas fa-download mr-2"></i>
                                     {{ isDownloading ? '下载中...' : '开始下载' }}
                                 </button>
@@ -121,10 +111,8 @@
                                 <span class="text-primary font-medium">{{ progressPercent }}%</span>
                             </div>
                             <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
-                                <div 
-                                    class="h-full bg-primary rounded-full transition-all duration-300"
-                                    :style="{ width: progressPercent + '%' }"
-                                ></div>
+                                <div class="h-full bg-primary rounded-full transition-all duration-300"
+                                    :style="{ width: progressPercent + '%' }"></div>
                             </div>
                         </div>
 
@@ -142,10 +130,8 @@
 
                         <!-- 取消按钮 -->
                         <div class="mt-6">
-                            <button 
-                                @click="cancelDownload"
-                                class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2 rounded-lg font-medium transition-custom"
-                            >
+                            <button @click="cancelDownload"
+                                class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2 rounded-lg font-medium transition-custom">
                                 <i class="fas fa-times mr-2"></i>取消下载
                             </button>
                         </div>
@@ -160,25 +146,22 @@
                                 <span>下载历史</span>
                             </h2>
                             <!-- 清除下载历史按钮：仅当有历史记录时显示 -->
-                            <button 
-                                v-if="downloadHistory.length > 0"
-                                @click="clearDownloadHistory"
-                                class="text-sm text-red-500 hover:text-red-600 flex items-center transition-custom"
-                            >
+                            <button v-if="downloadHistory.length > 0" @click="clearDownloadHistory"
+                                class="text-sm text-red-500 hover:text-red-600 flex items-center transition-custom">
                                 <i class="fas fa-trash-alt mr-1"></i>
                                 清除历史
                             </button>
                         </div>
 
                         <div class="space-y-3">
-                            <div v-if="downloadHistory.length === 0" 
-                                 class="text-center text-gray-500 py-8 border border-dashed border-gray-200 rounded-lg">
+                            <div v-if="downloadHistory.length === 0"
+                                class="text-center text-gray-500 py-8 border border-dashed border-gray-200 rounded-lg">
                                 <i class="fas fa-file-download text-3xl mb-2 text-gray-300"></i>
                                 <p>暂无下载历史</p>
                             </div>
-                            
-                            <div v-for="item in downloadHistory" :key="item.id" 
-                                 class="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-custom">
+
+                            <div v-for="item in downloadHistory" :key="item.id"
+                                class="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-custom">
                                 <div class="flex items-center">
                                     <i class="fas fa-file mr-3 text-primary"></i>
                                     <div>
@@ -189,11 +172,12 @@
                                 <div class="flex items-center">
                                     <span :class="['text-xs mr-3', 
                                                   item.status === 'success' ? 'text-green-500' : 'text-red-500']">
-                                        <i :class="[item.status === 'success' ? 'fas fa-check-circle' : 'fas fa-times-circle']"></i>
+                                        <i
+                                            :class="[item.status === 'success' ? 'fas fa-check-circle' : 'fas fa-times-circle']"></i>
                                         {{ item.status === 'success' ? '完成' : '取消' }}
                                     </span>
-                                    <button @click="copyUrl(item.url)" 
-                                            class="text-gray-400 hover:text-primary transition-custom">
+                                    <button @click="copyUrl(item.url)"
+                                        class="text-gray-400 hover:text-primary transition-custom">
                                         <i class="fas fa-link"></i>
                                     </button>
                                 </div>
@@ -204,10 +188,7 @@
             </main>
 
             <!-- 页脚 -->
-            <common-footer 
-                description="通过转发服务器下载文件，支持多种文件类型" 
-                copyright="© 2025 Gloduck">
-            </common-footer>
+            <common-footer copyright="© 2025 Gloduck"></common-footer>
         </div>
     </div>
 
@@ -240,20 +221,20 @@
                 const isDownloading = ref(false);
                 const showDownloadStatus = ref(false);
                 const showProgress = ref(false);
-                
+
                 // 下载状态
                 const statusText = ref('准备下载...');
                 const fileName = ref('-');
                 const progressPercent = ref(0);
                 const downloadedSize = ref('0 KB');
                 const downloadSpeed = ref('-');
-                
+
                 // 下载控制
                 let abortController = null;
                 let downloadStartTime = 0;
                 let lastDownloadedBytes = 0;
                 let speedInterval = null;
-                
+
                 // 下载历史
                 const downloadHistory = ref([]);
 
@@ -300,14 +281,14 @@
                         url: url,
                         timestamp: new Date().toISOString()
                     };
-                    
+
                     downloadHistory.value.unshift(historyItem);
-                    
+
                     // 限制历史记录数量
                     if (downloadHistory.value.length > 20) {
                         downloadHistory.value = downloadHistory.value.slice(0, 20);
                     }
-                    
+
                     // 保存到localStorage
                     try {
                         localStorage.setItem('downloadHistory', JSON.stringify(downloadHistory.value.slice(0, 10)));
@@ -324,14 +305,14 @@
                 // 计算下载速度
                 const calculateSpeed = () => {
                     if (!isDownloading.value) return;
-                    
+
                     const currentTime = Date.now();
                     const elapsedTime = (currentTime - downloadStartTime) / 1000;
-                    
+
                     if (elapsedTime > 0) {
                         const currentBytesText = downloadedSize.value;
                         const match = currentBytesText.match(/([\d.]+)\s*(\w+)/);
-                        
+
                         if (match) {
                             const value = parseFloat(match[1]);
                             const unit = match[2];
@@ -341,10 +322,10 @@
                                 'MB': 1024 * 1024,
                                 'GB': 1024 * 1024 * 1024
                             }[unit] || 0;
-                            
+
                             const bytesSinceLastCheck = bytes - lastDownloadedBytes;
                             lastDownloadedBytes = bytes;
-                            
+
                             downloadSpeed.value = formatFileSize(bytesSinceLastCheck) + '/s';
                         }
                     }
@@ -353,19 +334,19 @@
                 // 开始下载
                 const startDownload = async () => {
                     const url = fileUrl.value.trim();
-                    
+
                     // 验证输入
                     if (!url || !isValidUrl(url)) {
                         urlError.value = '请输入有效的URL地址';
                         return;
                     }
-                    
+
                     urlError.value = '';
-                    
+
                     // 编码目标URL，使用固定的转发服务器地址
                     const encodedUrl = encodeURIComponent(url);
                     const proxyUrl = `/forward/v1/proxy?url=${encodedUrl}`;
-                    
+
                     // 显示下载状态面板
                     isDownloading.value = true;
                     showDownloadStatus.value = true;
@@ -375,18 +356,18 @@
                     progressPercent.value = 0;
                     downloadedSize.value = '0 KB';
                     downloadSpeed.value = '-';
-                    
+
                     // 创建AbortController用于取消请求
                     abortController = new AbortController();
-                    
+
                     // 记录开始时间
                     downloadStartTime = Date.now();
                     lastDownloadedBytes = 0;
-                    
+
                     // 启动速度计算定时器
                     clearInterval(speedInterval);
                     speedInterval = setInterval(calculateSpeed, 1000);
-                    
+
                     try {
                         const response = await fetch(proxyUrl, {
                             method: 'GET',
@@ -395,15 +376,15 @@
                                 'Accept': '*/*'
                             }
                         });
-                        
+
                         if (!response.ok) {
                             throw new Error(`HTTP错误: ${response.status}`);
                         }
-                        
+
                         // 从响应头获取文件名
                         let finalFileName = getFileNameFromUrl(url);
                         const contentDisposition = response.headers.get('Content-Disposition');
-                        
+
                         if (contentDisposition && contentDisposition.includes('filename=')) {
                             const fileNameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
                             if (fileNameMatch && fileNameMatch[1]) {
@@ -415,22 +396,22 @@
                                 }
                             }
                         }
-                        
+
                         // 更新UI
                         fileName.value = finalFileName;
                         statusText.value = '正在下载...';
-                        
+
                         const contentLength = response.headers.get('Content-Length');
                         const totalBytes = contentLength ? parseInt(contentLength) : null;
-                        
+
                         // 处理响应流
                         const reader = response.body.getReader();
                         const chunks = [];
                         let receivedBytes = 0;
-                        
+
                         while (true) {
                             const { done, value } = await reader.read();
-                            
+
                             if (done) {
                                 // 下载完成，创建Blob并下载
                                 const blob = new Blob(chunks);
@@ -442,28 +423,28 @@
                                 a.click();
                                 URL.revokeObjectURL(url);
                                 document.body.removeChild(a);
-                                
+
                                 // 更新状态
                                 statusText.value = '下载完成';
                                 progressPercent.value = 100;
                                 downloadSpeed.value = '-';
-                                
+
                                 // 添加到历史记录
                                 addToHistory(finalFileName, 'success', fileUrl.value);
                                 showToast('下载完成', 'success');
-                                
+
                                 break;
                             }
-                            
+
                             chunks.push(value);
                             receivedBytes += value.length;
-                            
+
                             // 更新进度
                             if (totalBytes) {
                                 const percent = Math.round((receivedBytes / totalBytes) * 100);
                                 progressPercent.value = percent;
                             }
-                            
+
                             // 更新已下载大小
                             downloadedSize.value = formatFileSize(receivedBytes);
                         }
@@ -473,7 +454,7 @@
                             statusText.value = `下载失败: ${error.message}`;
                             downloadSpeed.value = '-';
                             showToast(`下载失败: ${error.message}`, 'error');
-                            
+
                             // 添加到历史记录
                             addToHistory(fileName.value, 'failed', fileUrl.value);
                         } else {
@@ -486,7 +467,7 @@
                         isDownloading.value = false;
                         showProgress.value = false;
                         abortController = null;
-                        
+
                         // 3秒后自动隐藏下载状态
                         setTimeout(() => {
                             if (!isDownloading.value) {
@@ -502,7 +483,7 @@
                         abortController.abort();
                         statusText.value = '下载已取消';
                         downloadSpeed.value = '-';
-                        
+
                         // 添加到历史记录
                         addToHistory(fileName.value, 'cancelled', fileUrl.value);
                         showToast('下载已取消', 'warning');
@@ -557,10 +538,10 @@
                     downloadedSize,
                     downloadSpeed,
                     downloadHistory,
-                    
+
                     // 计算属性
                     downloadStatusIcon,
-                    
+
                     // 方法
                     formatTime,
                     startDownload,
@@ -575,4 +556,5 @@
         app.mount('#app');
     </script>
 </body>
+
 </html>
