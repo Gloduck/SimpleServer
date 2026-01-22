@@ -18,7 +18,7 @@ public class OnlineClipBoardController {
     private OnlineClipBoardService service = OnlineClipBoardService.instance();
 
     public ControllerHandler getById() {
-        return new JsonControllerHandler<>(HttpMethod.GET, "/clipboard/v1/query", exchange -> {
+        return new JsonControllerHandler<>(HttpMethod.GET, "/api/clipboard/query", exchange -> {
             Map<String, List<String>> parameters = HttpExchangeUtils.getAllRequestParameters(exchange);
             String id = HttpExchangeUtils.getStringParameter(parameters, "id");
             return Result.success(service.getById(id));
@@ -26,7 +26,7 @@ public class OnlineClipBoardController {
     }
 
     public ControllerHandler save() {
-        return new JsonControllerHandler<>(HttpMethod.POST, "/clipboard/v1/save", exchange -> {
+        return new JsonControllerHandler<>(HttpMethod.POST, "/api/clipboard/save", exchange -> {
             OnlineClipBoard onlineClipBoard = JsonUtils.readValue(exchange.getRequestBody(), OnlineClipBoard.class);
             boolean success = service.save(onlineClipBoard);
             return success ? Result.success() : Result.failed();
@@ -34,7 +34,7 @@ public class OnlineClipBoardController {
     }
 
     public ControllerHandler delete() {
-        return new JsonControllerHandler<>(HttpMethod.DELETE, "/clipboard/v1/delete", exchange -> {
+        return new JsonControllerHandler<>(HttpMethod.DELETE, "/api/clipboard/delete", exchange -> {
             Map<String, List<String>> parameters = HttpExchangeUtils.getAllRequestParameters(exchange);
             String id = HttpExchangeUtils.getStringParameter(parameters, "id");
             boolean success = service.delete(id);

@@ -345,7 +345,7 @@
 
                     // 编码目标URL，使用固定的转发服务器地址
                     const encodedUrl = encodeURIComponent(url);
-                    const proxyUrl = `/forward/v1/proxy?url=${encodedUrl}`;
+                    const proxyUrl = `/api/forward/proxy?url=${encodedUrl}`;
 
                     // 显示下载状态面板
                     isDownloading.value = true;

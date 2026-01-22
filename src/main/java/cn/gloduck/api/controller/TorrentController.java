@@ -16,11 +16,11 @@ public class TorrentController {
     private TorrentService torrentService = TorrentService.instance();
 
     public ControllerHandler listHandlers() {
-        return new JsonControllerHandler<>(HttpMethod.GET, "/torrent/v1/listHandlers", t -> Result.success(torrentService.listHandlers()));
+        return new JsonControllerHandler<>(HttpMethod.GET, "/api/torrent/listHandlers", t -> Result.success(torrentService.listHandlers()));
     }
 
     public ControllerHandler queryDetail() {
-        return new JsonControllerHandler<>(HttpMethod.GET, "/torrent/v1/queryDetail", t -> {
+        return new JsonControllerHandler<>(HttpMethod.GET, "/api/torrent/queryDetail", t -> {
             Map<String, List<String>> parameters = HttpExchangeUtils.getAllRequestParameters(t);
             String id = HttpExchangeUtils.getStringParameter(parameters, "id");
             String code = HttpExchangeUtils.getStringParameter(parameters, "code");
@@ -29,7 +29,7 @@ public class TorrentController {
     }
 
     public ControllerHandler search() {
-        return new JsonControllerHandler<>(HttpMethod.GET, "/torrent/v1/search", t -> {
+        return new JsonControllerHandler<>(HttpMethod.GET, "/api/torrent/search", t -> {
             Map<String, List<String>> parameters = HttpExchangeUtils.getAllRequestParameters(t);
             String keyword = HttpExchangeUtils.getStringParameter(parameters, "keyword");
             String code = HttpExchangeUtils.getStringParameter(parameters, "code");

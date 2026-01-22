@@ -417,7 +417,7 @@
                         editorStatus.value = "正在获取内容...";
                         const beforeValue = editor ? editor.getValue() : '';
 
-                        const response = await fetch(`/clipboard/v1/query?id=${clipboardId.value}`);
+                        const response = await fetch(`/api/clipboard/query?id=${clipboardId.value}`);
                         const data = await CommonUtils.checkJsonResponseStatus(response);
 
                         if (data.code === 200) {
@@ -468,7 +468,7 @@
 
                     try {
                         editorStatus.value = "正在保存...";
-                        const response = await fetch('/clipboard/v1/save', {
+                        const response = await fetch('/api/clipboard/save', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
@@ -508,7 +508,7 @@
 
                     try {
                         editorStatus.value = "正在删除...";
-                        const response = await fetch(`/clipboard/v1/delete?id=${clipboardId.value}`, {
+                        const response = await fetch(`/api/clipboard/delete?id=${clipboardId.value}`, {
                             method: 'DELETE'
                         });
 

@@ -263,9 +263,6 @@
             },
 
             setup() {
-                // API基础URL
-                const API_BASE = '/torrent/v1';
-
                 // 排序字段显示名称映射
                 const sortFieldLabels = {
                     'name': '名称',
@@ -340,7 +337,7 @@
                 // 加载搜索源
                 const loadHandlers = async () => {
                     try {
-                        const response = await fetch(`${API_BASE}/listHandlers`);
+                        const response = await fetch(`/api/torrent/listHandlers`);
                         const data = await checkJsonResponseStatus(response);
 
                         if (data.code === 200 && Array.isArray(data.data)) {
@@ -381,7 +378,7 @@
                     showResults.value = true;
 
                     try {
-                        const url = new URL(`${API_BASE}/search`, window.location.origin);
+                        const url = new URL(`/api/torrent/search`, window.location.origin);
                         url.searchParams.append('pageIndex', currentPage.value);
                         url.searchParams.append('pageSize', pageSize);
                         url.searchParams.append('code', selectedHandler.value);
@@ -437,7 +434,7 @@
                     loadingDetail.value = true;
 
                     try {
-                        const url = new URL(`${API_BASE}/queryDetail`, window.location.origin);
+                        const url = new URL(`/api/torrent/queryDetail`, window.location.origin);
                         url.searchParams.append('code', selectedHandler.value);
                         url.searchParams.append('id', item.id);
 
