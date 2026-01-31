@@ -24,6 +24,7 @@ public class Bootstrap {
         server.registerController(new TorrentController());
         server.registerController(new GithubController());
         server.registerController(new ForwardController());
+        server.registerController(new MdEditorController());
         server.addHandler(new StaticFileHandler("./", "/static/**"));
         server.start();
     }
