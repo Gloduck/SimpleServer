@@ -30,6 +30,7 @@ public class TorrentService {
         Optional.ofNullable(config.sukebeiNyaaSi).ifPresent(nyaaSi -> this.torrentHandlers.add(new SukebeiNyaaSiHandler(nyaaSi)));
         Optional.ofNullable(config.nyaaSi).ifPresent(nyaaSi -> this.torrentHandlers.add(new NyaaSiHandler(nyaaSi)));
         Optional.ofNullable(config.tokyoToshokan).ifPresent(tokyoToshokan -> this.torrentHandlers.add(new TokyoToshokanHandler(tokyoToshokan)));
+        Optional.ofNullable(config.torrentkitty).ifPresent(torrentkitty -> this.torrentHandlers.add(new TorrentkittyHandler(torrentkitty)));
         handlerStatusMap = new HashMap<>(torrentHandlers.size() / 3 * 4 + 1);
         scheduledExecutor.scheduleAtFixedRate(checkHandlerStatusTask(), 0, 30, TimeUnit.MINUTES);
     }

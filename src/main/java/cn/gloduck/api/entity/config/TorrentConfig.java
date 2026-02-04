@@ -13,6 +13,8 @@ public class TorrentConfig {
 
     public WebConfig tokyoToshokan;
 
+    public WebConfig torrentkitty;
+
     public static class WebConfig {
         public String url;
 

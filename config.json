@@ -50,6 +50,13 @@
       "connectTimeout": 10,
       "requestTimeout": 30,
       "proxy": null
+    },
+    "torrentkitty": {
+      "url": "https://torrentkitty.one",
+      "validStatusTimeout": 3,
+      "connectTimeout": 5,
+      "requestTimeout": 30,
+      "proxy": null
     }
   },
   "forward": {
