@@ -91,9 +91,10 @@
                                 class="w-full md:w-48 bg-white border border-gray-300 text-gray-700 py-3 px-4 pr-8 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-no-repeat bg-right">
                                 <option value="">默认排序</option>
                                 <option
-                                    v-for="[field, order] in currentHandlerInfo.supportSortFields.flatMap(field => ['asc', 'desc'].map(order => [field, order]))"
-                                    :key="`${field}-${order}`" :value="`${field}-${order}`">
-                                    {{ getSortFieldLabel(field) }} {{ order === 'asc' ? '↑ 升序' : '↓ 降序' }}
+                                    v-for="option in availableSortOptions"
+                                    :key="option.value"
+                                    :value="option.value">
+                                    {{ option.label }}
                                 </option>
                             </select>
                         </div>
@@ -267,7 +268,10 @@
                 const sortFieldLabels = {
                     'name': '名称',
                     'uploadTime': '上传时间',
-                    'size': '文件大小'
+                    'size': '文件大小',
+                    'relevance': '相关度',
+                    'time': '时间',
+                    "fileCount": "文件数量"
                 };
 
                 const sortOrderLabels = {
@@ -312,7 +316,46 @@
                     const [field, order] = currentSort.value.split('-');
                     const fieldLabel = sortFieldLabels[field] || field;
                     const orderLabel = sortOrderLabels[order] || order;
-                    return `排序: ${fieldLabel} ${orderLabel}`;
+                    return `排序: ${fieldLabel}-${orderLabel}`;
+                });
+
+                // 生成可用的排序选项
+                // 格式: "+field" = 只支持升序, "-field" = 只支持降序, "field" = 支持两种排序
+                const availableSortOptions = computed(() => {
+                    if (!currentHandlerInfo.value || !currentHandlerInfo.value.supportSortFields) {
+                        return [];
+                    }
+                    const options = [];
+                    for (const field of currentHandlerInfo.value.supportSortFields) {
+                        if (!field) continue;
+                        let fieldName = field;
+                        let orders = [];
+
+                        // 解析字段格式
+                        if (field.startsWith('+')) {
+                            fieldName = field.substring(1);
+                            orders = ['asc'];
+                        } else if (field.startsWith('-')) {
+                            fieldName = field.substring(1);
+                            orders = ['desc'];
+                        } else {
+                            fieldName = field;
+                            orders = [
+                                'asc',
+                                'desc'
+                            ];
+                        }
+
+                        const nameLabel = sortFieldLabels[fieldName] || fieldName;
+                        for (const order of orders) {
+                            const orderLabel = sortOrderLabels[order] || order;
+                            options.push({
+                                value: `${fieldName}-${order}`,
+                                label: `${nameLabel}-${orderLabel}`
+                            });
+                        }
+                    }
+                    return options;
                 });
 
                 // 获取排序字段标签
@@ -504,6 +547,7 @@
                     currentPage,
                     hasNextPage,
                     handlers,
+                    availableSortOptions,
                     currentHandlerInfo,
                     sortInfo,
 
