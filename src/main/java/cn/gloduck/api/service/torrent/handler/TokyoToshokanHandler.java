@@ -3,6 +3,7 @@ package cn.gloduck.api.service.torrent.handler;
 import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
+import cn.gloduck.api.utils.DateUtils;
 import cn.gloduck.api.utils.StringUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
@@ -46,7 +47,7 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
         torrentInfo.setName(name);
         torrentInfo.setHash(hash.toUpperCase());
         torrentInfo.setSize(convertSizeUnit(fileSizeStr));
-        torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, DASH_SEPARATED_DATE_TIME_FORMAT_PADDED_ZONE));
+        torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.DASH_SEPARATED_DATE_TIME_FORMAT_PADDED_ZONE));
         torrentInfo.setFileCount(null);
         torrentInfo.setFiles(null);
 
@@ -102,7 +103,7 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
             torrentInfo.setName(name);
             torrentInfo.setHash(hash);
             torrentInfo.setSize(convertSizeUnit(sizeStr));
-            torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, DASH_SEPARATED_DATE_TIME_FORMAT_PADDED_ZONE));
+            torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.DASH_SEPARATED_DATE_TIME_FORMAT_PADDED_ZONE));
             torrentInfos.add(torrentInfo);
         }
         boolean hasNext = !isLastPage(response);

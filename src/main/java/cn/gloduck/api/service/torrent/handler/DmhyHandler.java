@@ -4,6 +4,7 @@ import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentFileInfo;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
+import cn.gloduck.api.utils.DateUtils;
 import cn.gloduck.api.utils.StringUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
@@ -41,7 +42,7 @@ public class DmhyHandler extends AbstractTorrentHandler {
         torrentInfo.setName(name);
         torrentInfo.setHash(hash);
         torrentInfo.setSize(convertSizeUnit(sizeStr));
-        torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD));
+        torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD));
         List<TorrentFileInfo> torrentFileInfos = parseFileInfo(response);
         torrentInfo.setFileCount((long) torrentFileInfos.size());
         torrentInfo.setFiles(torrentFileInfos);
@@ -107,7 +108,7 @@ public class DmhyHandler extends AbstractTorrentHandler {
             torrentInfo.setName(name);
             torrentInfo.setHash(hash);
             torrentInfo.setSize(convertSizeUnit(sizeStr));
-            torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD));
+            torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD));
             torrentInfos.add(torrentInfo);
         }
         boolean hasNext = response.contains("/topics/list/page/" + (index + 1));

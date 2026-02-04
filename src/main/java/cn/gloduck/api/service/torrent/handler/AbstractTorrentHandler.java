@@ -45,11 +45,7 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
         add(new Pair<>("kb", 1024L));
         add(new Pair<>("b", 1L));
     }};
-    protected static final DateTimeFormatter SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD = DateTimeFormatter.ofPattern("yyyy/MM/dd H:m");
-    protected static final DateTimeFormatter SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm");
-    protected static final DateTimeFormatter DASH_SEPARATED_DATE_TIME_FORMAT_PADDED = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
-    protected static final DateTimeFormatter DASH_SEPARATED_DATE_TIME_FORMAT_PADDED_ZONE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z");
-    protected static final DateTimeFormatter DASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD = DateTimeFormatter.ofPattern("yyyy-MM-dd H:m");
+
     protected static final Pattern TABLE_PATTERN = Pattern.compile("<table\\b[^>]*>(.*?)</table>", Pattern.DOTALL);
     protected static final Pattern TBODY_PATTERN = Pattern.compile("<tbody\\b[^>]*>(.*?)</tbody>", Pattern.DOTALL);
     protected static final Pattern TR_PATTERN = Pattern.compile("<tr\\b[^>]*>(.*?)</tr>", Pattern.DOTALL);
@@ -140,13 +136,16 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
                 sslContext = SSLContext.getInstance("TLS");
                 sslContext.init(null, new TrustManager[]{
                         new X509TrustManager() {
+                            @Override
                             public X509Certificate[] getAcceptedIssuers() {
                                 return null;
                             }
 
+                            @Override
                             public void checkClientTrusted(X509Certificate[] certs, String authType) {
                             }
 
+                            @Override
                             public void checkServerTrusted(X509Certificate[] certs, String authType) {
                             }
                         }
@@ -223,17 +222,6 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
             return null;
         }
         return Math.round(Double.parseDouble(numericStr));
-    }
-
-    protected Date convertUploadTime(String uploadTimeStr, DateTimeFormatter formatter) {
-        if (uploadTimeStr == null) {
-            return null;
-        }
-        LocalDateTime localDateTime = LocalDateTime.parse(uploadTimeStr, formatter);
-
-        ZonedDateTime zdt = localDateTime.atZone(ZoneId.of("Asia/Shanghai"));
-
-        return Date.from(zdt.toInstant());
     }
 
     public AbstractTorrentHandler(TorrentConfig.WebConfig config) {

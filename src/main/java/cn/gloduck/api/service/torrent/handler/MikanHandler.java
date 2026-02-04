@@ -3,6 +3,7 @@ package cn.gloduck.api.service.torrent.handler;
 import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
+import cn.gloduck.api.utils.DateUtils;
 import cn.gloduck.api.utils.StringUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
@@ -46,7 +47,7 @@ public class MikanHandler extends AbstractTorrentHandler{
         torrentInfo.setName(name);
         torrentInfo.setHash(id.toUpperCase());
         torrentInfo.setSize(convertSizeUnit(sizeStr));
-        torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
+        torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
         torrentInfo.setFileCount(null);
         torrentInfo.setFiles(null);
 
@@ -95,7 +96,7 @@ public class MikanHandler extends AbstractTorrentHandler{
             torrentInfo.setName(name);
             torrentInfo.setHash(hash.toUpperCase());
             torrentInfo.setSize(convertSizeUnit(sizeStr));
-            torrentInfo.setUploadTime(convertUploadTime(tds.get(3).trim(), SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
+            torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(tds.get(3).trim(), DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
             torrentInfos.add(torrentInfo);
         }
         if(sortField != null && !sortField.isEmpty()){
