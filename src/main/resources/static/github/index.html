@@ -507,17 +507,25 @@
                 const downloadFileName = ref('');
 
                 // 热门搜索示例
-                const examples = ref([
-                    'lyswhut/lx-music-desktop',
-                    'lacymorrow/crossover',
-                    'OpenListTeam/OpenList',
-                    'chen08209/FlClash',
-                    'clash-verge-rev/clash-verge-rev',
-                    'rubickCenter/rubick',
-                    'anthropics/claude-code',
-                    'farion1231/cc-switch',
-                    'ChromeDevTools/chrome-devtools-mcp'
-                ]);
+                const examples = ref([]);
+
+                // 加载热门搜索
+                const loadHotSearches = async () => {
+                    try {
+                        const response = await fetch('/api/github/hotSearches');
+                        const data = await response.json();
+                        if (data.code === 200 && data.data) {
+                            examples.value = data.data;
+                        }
+                    } catch (error) {
+                        console.error('加载热门搜索失败:', error);
+                    }
+                };
+
+                // 初始化
+                onMounted(() => {
+                    loadHotSearches();
+                });
 
                 // 语言颜色映射
                 const languageColors = {
