@@ -54,5 +54,19 @@
   },
   "forward": {
     "proxy": null
+  },
+  "github": {
+    "hotSearches": [
+      "lyswhut/lx-music-desktop",
+      "lacymorrow/crossover",
+      "OpenListTeam/OpenList",
+      "chen08209/FlClash",
+      "clash-verge-rev/clash-verge-rev",
+      "rubickCenter/rubick",
+      "anthropics/claude-code",
+      "farion1231/cc-switch",
+      "ChromeDevTools/chrome-devtools-mcp",
+      "langgenius/dify"
+    ]
   }
 }
