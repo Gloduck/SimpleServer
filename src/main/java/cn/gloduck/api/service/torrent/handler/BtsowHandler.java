@@ -96,7 +96,7 @@ public class BtsowHandler extends AbstractTorrentHandler {
 
     @Override
     public List<String> tags() {
-        return Arrays.asList("所有内容");
+        return Arrays.asList("ALL");
     }
 
     @Override
