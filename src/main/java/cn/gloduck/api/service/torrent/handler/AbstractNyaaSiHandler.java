@@ -4,6 +4,7 @@ import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentFileInfo;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
+import cn.gloduck.api.utils.DateUtils;
 import cn.gloduck.api.utils.StringUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
@@ -129,7 +130,7 @@ public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
             torrentInfo.setName(name);
             torrentInfo.setHash(hash);
             torrentInfo.setSize(convertSizeUnit(sizeStr));
-            torrentInfo.setUploadTime(convertUploadTime(uploadTimeStr, DASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
+            torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.DASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
             torrentInfos.add(torrentInfo);
         }
         boolean hasNext = response.contains("class=\"next\"");
