@@ -57,6 +57,13 @@
       "connectTimeout": 5,
       "requestTimeout": 30,
       "proxy": null
+    },
+    "anybt": {
+      "url": "https://anybt.eth.limo",
+      "validStatusTimeout": 10,
+      "connectTimeout": 10,
+      "requestTimeout": 30,
+      "proxy": null
     }
   },
   "forward": {
