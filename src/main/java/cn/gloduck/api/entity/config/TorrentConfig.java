@@ -15,6 +15,8 @@ public class TorrentConfig {
 
     public WebConfig torrentkitty;
 
+    public WebConfig anybt;
+
     public static class WebConfig {
         public String url;
 
