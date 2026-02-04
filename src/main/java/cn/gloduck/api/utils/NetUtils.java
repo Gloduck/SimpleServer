@@ -2,8 +2,10 @@ package cn.gloduck.api.utils;
 
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class NetUtils {
     public static InetSocketAddress buildProxyAddress(String proxyAddress) {
@@ -93,5 +95,67 @@ public class NetUtils {
 
         }
         return paramsMap;
+    }
+
+    /**
+     * 构建带参数的URL
+     *
+     * @param baseURL 基础URL
+     * @param params  参数映射（单值）
+     * @return 拼接参数后的URL
+     */
+    public static String buildParamUrl(String baseURL, Map<String, String> params) {
+        Map<String, List<String>> listParams = toMultiValueMap(params);
+        return buildMultiParamUrl(baseURL, listParams);
+    }
+
+    /**
+     * 构建带参数的URL
+     * 如果baseURL已包含查询参数（?），则使用&amp;连接新参数
+     *
+     * @param baseURL 基础URL
+     * @param params  参数映射（支持多值）
+     * @return 拼接参数后的URL
+     */
+    public static String buildMultiParamUrl(String baseURL, Map<String, List<String>> params) {
+        StringBuilder urlBuilder = new StringBuilder(baseURL);
+
+        if (params != null && !params.isEmpty()) {
+            // 检查是否已经包含查询参数
+            boolean hasQueryParams = baseURL.contains("?");
+
+            // 添加连接符
+            urlBuilder.append(hasQueryParams ? "&" : "?");
+
+            Set<Map.Entry<String, List<String>>> entrySet = params.entrySet();
+            StringJoiner sj = new StringJoiner("&");
+
+            for (Map.Entry<String, List<String>> entry : entrySet) {
+                String key = entry.getKey();
+                List<String> values = entry.getValue();
+
+                // 遍历每一个参数值（如果有多个相同key的值）
+                for (String value : values) {
+                    sj.add(key + "=" + URLEncoder.encode(value, StandardCharsets.UTF_8));
+                }
+            }
+
+            urlBuilder.append(sj);
+        }
+
+        return urlBuilder.toString();
+    }
+
+    /**
+     * 将单值参数映射转换为多值参数映射
+     *
+     * @param params 单值参数映射
+     * @return 多值参数映射
+     */
+    public static Map<String, List<String>> toMultiValueMap(Map<String, String> params) {
+        if (params == null) {
+            return null;
+        }
+        return params.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, t -> Collections.singletonList(t.getValue())));
     }
 }
