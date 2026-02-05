@@ -4,7 +4,9 @@ import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
 import cn.gloduck.api.utils.DateUtils;
+import cn.gloduck.api.utils.Patterns;
 import cn.gloduck.api.utils.StringUtils;
+import cn.gloduck.api.utils.UnitUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
 import java.net.URI;
@@ -46,7 +48,7 @@ public class MikanHandler extends AbstractTorrentHandler{
         torrentInfo.setId(id);
         torrentInfo.setName(name);
         torrentInfo.setHash(id.toUpperCase());
-        torrentInfo.setSize(convertSizeUnit(sizeStr));
+        torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
         torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
         torrentInfo.setFileCount(null);
         torrentInfo.setFiles(null);
@@ -66,23 +68,23 @@ public class MikanHandler extends AbstractTorrentHandler{
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }
         List<TorrentInfo> torrentInfos = new ArrayList<>(pageSize());
-        Matcher tbodyMatcher = TBODY_PATTERN.matcher(response);
+        Matcher tbodyMatcher = Patterns.TBODY_PATTERN.matcher(response);
         if (!tbodyMatcher.find()) {
             throw new ApiException("Api response error data");
         }
         String tbody = tbodyMatcher.group(1);
-        Matcher trMatcher = TR_PATTERN.matcher(tbody);
+        Matcher trMatcher = Patterns.TR_PATTERN.matcher(tbody);
         while (trMatcher.find()) {
             String tr = trMatcher.group();
             List<String> tds = new ArrayList<>();
-            Matcher matcher = TD_PATTERN.matcher(tr);
+            Matcher matcher = Patterns.TD_PATTERN.matcher(tr);
             while (matcher.find()) {
                 tds.add(matcher.group(1));
             }
             if (tds.size() != 6) {
                 continue;
             }
-            Matcher hashMatcher = MAGNET_HASH_PATTERN.matcher(tds.get(0));
+            Matcher hashMatcher = Patterns.MAGNET_HASH_PATTERN.matcher(tds.get(0));
             String hash = hashMatcher.find() ? hashMatcher.group(1) : null;
             if (hash == null) {
                 continue;
@@ -95,7 +97,7 @@ public class MikanHandler extends AbstractTorrentHandler{
             torrentInfo.setId(hash);
             torrentInfo.setName(name);
             torrentInfo.setHash(hash.toUpperCase());
-            torrentInfo.setSize(convertSizeUnit(sizeStr));
+            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
             torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(tds.get(3).trim(), DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
             torrentInfos.add(torrentInfo);
         }

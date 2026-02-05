@@ -4,7 +4,9 @@ import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentFileInfo;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.utils.DateUtils;
+import cn.gloduck.api.utils.Patterns;
 import cn.gloduck.api.utils.StringUtils;
+import cn.gloduck.api.utils.UnitUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
 import java.net.URI;
@@ -35,11 +37,11 @@ public class TorrentkittyHandler extends AbstractTorrentHandler {
         torrentInfo.setId(id);
         torrentInfo.setName(name);
         // 正则读取tr，然后遍历
-        Matcher trMatcher = TR_PATTERN.matcher(detailTable);
+        Matcher trMatcher = Patterns.TR_PATTERN.matcher(detailTable);
         while (trMatcher.find()) {
             String tr = trMatcher.group();
             String content = null;
-            Matcher tdMatcher = TD_PATTERN.matcher(tr);
+            Matcher tdMatcher = Patterns.TD_PATTERN.matcher(tr);
             if (tdMatcher.find()) {
                 content = tdMatcher.group(1);
             }
@@ -54,7 +56,7 @@ public class TorrentkittyHandler extends AbstractTorrentHandler {
                 torrentInfo.setFileCount(Long.parseLong(content));
             }
             if (tr.contains("Content Size:")) {
-                torrentInfo.setSize(convertSizeUnit(content));
+                torrentInfo.setSize(UnitUtils.convertSizeUnit(content));
             }
             if (tr.contains("Created On:")) {
                 torrentInfo.setUploadTime(parseDateStr(content));
@@ -84,7 +86,7 @@ public class TorrentkittyHandler extends AbstractTorrentHandler {
         }
 
         List<TorrentFileInfo> fileList = new ArrayList<>();
-        Matcher trMatcher = TR_PATTERN.matcher(tableArea);
+        Matcher trMatcher = Patterns.TR_PATTERN.matcher(tableArea);
         boolean isFirst = true;
         while (trMatcher.find()) {
             if (isFirst) {
@@ -101,7 +103,7 @@ public class TorrentkittyHandler extends AbstractTorrentHandler {
             fileSize = fileSize.trim();
             TorrentFileInfo fileInfo = new TorrentFileInfo();
             fileInfo.setName(fileName);
-            fileInfo.setSize(convertSizeUnit(fileSize));
+            fileInfo.setSize(UnitUtils.convertSizeUnit(fileSize));
             fileList.add(fileInfo);
         }
         return fileList;
@@ -126,7 +128,7 @@ public class TorrentkittyHandler extends AbstractTorrentHandler {
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }
 
-        Matcher trMatcher = TR_PATTERN.matcher(tbody);
+        Matcher trMatcher = Patterns.TR_PATTERN.matcher(tbody);
         while (trMatcher.find()) {
             String tr = trMatcher.group();
             String name = StringUtils.subBetween(tr, "<td class=\"name\">", "</td>");
@@ -151,7 +153,7 @@ public class TorrentkittyHandler extends AbstractTorrentHandler {
             torrentInfo.setId(hash);
             torrentInfo.setName(name);
             torrentInfo.setHash(hash.toUpperCase());
-            torrentInfo.setSize(convertSizeUnit(sizeStr));
+            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
             torrentInfo.setUploadTime(parseDateStr(dateStr));
             torrentInfos.add(torrentInfo);
         }

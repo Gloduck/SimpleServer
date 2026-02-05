@@ -5,7 +5,9 @@ import cn.gloduck.api.entity.model.torrent.TorrentFileInfo;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
 import cn.gloduck.api.utils.DateUtils;
+import cn.gloduck.api.utils.Patterns;
 import cn.gloduck.api.utils.StringUtils;
+import cn.gloduck.api.utils.UnitUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
 import java.net.URI;
@@ -42,7 +44,7 @@ public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
         torrentInfo.setId(id);
         torrentInfo.setName(name);
         torrentInfo.setHash(hash);
-        torrentInfo.setSize(convertSizeUnit(fileSizeStr));
+        torrentInfo.setSize(UnitUtils.convertSizeUnit(fileSizeStr));
         torrentInfo.setUploadTime(parseDate(uploadTimeStr));
         torrentInfo.setFileCount((long) torrentFileInfos.size());
         torrentInfo.setFiles(torrentFileInfos);
@@ -53,14 +55,14 @@ public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
     private List<TorrentFileInfo> parseFileInfo(String response) {
         String fileListDiv = StringUtils.subBetween(response, "<div class=\"torrent-file-list panel-body\">", "</div>");
         List<TorrentFileInfo> fileList = new ArrayList<>();
-        Matcher liMatcher = LI_PATTERN.matcher(fileListDiv);
+        Matcher liMatcher = Patterns.LI_PATTERN.matcher(fileListDiv);
         while (liMatcher.find()) {
             String li = liMatcher.group();
             String fileName = StringUtils.subBetween(li, "<li><i class=\"fa fa-file\"></i>", "<span class=\"file-size\">").trim();
             String fileSize = StringUtils.subBetween(li, "<span class=\"file-size\">(", ")</span>").trim();
             TorrentFileInfo fileInfo = new TorrentFileInfo();
             fileInfo.setName(fileName);
-            fileInfo.setSize(convertSizeUnit(fileSize));
+            fileInfo.setSize(UnitUtils.convertSizeUnit(fileSize));
             fileList.add(fileInfo);
         }
         return fileList;
@@ -96,16 +98,16 @@ public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }
         List<TorrentInfo> torrentInfos = new ArrayList<>(pageSize());
-        Matcher tbodyMatcher = TBODY_PATTERN.matcher(response);
+        Matcher tbodyMatcher = Patterns.TBODY_PATTERN.matcher(response);
         if (!tbodyMatcher.find()) {
             throw new ApiException("Api response error data");
         }
         String tbody = tbodyMatcher.group(1);
-        Matcher trMatcher = TR_PATTERN.matcher(tbody);
+        Matcher trMatcher = Patterns.TR_PATTERN.matcher(tbody);
         while (trMatcher.find()) {
             String tr = trMatcher.group();
             List<String> tds = new ArrayList<>();
-            Matcher matcher = TD_PATTERN.matcher(tr);
+            Matcher matcher = Patterns.TD_PATTERN.matcher(tr);
             while (matcher.find()) {
                 tds.add(matcher.group(1));
             }
@@ -116,20 +118,20 @@ public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
             String name;
             if (id.contains("#comments")) {
                 id = id.replace("#comments", "");
-                List<String> tagContents = getTagContents(tds.get(1), A_PATTERN);
+                List<String> tagContents = Patterns.extractFirstCapturedGroupContents(tds.get(1), Patterns.A_PATTERN);
                 name = tagContents.size() == 2 ? tagContents.get(1) : "";
             } else {
-                name = getTagContent(tds.get(1), A_PATTERN);
+                name = Patterns.extractFirstCapturedGroupContent(tds.get(1), Patterns.A_PATTERN);
             }
             String sizeStr = tds.get(3).trim();
             String uploadTimeStr = tds.get(4).trim();
-            Matcher hashMatcher = MAGNET_HASH_PATTERN.matcher(tds.get(2));
+            Matcher hashMatcher = Patterns.MAGNET_HASH_PATTERN.matcher(tds.get(2));
             String hash = hashMatcher.find() ? hashMatcher.group(1).toUpperCase() : null;
             TorrentInfo torrentInfo = new TorrentInfo();
             torrentInfo.setId(id);
             torrentInfo.setName(name);
             torrentInfo.setHash(hash);
-            torrentInfo.setSize(convertSizeUnit(sizeStr));
+            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
             torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.DASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
             torrentInfos.add(torrentInfo);
         }

@@ -4,7 +4,9 @@ import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
 import cn.gloduck.api.utils.DateUtils;
+import cn.gloduck.api.utils.Patterns;
 import cn.gloduck.api.utils.StringUtils;
+import cn.gloduck.api.utils.UnitUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
 import java.net.URI;
@@ -40,13 +42,13 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
         String uploadTimeStr = StringUtils.subBetween(response, "<li class=\"detailsleft shade\" id=\"detailsleft\">Date Submitted:</li>\n<li class=\"detailsright shade\">", "</li>");
         String fileSizeStr = StringUtils.subBetween(response, "<li class=\"detailsleft\">Filesize:</li>\n\t<li class=\"detailsright\">", "</li>");
         String fileNameContainer = StringUtils.subBetween(response, "<li class=\"detailsleft\">Torrent Name:</li>\n<li class=\"detailsright\">", "</li>");
-        String name = getTagContent(fileNameContainer, A_PATTERN).replace("<span class=\"s\"> </span>", "");
+        String name = Patterns.extractFirstCapturedGroupContent(fileNameContainer, Patterns.A_PATTERN).replace("<span class=\"s\"> </span>", "");
         String hash = StringUtils.subBetween(response, "Magnet Link</a>", "</li>").trim();
         TorrentInfo torrentInfo = new TorrentInfo();
         torrentInfo.setId(id);
         torrentInfo.setName(name);
         torrentInfo.setHash(hash.toUpperCase());
-        torrentInfo.setSize(convertSizeUnit(fileSizeStr));
+        torrentInfo.setSize(UnitUtils.convertSizeUnit(fileSizeStr));
         torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.DASH_SEPARATED_DATE_TIME_FORMAT_PADDED_ZONE));
         torrentInfo.setFileCount(null);
         torrentInfo.setFiles(null);
@@ -68,13 +70,13 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
 
         List<TorrentInfo> torrentInfos = new ArrayList<>(pageSize());
         String tbody = StringUtils.subBetween(response, "<table class=\"listing\">", "</table>");
-        Matcher trMatcher = TR_PATTERN.matcher(tbody);
+        Matcher trMatcher = Patterns.TR_PATTERN.matcher(tbody);
         List<List<String>> mainInfoList = new ArrayList<>();
         List<List<String>> otherInfoList = new ArrayList<>();
         while (trMatcher.find()) {
             String tr = trMatcher.group();
             List<String> tds = new ArrayList<>();
-            Matcher matcher = TD_PATTERN.matcher(tr);
+            Matcher matcher = Patterns.TD_PATTERN.matcher(tr);
             while (matcher.find()) {
                 tds.add(matcher.group(1));
             }
@@ -91,9 +93,9 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
         for (int i = 0; i < mainInfoList.size(); i++) {
             List<String> mainInfo = mainInfoList.get(i);
             List<String> otherInfo = otherInfoList.get(i);
-            List<String> aTagContents = getTagContents(mainInfo.get(1), A_PATTERN);
+            List<String> aTagContents = Patterns.extractFirstCapturedGroupContents(mainInfo.get(1), Patterns.A_PATTERN);
             String name = aTagContents.get(1).replace("<span class=\"s\"> </span>", "");
-            Matcher hashMatcher = MAGNET_HASH_PATTERN.matcher(mainInfo.get(1));
+            Matcher hashMatcher = Patterns.MAGNET_HASH_PATTERN.matcher(mainInfo.get(1));
             String hash = hashMatcher.find() ? hashMatcher.group(1).toUpperCase() : null;
             String sizeStr = StringUtils.subBetween(otherInfo.get(0), "| Size: ", " |");
             String uploadTimeStr = StringUtils.subBetween(otherInfo.get(0), "| Date: ", " |");
@@ -102,7 +104,7 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
             torrentInfo.setId(id);
             torrentInfo.setName(name);
             torrentInfo.setHash(hash);
-            torrentInfo.setSize(convertSizeUnit(sizeStr));
+            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
             torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.DASH_SEPARATED_DATE_TIME_FORMAT_PADDED_ZONE));
             torrentInfos.add(torrentInfo);
         }
