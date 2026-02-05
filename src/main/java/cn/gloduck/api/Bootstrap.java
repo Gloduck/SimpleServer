@@ -16,6 +16,7 @@ public class Bootstrap {
     public static void main(String[] args) throws IOException {
         ServerConfig config = ConfigUtils.loadConfig(null, ServerConfig.class);
         setLoggerLevel(config.logLevel);
+        ApplicationShutdownHooks.registerShutdownHook();
         Integer workThreads = Optional.ofNullable(config.workThreads).orElse(5);
         SimpleServer server = new SimpleServer(config.port, workThreads);
         server.registerController(new IndexController());
