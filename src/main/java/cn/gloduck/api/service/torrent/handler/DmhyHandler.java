@@ -10,7 +10,6 @@ import cn.gloduck.api.utils.StringUtils;
 import cn.gloduck.api.utils.UnitUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
-import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
@@ -30,7 +29,7 @@ public class DmhyHandler extends AbstractTorrentHandler {
         HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
-        String response = sendRequest(request);
+        String response = sendPlainTextRequest(request);
         String uploadTimeStr = StringUtils.subBetween(response, "<li>發佈時間: <span>", "</span></li>");
         String sizeStr = StringUtils.subBetween(response, "<li>文件大小: <span>", "</span></li>");
         String hashStrContainer = StringUtils.subBetween(response, "<p><strong>Magnet連接:</strong>", "</p>");
@@ -76,7 +75,7 @@ public class DmhyHandler extends AbstractTorrentHandler {
         HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
-        String response = sendRequest(request);
+        String response = sendPlainTextRequest(request);
         if(response.contains("沒有可顯示資源")){
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }
