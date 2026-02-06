@@ -3,6 +3,8 @@ package cn.gloduck.api.entity.config;
 public class TorrentConfig {
     public String proxy;
 
+    public String bypassCfApiProxy;
+
     public String bypassCfApi;
 
     public WebConfig btsow;
@@ -20,6 +22,8 @@ public class TorrentConfig {
     public WebConfig torrentkitty;
 
     public WebConfig anybt;
+
+    public WebConfig extTo;
 
     public static class WebConfig {
         public String url;

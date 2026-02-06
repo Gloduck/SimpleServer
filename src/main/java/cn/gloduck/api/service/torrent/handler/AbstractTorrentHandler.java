@@ -24,7 +24,7 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
 
     private final String bypassCfApi;
 
-    private final String proxy;
+    private final String bypassCfApiProxy;
 
     private final int requestTimeout;
 
@@ -47,9 +47,7 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
 
 
     public boolean isWebsiteReachable(String websiteUrl) {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(websiteUrl))
-                .timeout(Duration.ofSeconds(validStatusTimeout))
+        HttpRequest request = requestBuilder(websiteUrl, validStatusTimeout)
                 .GET()
                 .build();
         try {
@@ -90,8 +88,11 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
         }
     }
 
-
     protected HttpRequest.Builder requestBuilder(String url) {
+        return requestBuilder(url, requestTimeout);
+    }
+
+    protected HttpRequest.Builder requestBuilder(String url, int timeout) {
         if (bypassCfApi != null) {
             URI originalUri = URI.create(url);
             String path = originalUri.getRawPath();
@@ -108,8 +109,8 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
                     .timeout(Duration.ofSeconds(requestTimeout))
                     .uri(URI.create(requestUrl));
             builder.header("x-hostname", originalUri.getHost());
-            if (proxy != null) {
-                builder.header("x-proxy", proxy);
+            if (bypassCfApiProxy != null) {
+                builder.header("x-proxy", bypassCfApiProxy);
             }
             return builder;
         } else {
@@ -140,8 +141,18 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
         this.baseUrl = config.url;
         this.requestTimeout = Optional.ofNullable(config.requestTimeout).orElse(5);
         this.validStatusTimeout = Optional.ofNullable(config.validStatusTimeout).orElse(1);
-        this.bypassCfApi = (torrentConfig.bypassCfApi != null && !torrentConfig.bypassCfApi.isEmpty()) ? torrentConfig.bypassCfApi : null;
-        this.proxy = (torrentConfig.proxy != null && !torrentConfig.proxy.isEmpty()) ? torrentConfig.proxy : null;
+        String bypassCfApi = null;
+        String bypassCfApiProxy = null;
+        boolean bypassCf = Boolean.TRUE.equals(config.bypassCf);
+        if (bypassCf) {
+            bypassCfApi = (torrentConfig.bypassCfApi != null && !torrentConfig.bypassCfApi.isEmpty()) ? torrentConfig.bypassCfApi : null;
+            boolean useProxy = Boolean.TRUE.equals(config.useProxy);
+            if (useProxy) {
+                bypassCfApiProxy = (torrentConfig.bypassCfApiProxy != null && !torrentConfig.bypassCfApiProxy.isEmpty()) ? torrentConfig.bypassCfApiProxy : null;
+            }
+        }
+        this.bypassCfApi = bypassCfApi;
+        this.bypassCfApiProxy = bypassCfApiProxy;
         this.httpClient = buildClientByConfig(torrentConfig, config);
     }
 
