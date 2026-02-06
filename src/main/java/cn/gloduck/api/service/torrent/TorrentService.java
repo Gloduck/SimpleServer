@@ -28,6 +28,7 @@ public class TorrentService {
         this.torrentHandlers = new ArrayList<>();
         this.scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
         tryInitHandler(config, config.btsow, BtsowHandler::new);
+        tryInitHandler(config, config.extTo, ExtToHandler::new);
         tryInitHandler(config, config.dmhy, DmhyHandler::new);
         tryInitHandler(config, config.mikan, MikanHandler::new);
         tryInitHandler(config, config.sukebeiNyaaSi, SukebeiNyaaSiHandler::new);
@@ -60,15 +61,16 @@ public class TorrentService {
             throw new RuntimeException(e);
         }
 
-        boolean useProxy = Boolean.TRUE.equals(config.useProxy);
-        String proxy = torrentConfig.proxy;
-        if (useProxy && (proxy == null || proxy.isEmpty())) {
-            throw new RuntimeException("Proxy is required when useProxy is true");
-        }
         boolean bypassCf = Boolean.TRUE.equals(config.bypassCf);
         String bypassCfApi = torrentConfig.bypassCfApi;
         if (bypassCf && (bypassCfApi == null || bypassCfApi.isEmpty())) {
             throw new RuntimeException("BypassCf is required when bypassCf is true");
+        }
+
+        boolean useProxy = Boolean.TRUE.equals(config.useProxy);
+        String proxy = !bypassCf ? torrentConfig.proxy : torrentConfig.bypassCfApiProxy;
+        if (useProxy && (proxy == null || proxy.isEmpty())) {
+            throw new RuntimeException("Proxy is required when useProxy is true");
         }
     }
 

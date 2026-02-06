@@ -9,7 +9,8 @@
   },
   "torrent": {
     "proxy": null,
-    "bypassCfApi": null,
+    "bypassCfApiProxy": null,
+    "bypassCfApi": "http://127.0.0.1:2227",
     "btsow": {
       "url": "https://btsow.lol",
       "validStatusTimeout": 3,
@@ -73,6 +74,14 @@
       "trustAllCertificates": false,
       "useProxy": false,
       "bypassCf": false
+    },
+    "extTo": {
+      "url": "https://ext.to",
+      "validStatusTimeout": 30,
+      "requestTimeout": 30,
+      "trustAllCertificates": false,
+      "useProxy": false,
+      "bypassCf": true
     }
   },
   "forward": {

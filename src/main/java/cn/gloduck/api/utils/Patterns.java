@@ -14,9 +14,37 @@ public class Patterns {
     public static final Pattern LI_PATTERN = Pattern.compile("<li\\b[^>]*>(.*?)</li>", Pattern.DOTALL);
     public static final Pattern A_PATTERN = Pattern.compile("<a\\b[^>]*>(.*?)</a>", Pattern.DOTALL);
 
+    public static final Pattern SPAN_PATTERN = Pattern.compile("<span\\b[^>]*>(.*?)</span>", Pattern.DOTALL);
+
+    public static final Pattern A_TAG_HREF_PATTERN = Pattern.compile("<a\\b[^>]*href=\"([^\"]+)\"[^>]*>");
+
     public static final Pattern DIV_PATTERN = Pattern.compile("<div\\b[^>]*>(.*?)</div>", Pattern.DOTALL);
 
     public static final Pattern MAGNET_HASH_PATTERN = Pattern.compile("magnet:\\?xt=urn:btih:([0-9a-zA-Z]{32,40})");
+
+
+    /**
+     * 从输入字符串中提取正则匹配的所有捕获组内容，去除首尾空格后返回列表
+     *
+     * @param input      待匹配的原始字符串
+     * @param tagPattern 正则匹配模式（必须包含捕获组）
+     * @return 处理后的匹配内容列表，无匹配/入参非法时返回空列表
+     */
+    public static List<String> extractCapturedGroupContents(String input, Pattern tagPattern) {
+
+        List<String> result = new ArrayList<>();
+        if (input == null || input.isEmpty() || tagPattern == null) {
+            return result;
+        }
+
+        Matcher matcher = tagPattern.matcher(input);
+        while (matcher.find()) {
+            String content = matcher.group(0);
+            content = content.trim();
+            result.add(content);
+        }
+        return result;
+    }
 
     /**
      * 从输入字符串中提取正则匹配的第一个捕获组内容，去除首尾空格后返回列表
