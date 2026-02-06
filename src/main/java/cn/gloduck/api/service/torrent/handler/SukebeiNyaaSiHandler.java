@@ -6,8 +6,8 @@ import java.util.Arrays;
 import java.util.List;
 
 public class SukebeiNyaaSiHandler extends AbstractNyaaSiHandler {
-    public SukebeiNyaaSiHandler(TorrentConfig.WebConfig config) {
-        super(config);
+    public SukebeiNyaaSiHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
+        super(torrentConfig, config);
     }
 
     @Override

@@ -8,10 +8,13 @@ import cn.gloduck.api.service.torrent.handler.*;
 import cn.gloduck.api.utils.ConfigUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiFunction;
 import java.util.logging.Logger;
 
 public class TorrentService {
@@ -24,16 +27,49 @@ public class TorrentService {
         this.config = config;
         this.torrentHandlers = new ArrayList<>();
         this.scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
-        Optional.ofNullable(config.btsow).ifPresent(btsow -> this.torrentHandlers.add(new BtsowHandler(btsow)));
-        Optional.ofNullable(config.dmhy).ifPresent(dmhy -> this.torrentHandlers.add(new DmhyHandler(dmhy)));
-        Optional.ofNullable(config.mikan).ifPresent(mikan -> this.torrentHandlers.add(new MikanHandler(mikan)));
-        Optional.ofNullable(config.sukebeiNyaaSi).ifPresent(nyaaSi -> this.torrentHandlers.add(new SukebeiNyaaSiHandler(nyaaSi)));
-        Optional.ofNullable(config.nyaaSi).ifPresent(nyaaSi -> this.torrentHandlers.add(new NyaaSiHandler(nyaaSi)));
-        Optional.ofNullable(config.tokyoToshokan).ifPresent(tokyoToshokan -> this.torrentHandlers.add(new TokyoToshokanHandler(tokyoToshokan)));
-        Optional.ofNullable(config.torrentkitty).ifPresent(torrentkitty -> this.torrentHandlers.add(new TorrentkittyHandler(torrentkitty)));
-        Optional.ofNullable(config.anybt).ifPresent(anybt -> this.torrentHandlers.add(new AnybtHandler(anybt)));
+        tryInitHandler(config, config.btsow, BtsowHandler::new);
+        tryInitHandler(config, config.dmhy, DmhyHandler::new);
+        tryInitHandler(config, config.mikan, MikanHandler::new);
+        tryInitHandler(config, config.sukebeiNyaaSi, SukebeiNyaaSiHandler::new);
+        tryInitHandler(config, config.nyaaSi, NyaaSiHandler::new);
+        tryInitHandler(config, config.tokyoToshokan, TokyoToshokanHandler::new);
+        tryInitHandler(config, config.torrentkitty, TorrentkittyHandler::new);
+        tryInitHandler(config, config.anybt, AnybtHandler::new);
         handlerStatusMap = new HashMap<>(torrentHandlers.size() / 3 * 4 + 1);
         scheduledExecutor.scheduleAtFixedRate(checkHandlerStatusTask(), 0, 30, TimeUnit.MINUTES);
+    }
+
+    private void tryInitHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config, BiFunction<TorrentConfig, TorrentConfig.WebConfig, TorrentHandler> initializer) {
+        if (config == null) {
+            return;
+        }
+        checkConfig(torrentConfig, config);
+        TorrentHandler handler = initializer.apply(torrentConfig, config);
+        this.torrentHandlers.add(handler);
+    }
+
+    private void checkConfig(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
+        String url = config.url;
+        if (url == null || url.isEmpty()) {
+            throw new RuntimeException("URL is required");
+        }
+
+        try {
+            new URI(url);
+        } catch (URISyntaxException e) {
+            throw new RuntimeException(e);
+        }
+
+        boolean useProxy = Boolean.TRUE.equals(config.useProxy);
+        String proxy = torrentConfig.proxy;
+        if (useProxy && (proxy == null || proxy.isEmpty())) {
+            throw new RuntimeException("Proxy is required when useProxy is true");
+        }
+        boolean bypassCf = Boolean.TRUE.equals(config.bypassCf);
+        String bypassCfApi = torrentConfig.bypassCfApi;
+        if (bypassCf && (bypassCfApi == null || bypassCfApi.isEmpty())) {
+            throw new RuntimeException("BypassCf is required when bypassCf is true");
+        }
     }
 
     private Runnable checkHandlerStatusTask() {
@@ -96,7 +132,7 @@ public class TorrentService {
             }
             List<TorrentInfo> items = searchResult.getItems();
             Boolean hasNext = searchResult.getHasNext();
-            if(hasNext && items.size() != torrentHandler.pageSize()){
+            if (hasNext && items.size() != torrentHandler.pageSize()) {
                 LOGGER.warning(String.format("Source %s has next page, the returned sizes do not match %s out of %s", code, torrentHandler.pageSize(), items.size()));
             }
             List<TorrentInfo> toAddResults;

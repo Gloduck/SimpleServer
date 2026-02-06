@@ -21,8 +21,8 @@ public class AnybtHandler extends AbstractTorrentHandler {
 
     private static final String DETAIL_SQL_TEMPLATE = "select /*+ SET_VAR(full_text_option='{\"highlight\":{ \"fields\":[\"file_name\"]}}') */ file_name,filesize,total_count,_id,category,firstadd_utc_timestamp,_score from library.dht where _id = '%s'";
 
-    public AnybtHandler(TorrentConfig.WebConfig config) {
-        super(config);
+    public AnybtHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
+        super(torrentConfig, config);
     }
 
     @Override
@@ -36,8 +36,7 @@ public class AnybtHandler extends AbstractTorrentHandler {
         // 构建请求体
         String requestBody = JsonUtils.writeValueAsString(requestBodyJson);
 
-        HttpRequest request = jsonRequestBuilder()
-                .uri(URI.create(API_URL))
+        HttpRequest request = jsonRequestBuilder(API_URL)
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
         JsonNode response = sendJsonRequest(request);
@@ -89,8 +88,7 @@ public class AnybtHandler extends AbstractTorrentHandler {
         // 构建请求体
         String requestBody = JsonUtils.writeValueAsString(requestBodyJson);
 
-        HttpRequest request = jsonRequestBuilder()
-                .uri(URI.create(API_URL))
+        HttpRequest request = jsonRequestBuilder(API_URL)
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
         JsonNode response = sendJsonRequest(request);

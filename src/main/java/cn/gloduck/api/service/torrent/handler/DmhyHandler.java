@@ -20,15 +20,14 @@ import java.util.regex.Matcher;
 public class DmhyHandler extends AbstractTorrentHandler {
 
 
-    public DmhyHandler(TorrentConfig.WebConfig config) {
-        super(config);
+    public DmhyHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
+        super(torrentConfig, config);
     }
 
     @Override
     public TorrentInfo queryDetail(String id) {
         String requestUrl = String.format("%s/topics/view/%s.html", baseUrl, id);
-        HttpRequest request = requestBuilder()
-                .uri(URI.create(requestUrl))
+        HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
         String response = sendRequest(request);
@@ -74,8 +73,7 @@ public class DmhyHandler extends AbstractTorrentHandler {
     @Override
     public ScrollPageResult<TorrentInfo> search(String keyword, Long index, String sortField, String sortOrder) {
         String requestUrl = String.format("%s/topics/list/page/%s?keyword=%s", baseUrl, index, URLEncoder.encode(keyword, StandardCharsets.UTF_8));
-        HttpRequest request = requestBuilder()
-                .uri(URI.create(requestUrl))
+        HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
         String response = sendRequest(request);

@@ -28,8 +28,8 @@ public class MikanHandler extends AbstractTorrentHandler{
     // 匹配十进制实体：&#开头， followed by 1-7位数字，以;结尾
     private static final Pattern DECIMAL_ENTITY_PATTERN = Pattern.compile("&#(\\d{1,7});");
 
-    public MikanHandler(TorrentConfig.WebConfig config) {
-        super(config);
+    public MikanHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
+        super(torrentConfig, config);
     }
 
     @Override

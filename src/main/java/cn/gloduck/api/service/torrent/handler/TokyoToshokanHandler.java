@@ -24,15 +24,14 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
     private static final Pattern CUR_PAGE_INFO_NUMBER_PATTERN = Pattern.compile("Showing results (\\d+) to (\\d+) of (\\d+)");
     private static final Pattern CUR_PAGE_INFO_PATTERN = Pattern.compile("Showing results \\d+ to \\d+ of \\d+");
 
-    public TokyoToshokanHandler(TorrentConfig.WebConfig config) {
-        super(config);
+    public TokyoToshokanHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
+        super(torrentConfig, config);
     }
 
     @Override
     public TorrentInfo queryDetail(String id) {
         String requestUrl = String.format("%s/details.php?id=%s", baseUrl, id);
-        HttpRequest request = requestBuilder()
-                .uri(URI.create(requestUrl))
+        HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
         String response = sendRequest(request);
@@ -59,8 +58,7 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
     @Override
     public ScrollPageResult<TorrentInfo> search(String keyword, Long index, String sortField, String sortOrder) {
         String requestUrl = String.format("%s/search.php?page=%s&searchComment=true&searchName=true&terms=%s", baseUrl, index, URLEncoder.encode(keyword, StandardCharsets.UTF_8));
-        HttpRequest request = requestBuilder()
-                .uri(URI.create(requestUrl))
+        HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
         String response = sendRequest(request);

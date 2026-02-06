@@ -14,16 +14,15 @@ import java.util.logging.Logger;
 public class BtsowHandler extends AbstractTorrentHandler {
     private static final int DEFAULT_PAGE_SIZE = 100;
 
-    public BtsowHandler(TorrentConfig.WebConfig config) {
-        super(config);
+    public BtsowHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
+        super(torrentConfig, config);
     }
 
     @Override
     public TorrentInfo queryDetail(String id) {
         String requestUrl = baseUrl + "/bts/data/api/magnet";
         String requestBody = String.format("[\"%s\"]", id);
-        HttpRequest request = jsonRequestBuilder()
-                .uri(URI.create(requestUrl))
+        HttpRequest request = jsonRequestBuilder(requestUrl)
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
         JsonNode response = sendJsonRequest(request);
@@ -59,8 +58,7 @@ public class BtsowHandler extends AbstractTorrentHandler {
     public ScrollPageResult<TorrentInfo> search(String keyword, Long index, String sortField, String sortOrder) {
         String requestBody = String.format("[{\"search\": \"%s\"},%s,%s]", keyword, DEFAULT_PAGE_SIZE, index);
         String requestUrl = baseUrl + "/bts/data/api/search";
-        HttpRequest request = jsonRequestBuilder()
-                .uri(URI.create(requestUrl))
+        HttpRequest request = jsonRequestBuilder(requestUrl)
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
         JsonNode response = sendJsonRequest(request);
