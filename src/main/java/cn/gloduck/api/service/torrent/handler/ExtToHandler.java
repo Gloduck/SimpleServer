@@ -104,7 +104,7 @@ public class ExtToHandler extends AbstractTorrentHandler {
         String sizeStr = StringUtils.subBetween(response, "<span class=\"content-size\">Size:", "</span>");
         sizeStr = sizeStr != null ? sizeStr.trim() : null;
         String name = StringUtils.subBetween(response, "<h1 class=\"card-title\">", "</h1>");
-        name = NAME_IGNORE_STR_PATTERN.matcher(name).replaceAll("");
+        name = NAME_IGNORE_STR_PATTERN.matcher(name).replaceAll("").trim();
         String strIncludeTime = StringUtils.subBetween(response, "<div class=\"col-12 detail-torrent-poster-info\">", "</div>");
         Date uploadTime = parseTimeAgo(strIncludeTime);
         String torrentFileTableBody = Patterns.extractFirstCapturedGroupContent(response, Patterns.TBODY_PATTERN);
@@ -211,7 +211,9 @@ public class ExtToHandler extends AbstractTorrentHandler {
                     String a = Patterns.extractFirstCapturedGroupContent(recordTd, Patterns.A_PATTERN);
                     if (a != null) {
                         String name = StringUtils.subBetween(a, "<b>", "</b>");
-                        torrentInfo.setName(name != null ? name.trim() : null);
+                        name = name != null ? name.replaceAll("<span>", "").replaceAll("</span>", "") : "";
+                        name = name.trim();
+                        torrentInfo.setName(name);
                     }
                 }
             }
