@@ -9,7 +9,6 @@ import cn.gloduck.api.utils.StringUtils;
 import cn.gloduck.api.utils.UnitUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
-import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
@@ -34,7 +33,7 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
         HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
-        String response = sendRequest(request);
+        String response = sendPlainTextRequest(request);
         if (response.contains("Entry not found")) {
             return null;
         }
@@ -61,7 +60,7 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
         HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
-        String response = sendRequest(request);
+        String response = sendPlainTextRequest(request);
         if (response.contains("No results returned")) {
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }

@@ -24,6 +24,8 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
 
     private final String bypassCfApi;
 
+    private final String proxy;
+
     private final int requestTimeout;
 
     private final int validStatusTimeout;
@@ -73,7 +75,7 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
         }
     }
 
-    public String sendRequest(HttpRequest request) {
+    public String sendPlainTextRequest(HttpRequest request) {
         String body = null;
         try {
             HttpResponse<String> response = httpClient.send(request, new StringBodyHandler());
@@ -89,16 +91,36 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
     }
 
 
-    protected HttpRequest.Builder requestBuilder(String requestUrl) {
-        return HttpRequest.newBuilder()
-                .uri(URI.create(requestUrl))
-                .timeout(java.time.Duration.ofSeconds(requestTimeout));
+    protected HttpRequest.Builder requestBuilder(String url) {
+        if (bypassCfApi != null) {
+            URI originalUri = URI.create(url);
+            String path = originalUri.getRawPath();
+            StringBuilder requestUrlBuilder = new StringBuilder(bypassCfApi);
+            if (path != null && !path.isEmpty()) {
+                requestUrlBuilder.append(path);
+            }
+            String query = originalUri.getRawQuery();
+            if (query != null && !query.isEmpty()) {
+                requestUrlBuilder.append("?").append(query);
+            }
+            String requestUrl = requestUrlBuilder.toString();
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .timeout(Duration.ofSeconds(requestTimeout))
+                    .uri(URI.create(requestUrl));
+            builder.header("x-hostname", originalUri.getHost());
+            if (proxy != null) {
+                builder.header("x-proxy", proxy);
+            }
+            return builder;
+        } else {
+            return HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(java.time.Duration.ofSeconds(requestTimeout));
+        }
     }
 
     protected HttpRequest.Builder jsonRequestBuilder(String requestUrl) {
-        return HttpRequest.newBuilder()
-                .uri(URI.create(requestUrl))
-                .timeout(java.time.Duration.ofSeconds(requestTimeout))
+        return requestBuilder(requestUrl)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json");
     }
@@ -118,7 +140,8 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
         this.baseUrl = config.url;
         this.requestTimeout = Optional.ofNullable(config.requestTimeout).orElse(5);
         this.validStatusTimeout = Optional.ofNullable(config.validStatusTimeout).orElse(1);
-        this.bypassCfApi = torrentConfig.bypassCfApi;
+        this.bypassCfApi = (torrentConfig.bypassCfApi != null && !torrentConfig.bypassCfApi.isEmpty()) ? torrentConfig.bypassCfApi : null;
+        this.proxy = (torrentConfig.proxy != null && !torrentConfig.proxy.isEmpty()) ? torrentConfig.proxy : null;
         this.httpClient = buildClientByConfig(torrentConfig, config);
     }
 

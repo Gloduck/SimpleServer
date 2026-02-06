@@ -39,7 +39,7 @@ public class MikanHandler extends AbstractTorrentHandler{
                 .uri(URI.create(requestUrl))
                 .GET()
                 .build();
-        String response = sendRequest(request);
+        String response = sendPlainTextRequest(request);
         String name = StringUtils.subBetween(response, "<p class=\"episode-title\">", "</p>");
         name = unescapeHtml(name);
         String sizeStr = StringUtils.subBetween(response, "<p class=\"bangumi-info\">文件大小：", "</p>").trim();
@@ -63,7 +63,7 @@ public class MikanHandler extends AbstractTorrentHandler{
                 .uri(URI.create(requestUrl))
                 .GET()
                 .build();
-        String response = sendRequest(request);
+        String response = sendPlainTextRequest(request);
         if(response.contains("找不到对应结果")){
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }
