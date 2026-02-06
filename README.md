@@ -20,4 +20,5 @@
       ```
     + 如果要修改端口，需要同步修改配置文件中：bypassCfApi的端口
     + 如果要为Cloudflare绕过API单独设置代理，需要确保容器内部能访问代理，并且修改配置文件中：bypassCfApiProxy，添加代理地址。
+    由于绕过Cloudflare需要需要一定的时间，所以需要将requestTimeout设置为较大的值，例如：30秒。
     
