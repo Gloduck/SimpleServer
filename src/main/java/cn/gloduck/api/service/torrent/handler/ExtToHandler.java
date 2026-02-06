@@ -107,39 +107,6 @@ public class ExtToHandler extends AbstractTorrentHandler {
         name = NAME_IGNORE_STR_PATTERN.matcher(name).replaceAll("").trim();
         String strIncludeTime = StringUtils.subBetween(response, "<div class=\"col-12 detail-torrent-poster-info\">", "</div>");
         Date uploadTime = parseTimeAgo(strIncludeTime);
-        String torrentFileTableBody = Patterns.extractFirstCapturedGroupContent(response, Patterns.TBODY_PATTERN);
-        List<String> files = Patterns.extractFirstCapturedGroupContents(torrentFileTableBody, Patterns.TR_PATTERN);
-        List<TorrentFileInfo> fileInfos = new ArrayList<>(files.size());
-        for (String file : files) {
-            List<String> fileTds = Patterns.extractCapturedGroupContents(file, Patterns.TD_PATTERN);
-            String fileSizeStr = null;
-            String fileName = null;
-            for (String fileTd : fileTds) {
-                if (fileTd.contains("folder-name")) {
-                    fileName = Patterns.extractFirstCapturedGroupContent(file, Patterns.A_PATTERN);
-                } else if (fileTd.contains("file-size")) {
-                    fileSizeStr = StringUtils.subBetween(fileTd, "<div class=\"file-size\">", "</div>");
-                }
-            }
-            Long fileSize = null;
-            if (fileSizeStr != null) {
-                fileSize = UnitUtils.convertSizeUnit(fileSizeStr.trim());
-            }
-            if (fileName != null && fileSize != null) {
-                TorrentFileInfo fileInfo = new TorrentFileInfo();
-                fileInfo.setName(fileName);
-                fileInfo.setSize(fileSize);
-                fileInfos.add(fileInfo);
-            }
-        }
-        TorrentInfo torrentInfo = new TorrentInfo();
-        torrentInfo.setId(id);
-        torrentInfo.setName(name);
-        torrentInfo.setHash(null);
-        torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
-        torrentInfo.setUploadTime(uploadTime);
-        torrentInfo.setFileCount((long) fileInfos.size());
-        torrentInfo.setFiles(fileInfos);
         String pageToken = Patterns.extractFirstCapturedGroupContent(response, PAGE_TOKEN_PATTERN);
         String csrfToken = Patterns.extractFirstCapturedGroupContent(response, CSRF_TOKEN_PATTERN);
         String torrentId = extractTorrentId(id);
@@ -152,6 +119,15 @@ public class ExtToHandler extends AbstractTorrentHandler {
         if (!jsonNode.path("success").asBoolean(false)) {
             throw new ApiException("Failed to get torrent hash");
         }
+
+        TorrentInfo torrentInfo = new TorrentInfo();
+        torrentInfo.setId(id);
+        torrentInfo.setName(name);
+        torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
+        torrentInfo.setUploadTime(uploadTime);
+        torrentInfo.setFileCount(null);
+        torrentInfo.setFiles(null);
+
         torrentInfo.setHash(Patterns.extractFirstCapturedGroupContent(jsonNode.path("magnet").asText(""), Patterns.MAGNET_HASH_PATTERN).toUpperCase());
 
         return torrentInfo;
