@@ -43,7 +43,8 @@ public class UnitUtils {
         sizeStr = sizeStr.trim().replace(" ", "").toLowerCase();
         for (Pair<String, Long> kv : UNIT_MAP) {
             if (sizeStr.endsWith(kv.getKey())) {
-                return Math.round(Double.parseDouble(sizeStr.replace(kv.getKey(), "")) * kv.getValue());
+                String numericStr = sizeStr.replaceAll("[^-+0-9.]", "");
+                    return Math.round(Double.parseDouble(numericStr) * kv.getValue());
             }
         }
         String numericStr = sizeStr.replaceAll("[^-+0-9.]", "");
