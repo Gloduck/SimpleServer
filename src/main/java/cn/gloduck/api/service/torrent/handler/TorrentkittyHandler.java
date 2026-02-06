@@ -18,15 +18,14 @@ import java.util.regex.Matcher;
 
 public class TorrentkittyHandler extends AbstractTorrentHandler {
 
-    public TorrentkittyHandler(TorrentConfig.WebConfig config) {
-        super(config);
+    public TorrentkittyHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
+        super(torrentConfig, config);
     }
 
     @Override
     public TorrentInfo queryDetail(String id) {
         String requestUrl = String.format("%s/information/%s", baseUrl, id);
-        HttpRequest request = requestBuilder()
-                .uri(URI.create(requestUrl))
+        HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
         String response = sendRequest(request);
@@ -112,8 +111,7 @@ public class TorrentkittyHandler extends AbstractTorrentHandler {
     @Override
     public ScrollPageResult<TorrentInfo> search(String keyword, Long index, String sortField, String sortOrder) {
         String requestUrl = String.format("%s/search/%s/%d", baseUrl, URLEncoder.encode(keyword, StandardCharsets.UTF_8), index);
-        HttpRequest request = requestBuilder()
-                .uri(URI.create(requestUrl))
+        HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
         String response = sendRequest(request);

@@ -6,8 +6,8 @@ import java.util.Arrays;
 import java.util.List;
 
 public class NyaaSiHandler extends AbstractNyaaSiHandler{
-    public NyaaSiHandler(TorrentConfig.WebConfig config) {
-        super(config);
+    public NyaaSiHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
+        super(torrentConfig, config);
     }
 
     @Override

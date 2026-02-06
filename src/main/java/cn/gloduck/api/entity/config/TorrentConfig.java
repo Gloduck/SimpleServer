@@ -1,6 +1,10 @@
 package cn.gloduck.api.entity.config;
 
 public class TorrentConfig {
+    public String proxy;
+
+    public String bypassCfApi;
+
     public WebConfig btsow;
 
     public WebConfig dmhy;
@@ -22,11 +26,11 @@ public class TorrentConfig {
 
         public Integer validStatusTimeout;
 
-        public Integer connectTimeout;
-
         public Integer requestTimeout;
 
-        public String proxy;
+        public Boolean useProxy;
+
+        public Boolean bypassCf;
 
         public Boolean trustAllCertificates;
     }

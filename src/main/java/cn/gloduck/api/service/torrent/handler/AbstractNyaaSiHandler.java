@@ -18,15 +18,14 @@ import java.util.*;
 import java.util.regex.Matcher;
 
 public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
-    public AbstractNyaaSiHandler(TorrentConfig.WebConfig config) {
-        super(config);
+    public AbstractNyaaSiHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
+        super(torrentConfig, config);
     }
 
     @Override
     public TorrentInfo queryDetail(String id) {
         String requestUrl = String.format("%s/view/%s", baseUrl, id);
-        HttpRequest request = requestBuilder()
-                .uri(URI.create(requestUrl))
+        HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
         String response = sendRequest(request);
@@ -89,8 +88,7 @@ public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
         } else {
             requestUrl = String.format("%s/?q=%s&p=%d&c=0_0", baseUrl, keyword, index);
         }
-        HttpRequest request = requestBuilder()
-                .uri(URI.create(requestUrl))
+        HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
         String response = sendRequest(request);

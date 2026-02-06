@@ -19,7 +19,10 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
     private final static Logger LOGGER = Logger.getLogger(AbstractTorrentHandler.class.getName());
 
     protected final HttpClient httpClient;
+
     protected final String baseUrl;
+
+    private final String bypassCfApi;
 
     private final int requestTimeout;
 
@@ -86,23 +89,37 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
     }
 
 
-    protected HttpRequest.Builder requestBuilder() {
+    protected HttpRequest.Builder requestBuilder(String requestUrl) {
         return HttpRequest.newBuilder()
+                .uri(URI.create(requestUrl))
                 .timeout(java.time.Duration.ofSeconds(requestTimeout));
     }
 
-    protected HttpRequest.Builder jsonRequestBuilder() {
+    protected HttpRequest.Builder jsonRequestBuilder(String requestUrl) {
         return HttpRequest.newBuilder()
+                .uri(URI.create(requestUrl))
                 .timeout(java.time.Duration.ofSeconds(requestTimeout))
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json");
     }
 
-    public AbstractTorrentHandler(TorrentConfig.WebConfig config) {
+
+    private HttpClient buildClientByConfig(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
+        boolean useProxy = Boolean.TRUE.equals(config.useProxy);
+        String proxy = torrentConfig.proxy;
+        boolean bypassCf = Boolean.TRUE.equals(config.bypassCf);
+        // 如果要绕过CF，则应该让CF的绕过服务器来使用代理
+        useProxy = useProxy && !bypassCf;
+        proxy = useProxy ? proxy : null;
+        return HttpClientUtils.buildClient(5, proxy, Boolean.TRUE.equals(config.trustAllCertificates));
+    }
+
+    public AbstractTorrentHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
         this.baseUrl = config.url;
         this.requestTimeout = Optional.ofNullable(config.requestTimeout).orElse(5);
         this.validStatusTimeout = Optional.ofNullable(config.validStatusTimeout).orElse(1);
-        this.httpClient = HttpClientUtils.buildClient(config.connectTimeout, config.proxy, Boolean.TRUE.equals(config.trustAllCertificates));
+        this.bypassCfApi = torrentConfig.bypassCfApi;
+        this.httpClient = buildClientByConfig(torrentConfig, config);
     }
 
 }

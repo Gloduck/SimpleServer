@@ -8,62 +8,71 @@
     "licenseValidDays": 180
   },
   "torrent": {
+    "proxy": null,
+    "bypassCfApi": null,
     "btsow": {
       "url": "https://btsow.lol",
       "validStatusTimeout": 3,
-      "connectTimeout": 5,
       "requestTimeout": 10,
       "trustAllCertificates": true,
-      "proxy": null
+      "useProxy": false,
+      "bypassCf": false
     },
     "dmhy": {
       "url": "https://www.dmhy.org",
       "validStatusTimeout": 3,
-      "connectTimeout": 5,
       "requestTimeout": 30,
-      "proxy": null
+      "trustAllCertificates": false,
+      "useProxy": false,
+      "bypassCf": false
     },
     "mikan": {
       "url": "https://mikanani.me",
       "validStatusTimeout": 3,
-      "connectTimeout": 5,
       "requestTimeout": 30,
-      "proxy": null
+      "trustAllCertificates": false,
+      "useProxy": false,
+      "bypassCf": false
     },
     "nyaaSi": {
       "url": "https://nyaa.si",
       "validStatusTimeout": 3,
-      "connectTimeout": 5,
       "requestTimeout": 30,
-      "proxy": null
+      "trustAllCertificates": false,
+      "useProxy": false,
+      "bypassCf": false
     },
     "sukebeiNyaaSi": {
       "url": "https://sukebei.nyaa.si",
       "validStatusTimeout": 3,
-      "connectTimeout": 5,
       "requestTimeout": 30,
-      "proxy": null
+      "trustAllCertificates": false,
+      "useProxy": false,
+      "bypassCf": false
     },
     "tokyoToshokan": {
       "url": "https://www.tokyotosho.info",
       "validStatusTimeout": 10,
-      "connectTimeout": 10,
       "requestTimeout": 30,
-      "proxy": null
+      "trustAllCertificates": false,
+      "useProxy": false,
+      "bypassCf": false
     },
     "torrentkitty": {
       "url": "https://torrentkitty.one",
       "validStatusTimeout": 3,
-      "connectTimeout": 5,
       "requestTimeout": 30,
-      "proxy": null
+      "trustAllCertificates": false,
+      "useProxy": false,
+      "bypassCf": false
     },
     "anybt": {
       "url": "https://anybt.eth.limo",
       "validStatusTimeout": 10,
-      "connectTimeout": 10,
       "requestTimeout": 30,
-      "proxy": null
+      "trustAllCertificates": false,
+      "useProxy": false,
+      "bypassCf": false
     }
   },
   "forward": {
