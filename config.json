@@ -12,7 +12,7 @@
     "bypassCfApiProxy": null,
     "bypassCfApi": "http://127.0.0.1:2227",
     "btsow": {
-      "url": "https://btsow.lol",
+      "url": "https://btsow.pics",
       "validStatusTimeout": 3,
       "requestTimeout": 10,
       "trustAllCertificates": true,
