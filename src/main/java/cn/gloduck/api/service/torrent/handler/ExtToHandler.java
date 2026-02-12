@@ -6,10 +6,13 @@ import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
 import cn.gloduck.api.utils.NetUtils;
 import cn.gloduck.api.utils.Patterns;
-import cn.gloduck.api.utils.StringUtils;
 import cn.gloduck.api.utils.UnitUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
@@ -24,8 +27,7 @@ import java.util.regex.Pattern;
 public class ExtToHandler extends AbstractTorrentHandler {
     private static final int DEFAULT_PAGE_SIZE = 50;
 
-    private static final Pattern TIME_AGO_PATTERN = Pattern.compile("^.*?(\\d+)\\s+(\\w+)\\s+ago.*$", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-    private static final Pattern NAME_IGNORE_STR_PATTERN = Pattern.compile("（检索：.*?）");
+    private static final Pattern TIME_PATTERN = Pattern.compile(".*?(\\d+)\\s+(second|minute|hour|day|month|year)s?.*", Pattern.CASE_INSENSITIVE);
     private static final Pattern PAGE_TOKEN_PATTERN = Pattern.compile("window\\.pageToken\\s*=\\s*'([^']+)';?", Pattern.CASE_INSENSITIVE);
     private static final Pattern CSRF_TOKEN_PATTERN = Pattern.compile("window\\.csrfToken\\s*=\\s*'([^']+)';?", Pattern.CASE_INSENSITIVE);
 
@@ -56,20 +58,21 @@ public class ExtToHandler extends AbstractTorrentHandler {
         return hexString.toString();
     }
 
-    public static Date parseTimeAgo(String strIncludeTime) {
+    public static Date parseTime(String strIncludeTime) {
         Date date = null;
         if (strIncludeTime == null || strIncludeTime.isBlank()) {
             return date;
         }
 
-        Matcher matcher = TIME_AGO_PATTERN.matcher(strIncludeTime.trim());
+        Matcher matcher = TIME_PATTERN.matcher(strIncludeTime.trim());
         if (!matcher.matches()) {
             return date;
         }
 
         try {
             long amount = Long.parseLong(matcher.group(1));
-            String unit = matcher.group(2).toLowerCase().replaceAll("s$", "");
+            String unit = matcher.group(2).toLowerCase();
+
             ChronoUnit chronoUnit = switch (unit) {
                 case "second" -> ChronoUnit.SECONDS;
                 case "minute" -> ChronoUnit.MINUTES;
@@ -79,10 +82,10 @@ public class ExtToHandler extends AbstractTorrentHandler {
                 case "year" -> ChronoUnit.YEARS;
                 default -> null;
             };
+
             if (chronoUnit != null) {
                 ZonedDateTime now = ZonedDateTime.now();
                 ZonedDateTime targetTime = now.minus(amount, chronoUnit);
-
                 date = Date.from(targetTime.toInstant());
             }
 
@@ -101,15 +104,26 @@ public class ExtToHandler extends AbstractTorrentHandler {
         HttpRequest request = requestBuilder(requestUrl)
                 .GET().build();
         String response = sendPlainTextRequest(request);
-        String sizeStr = StringUtils.subBetween(response, "<span class=\"content-size\">Size:", "</span>");
-        sizeStr = sizeStr != null ? sizeStr.trim() : null;
-        String name = StringUtils.subBetween(response, "<h1 class=\"card-title\">", "</h1>");
-        name = NAME_IGNORE_STR_PATTERN.matcher(name).replaceAll("").trim();
-        String strIncludeTime = StringUtils.subBetween(response, "<div class=\"col-12 detail-torrent-poster-info\">", "</div>");
-        Date uploadTime = parseTimeAgo(strIncludeTime);
+        Document document = Jsoup.parse(response);
+
+        Element titleElement = document.selectFirst("h1.card-title");
+        String name = titleElement != null ? titleElement.html().trim() : "";
+
+        Element sizeElement = document.selectFirst("span.content-size");
+        String sizeStr = sizeElement != null ? sizeElement.text().replace("Size:", "").trim() : null;
+
+        Element posterInfoElement = document.selectFirst("div.detail-torrent-poster-info");
+        String uploadTimeText = posterInfoElement != null ? posterInfoElement.text() : null;
+        Date uploadTime = parseTime(uploadTimeText);
+
+        List<TorrentFileInfo> files = parseFiles(document);
+
         String pageToken = Patterns.extractFirstCapturedGroupContent(response, PAGE_TOKEN_PATTERN);
         String csrfToken = Patterns.extractFirstCapturedGroupContent(response, CSRF_TOKEN_PATTERN);
-        String torrentId = extractTorrentId(id);
+
+        Element downloadBtn = document.selectFirst("a.download-btn-magnet");
+        String torrentId = downloadBtn != null ? downloadBtn.attr("data-id") : extractTorrentId(id);
+
         long timestamp = System.currentTimeMillis() / 1000;
         String hmac = computeHMAC(torrentId, timestamp, pageToken);
         HttpRequest fetchHashRequest = requestBuilder(String.format("%s/ajax/getTorrentMagnet.php", baseUrl))
@@ -125,12 +139,59 @@ public class ExtToHandler extends AbstractTorrentHandler {
         torrentInfo.setName(name);
         torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
         torrentInfo.setUploadTime(uploadTime);
-        torrentInfo.setFileCount(null);
-        torrentInfo.setFiles(null);
+        torrentInfo.setFileCount((long) files.size());
+        torrentInfo.setFiles(files);
 
         torrentInfo.setHash(Patterns.extractFirstCapturedGroupContent(jsonNode.path("magnet").asText(""), Patterns.MAGNET_HASH_PATTERN).toUpperCase());
 
         return torrentInfo;
+    }
+
+    private List<TorrentFileInfo> parseFiles(Document document) {
+        List<TorrentFileInfo> files = new ArrayList<>();
+        Element filesContainer = document.selectFirst("div#torrent_files");
+        if (filesContainer == null) {
+            return files;
+        }
+
+        // Get the main table only (not nested tables)
+        Element mainTable = filesContainer.selectFirst("table");
+        if (mainTable == null) {
+            return files;
+        }
+
+        parseTableRows(mainTable, files);
+        return files;
+    }
+
+    private void parseTableRows(Element table, List<TorrentFileInfo> files) {
+        Elements rows = table.select("> tbody > tr");
+        for (Element row : rows) {
+            Element nestedTable = row.selectFirst("table");
+            if (nestedTable != null) {
+                parseTableRows(nestedTable, files);
+                continue;
+            }
+
+            // Extract file link and size
+            Element fileLink = row.selectFirst("td.file-name-line-td a");
+            if (fileLink == null) {
+                continue;
+            }
+
+            Elements sizeElements = row.select("td.file-size-td div.file-size");
+            TorrentFileInfo fileInfo = new TorrentFileInfo();
+            fileInfo.setName(fileLink.text());
+
+            // Second size element contains the file size
+            if (sizeElements.size() >= 2) {
+                String fileSizeStr = sizeElements.get(1).text().trim();
+                fileInfo.setSize(UnitUtils.convertSizeUnit(fileSizeStr, 0L));
+            } else {
+                fileInfo.setSize(0L);
+            }
+            files.add(fileInfo);
+        }
     }
 
     public static String extractTorrentId(String fullId) {
@@ -156,56 +217,58 @@ public class ExtToHandler extends AbstractTorrentHandler {
                 .GET().build();
         String response = sendPlainTextRequest(request);
 
+        Document document = Jsoup.parse(response);
+        Element table = document.selectFirst("table.search-table");
 
-        String table = StringUtils.subBetween(response, "<table class=\"table table-striped table-hover search-table\">", "</table>");
-        if (StringUtils.isNullOrEmpty(table)) {
+        if (table == null) {
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }
         List<TorrentInfo> torrentInfos = new ArrayList<>(DEFAULT_PAGE_SIZE);
-        String tbody = StringUtils.subBetween(table, "<tbody>", "</tbody>");
-        List<String> records = Patterns.extractFirstCapturedGroupContents(tbody, Patterns.TR_PATTERN);
-        for (String record : records) {
-            TorrentInfo torrentInfo = new TorrentInfo();
-            List<String> recordTds = Patterns.extractFirstCapturedGroupContents(record, Patterns.TD_PATTERN);
-            for (String recordTd : recordTds) {
-                if (recordTd.contains("<span class=\"add-block\">")) {
-                    List<String> spanContents = Patterns.extractFirstCapturedGroupContents(recordTd, Patterns.SPAN_PATTERN);
-                    if (spanContents.size() != 2) {
-                        continue;
-                    }
-                    String content = spanContents.get(1);
-                    if (Objects.equals("Size", spanContents.get(0))) {
-                        torrentInfo.setSize(UnitUtils.convertSizeUnit(content));
-                    }
-                    if (Objects.equals("Age", spanContents.get(0))) {
-                        torrentInfo.setUploadTime(parseTimeAgo(content));
-                    }
-                } else if (recordTd.contains("torrent-title-link")) {
-                    String href = Patterns.extractFirstCapturedGroupContent(recordTd, Patterns.A_TAG_HREF_PATTERN);
-                    String id = href.substring(1, href.length() - 1);
-                    torrentInfo.setId(id);
-                    String a = Patterns.extractFirstCapturedGroupContent(recordTd, Patterns.A_PATTERN);
-                    if (a != null) {
-                        String name = StringUtils.subBetween(a, "<b>", "</b>");
-                        name = name != null ? name.replaceAll("<span>", "").replaceAll("</span>", "") : "";
-                        name = name.trim();
-                        torrentInfo.setName(name);
+        Elements trs = table.select("tbody tr");
+
+        for (Element tr : trs) {
+            // 从第一列提取id和name
+            Element titleLink = tr.selectFirst("a.torrent-title-link");
+            String id = "";
+            String name = "";
+
+            if (titleLink != null) {
+                String href = titleLink.attr("href");
+                id = href.substring(1, href.length() - 1);
+                Element b = titleLink.selectFirst("b");
+                if (b != null) {
+                    name = b.html().replace("<span>", "").replace("</span>", "").trim();
+                }
+            }
+
+            // 从其他列提取size和age
+            String sizeStr = null;
+            String ageStr = null;
+
+            Elements sizeWrappers = tr.select("span.add-block");
+            for (Element wrapper : sizeWrappers) {
+                String label = wrapper.text().trim();
+                Element valueSpan = wrapper.nextElementSibling();
+                if (valueSpan != null) {
+                    if ("Size".equals(label)) {
+                        sizeStr = valueSpan.text().trim();
+                    } else if ("Age".equals(label)) {
+                        ageStr = valueSpan.text().trim();
                     }
                 }
             }
 
+            TorrentInfo torrentInfo = new TorrentInfo();
+            torrentInfo.setId(id);
+            torrentInfo.setName(name);
+            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr, 0L));
+            torrentInfo.setUploadTime(parseTime(ageStr));
             // 列表页无法获取Hash
             torrentInfo.setHash(null);
             torrentInfos.add(torrentInfo);
         }
-        boolean hasMore = false;
-        String ul = StringUtils.subBetween(response, "<ul class=\"pages\">", "</ul>");
-        if (ul != null) {
-            List<String> lis = Patterns.extractCapturedGroupContents(ul, Patterns.LI_PATTERN);
-            if (!lis.isEmpty()) {
-                hasMore = !lis.get(lis.size() - 1).contains("active");
-            }
-        }
+        Elements pageLis = document.select("ul.pages li");
+        boolean hasMore = !pageLis.isEmpty() && !pageLis.get(pageLis.size() - 1).classNames().contains("active");
         return new ScrollPageResult<>(index, hasMore, torrentInfos);
     }
 

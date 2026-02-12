@@ -36,15 +36,20 @@ public class UnitUtils {
         });
     }
 
+    public static long convertSizeUnit(String sizeStr, long defaultValue) {
+        Long size = convertSizeUnit(sizeStr);
+        return size == null ? defaultValue : size;
+    }
+
     public static Long convertSizeUnit(String sizeStr) {
-        if (sizeStr == null) {
+        if (sizeStr == null || sizeStr.isBlank()) {
             return null;
         }
         sizeStr = sizeStr.trim().replace(" ", "").toLowerCase();
         for (Pair<String, Long> kv : UNIT_MAP) {
             if (sizeStr.endsWith(kv.getKey())) {
                 String numericStr = sizeStr.replaceAll("[^-+0-9.]", "");
-                    return Math.round(Double.parseDouble(numericStr) * kv.getValue());
+                return Math.round(Double.parseDouble(numericStr) * kv.getValue());
             }
         }
         String numericStr = sizeStr.replaceAll("[^-+0-9.]", "");

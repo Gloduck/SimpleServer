@@ -2,20 +2,20 @@ package cn.gloduck.api.service.torrent.handler;
 
 import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
-import cn.gloduck.api.exceptions.ApiException;
 import cn.gloduck.api.utils.DateUtils;
 import cn.gloduck.api.utils.Patterns;
-import cn.gloduck.api.utils.StringUtils;
 import cn.gloduck.api.utils.UnitUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -40,16 +40,27 @@ public class MikanHandler extends AbstractTorrentHandler{
                 .GET()
                 .build();
         String response = sendPlainTextRequest(request);
-        String name = StringUtils.subBetween(response, "<p class=\"episode-title\">", "</p>");
-        name = unescapeHtml(name);
-        String sizeStr = StringUtils.subBetween(response, "<p class=\"bangumi-info\">文件大小：", "</p>").trim();
-        String uploadTimeStr = StringUtils.subBetween(response, "<p class=\"bangumi-info\">发布日期：", "</p>").trim();
+        Document document = Jsoup.parse(response);
+
+        String name = Optional.ofNullable(document.selectFirst("p.episode-title")).map(Element::text).map(MikanHandler::unescapeHtml).orElse("");
+        Date uploadTime = null;
+        long size = 0L;
+        Elements infos = document.select(".bangumi-info");
+        for (Element info : infos) {
+            String content = info.text();
+            if(content.contains("发布日期：")){
+                String uploadTimeStr = content.replace("发布日期：", "").trim();
+                uploadTime = DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED);
+            } else if(content.contains("文件大小：")){
+                size = UnitUtils.convertSizeUnit(content.replace("文件大小：", "").trim(), 0L);
+            }
+        }
         TorrentInfo torrentInfo = new TorrentInfo();
         torrentInfo.setId(id);
         torrentInfo.setName(name);
         torrentInfo.setHash(id.toUpperCase());
-        torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
-        torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
+        torrentInfo.setSize(size);
+        torrentInfo.setUploadTime(uploadTime);
         torrentInfo.setFileCount(null);
         torrentInfo.setFiles(null);
 
@@ -67,38 +78,28 @@ public class MikanHandler extends AbstractTorrentHandler{
         if(response.contains("找不到对应结果")){
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }
+        Document document = Jsoup.parse(response);
         List<TorrentInfo> torrentInfos = new ArrayList<>(pageSize());
-        Matcher tbodyMatcher = Patterns.TBODY_PATTERN.matcher(response);
-        if (!tbodyMatcher.find()) {
-            throw new ApiException("Api response error data");
-        }
-        String tbody = tbodyMatcher.group(1);
-        Matcher trMatcher = Patterns.TR_PATTERN.matcher(tbody);
-        while (trMatcher.find()) {
-            String tr = trMatcher.group();
-            List<String> tds = new ArrayList<>();
-            Matcher matcher = Patterns.TD_PATTERN.matcher(tr);
-            while (matcher.find()) {
-                tds.add(matcher.group(1));
-            }
+        Elements trs = document.select("tbody tr.js-search-results-row");
+        for (Element tr : trs) {
+            Elements tds = tr.getElementsByTag("td");
             if (tds.size() != 6) {
                 continue;
             }
-            Matcher hashMatcher = Patterns.MAGNET_HASH_PATTERN.matcher(tds.get(0));
-            String hash = hashMatcher.find() ? hashMatcher.group(1) : null;
-            if (hash == null) {
-                continue;
-            }
-            String name = StringUtils.subBetween(tds.get(1), String.format("class=\"magnet-link-wrap\">", hash), "</a>");
-            name = unescapeHtml(name);
-            String sizeStr = tds.get(2).trim();
+            String hash = Patterns.extractFirstCapturedGroupContent(tds.get(0).html(), Patterns.MAGNET_HASH_PATTERN);
+            String name = Optional.ofNullable(tds.get(1).selectFirst("a.magnet-link-wrap"))
+                    .map(Element::text)
+                    .map(MikanHandler::unescapeHtml)
+                    .orElse("");
+            String sizeStr = tds.get(2).text().trim();
+            String updateTimeStr = tds.get(3).text().trim();
 
             TorrentInfo torrentInfo = new TorrentInfo();
             torrentInfo.setId(hash);
             torrentInfo.setName(name);
             torrentInfo.setHash(hash.toUpperCase());
-            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
-            torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(tds.get(3).trim(), DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
+            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr, 0L));
+            torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(updateTimeStr, DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
             torrentInfos.add(torrentInfo);
         }
         if(sortField != null && !sortField.isEmpty()){

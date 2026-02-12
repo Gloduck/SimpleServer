@@ -3,19 +3,17 @@ package cn.gloduck.api.service.torrent.handler;
 import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
-import cn.gloduck.api.utils.DateUtils;
-import cn.gloduck.api.utils.Patterns;
-import cn.gloduck.api.utils.StringUtils;
-import cn.gloduck.api.utils.UnitUtils;
+import cn.gloduck.api.utils.*;
 import cn.gloduck.common.entity.base.ScrollPageResult;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 import java.net.URLEncoder;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -37,16 +35,44 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
         if (response.contains("Entry not found")) {
             return null;
         }
-        String uploadTimeStr = StringUtils.subBetween(response, "<li class=\"detailsleft shade\" id=\"detailsleft\">Date Submitted:</li>\n<li class=\"detailsright shade\">", "</li>");
-        String fileSizeStr = StringUtils.subBetween(response, "<li class=\"detailsleft\">Filesize:</li>\n\t<li class=\"detailsright\">", "</li>");
-        String fileNameContainer = StringUtils.subBetween(response, "<li class=\"detailsleft\">Torrent Name:</li>\n<li class=\"detailsright\">", "</li>");
-        String name = Patterns.extractFirstCapturedGroupContent(fileNameContainer, Patterns.A_PATTERN).replace("<span class=\"s\"> </span>", "");
-        String hash = StringUtils.subBetween(response, "Magnet Link</a>", "</li>").trim();
+        Document doc = Jsoup.parse(response);
+
+        String name = null;
+        String uploadTimeStr = null;
+        String fileSizeStr = null;
+        String hash = null;
+
+        Elements lis = doc.select("div.details > ul > li");
+        for (int i = 0; i < lis.size(); i += 2) {
+            Element labelLi = lis.get(i);
+            Element valueLi = lis.get(i + 1);
+            String label = labelLi.text().trim();
+
+            if (label.startsWith("Torrent Name:")) {
+                Element a = valueLi.selectFirst("a[type=\"application/x-bittorrent\"]");
+                if (a != null) {
+                    name = a.html().replace("<span class=\"s\"> </span>", "").trim();
+                }
+            } else if (label.startsWith("Date Submitted:")) {
+                uploadTimeStr = valueLi.text().trim();
+            } else if (label.startsWith("Filesize:")) {
+                fileSizeStr = valueLi.text().trim();
+            } else if (label.startsWith("BT Info Hash")) {
+                Element a = valueLi.selectFirst("a[href^=magnet:]");
+                if (a != null) {
+                    hash = Patterns.extractFirstCapturedGroupContent(a.attr("href"), Patterns.MAGNET_HASH_PATTERN);
+                }
+            }
+        }
+
+        if (hash == null) {
+            throw new ApiException("Hash not found");
+        }
         TorrentInfo torrentInfo = new TorrentInfo();
         torrentInfo.setId(id);
         torrentInfo.setName(name);
         torrentInfo.setHash(hash.toUpperCase());
-        torrentInfo.setSize(UnitUtils.convertSizeUnit(fileSizeStr));
+        torrentInfo.setSize(UnitUtils.convertSizeUnit(fileSizeStr, 0L));
         torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.DASH_SEPARATED_DATE_TIME_FORMAT_PADDED_ZONE));
         torrentInfo.setFileCount(null);
         torrentInfo.setFiles(null);
@@ -56,7 +82,12 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
 
     @Override
     public ScrollPageResult<TorrentInfo> search(String keyword, Long index, String sortField, String sortOrder) {
-        String requestUrl = String.format("%s/search.php?page=%s&searchComment=true&searchName=true&terms=%s", baseUrl, index, URLEncoder.encode(keyword, StandardCharsets.UTF_8));
+        Map<String, String> param = new HashMap<>();
+        param.put("page", String.valueOf(index));
+        param.put("searchComment", "true");
+        param.put("searchName", "true");
+        param.put("terms", keyword);
+        String requestUrl = NetUtils.buildParamUrl(String.format("%s/search.php", baseUrl), param);
         HttpRequest request = requestBuilder(requestUrl)
                 .GET()
                 .build();
@@ -64,56 +95,75 @@ public class TokyoToshokanHandler extends AbstractTorrentHandler {
         if (response.contains("No results returned")) {
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }
+        Document document = Jsoup.parse(response);
+        Elements trs = document.select("table.listing tbody tr.category_0");
+        if (trs.size() % 2 != 0) {
+            throw new ApiException("Api Response Error data");
+        }
+        ArrayList<TorrentInfo> torrentInfos = new ArrayList<>(pageSize());
+        for (int i = 0; i < trs.size(); i += 2) {
+            Element mainRow = trs.get(i);
+            Element infoRow = trs.get(i + 1);
 
-        List<TorrentInfo> torrentInfos = new ArrayList<>(pageSize());
-        String tbody = StringUtils.subBetween(response, "<table class=\"listing\">", "</table>");
-        Matcher trMatcher = Patterns.TR_PATTERN.matcher(tbody);
-        List<List<String>> mainInfoList = new ArrayList<>();
-        List<List<String>> otherInfoList = new ArrayList<>();
-        while (trMatcher.find()) {
-            String tr = trMatcher.group();
-            List<String> tds = new ArrayList<>();
-            Matcher matcher = Patterns.TD_PATTERN.matcher(tr);
-            while (matcher.find()) {
-                tds.add(matcher.group(1));
+            // 从主行提取id、name、hash
+            Element titleLink = mainRow.selectFirst("a[href^=magnet:]");
+            Element detailLink = mainRow.selectFirst("a[href^=details.php?id=]");
+            Element torrentLink = mainRow.selectFirst("a[type=\"application/x-bittorrent\"]");
+
+            String id = null;
+            String name = null;
+            String hash = null;
+
+            if (detailLink != null) {
+                String href = detailLink.attr("href");
+                id = href.replace("details.php?id=", "").trim();
             }
-            if (tds.size() == 3) {
-                mainInfoList.add(tds);
+
+            if (torrentLink != null) {
+                name = torrentLink.html().replace("<span class=\"s\"> </span>", "").trim();
             }
-            if (tds.size() == 2) {
-                otherInfoList.add(tds);
+
+            if (titleLink != null) {
+                String magnetHref = titleLink.attr("href");
+                hash = Patterns.extractFirstCapturedGroupContent(magnetHref, Patterns.MAGNET_HASH_PATTERN);
+                if (hash != null) {
+                    hash = hash.toUpperCase();
+                }
             }
-        }
-        if (mainInfoList.size() != otherInfoList.size()) {
-            throw new ApiException("Api response error data");
-        }
-        for (int i = 0; i < mainInfoList.size(); i++) {
-            List<String> mainInfo = mainInfoList.get(i);
-            List<String> otherInfo = otherInfoList.get(i);
-            List<String> aTagContents = Patterns.extractFirstCapturedGroupContents(mainInfo.get(1), Patterns.A_PATTERN);
-            String name = aTagContents.get(1).replace("<span class=\"s\"> </span>", "");
-            Matcher hashMatcher = Patterns.MAGNET_HASH_PATTERN.matcher(mainInfo.get(1));
-            String hash = hashMatcher.find() ? hashMatcher.group(1).toUpperCase() : null;
-            String sizeStr = StringUtils.subBetween(otherInfo.get(0), "| Size: ", " |");
-            String uploadTimeStr = StringUtils.subBetween(otherInfo.get(0), "| Date: ", " |");
-            String id = StringUtils.subBetween(mainInfo.get(2), "\"details.php?id=", "\"");
+
+            String descBotText = Optional.ofNullable(infoRow.selectFirst("td.desc-bot")).map(Element::text).orElse("");
+            String sizeStr = findFieldFromJoinString(descBotText, "Size");
+            String uploadTimeStr = findFieldFromJoinString(descBotText, "Date");
+
             TorrentInfo torrentInfo = new TorrentInfo();
             torrentInfo.setId(id);
             torrentInfo.setName(name);
             torrentInfo.setHash(hash);
-            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
+            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr, 0L));
             torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.DASH_SEPARATED_DATE_TIME_FORMAT_PADDED_ZONE));
             torrentInfos.add(torrentInfo);
         }
+
         boolean hasNext = !isLastPage(response);
         // 第一页只有49条数据，补充一条虚拟数据，防止分页错误
-        if(index == 1 && hasNext && torrentInfos.size() < pageSize()) {
+        if (index == 1 && hasNext && torrentInfos.size() < pageSize()) {
             int leftSize = pageSize() - torrentInfos.size();
             for (int i = 0; i < leftSize; i++) {
                 torrentInfos.add(torrentInfos.get(0));
             }
         }
         return new ScrollPageResult<>(index, hasNext, torrentInfos);
+    }
+
+    private String findFieldFromJoinString(String joinString, String fieldName) {
+        String result = StringUtils.subBetween(joinString, fieldName + ": ", " |");
+        if (result == null) {
+            result = joinString.substring(joinString.indexOf(fieldName + ": ") + (fieldName + ": ").length());
+        }
+        if (StringUtils.isNullOrEmpty(result)) {
+            return null;
+        }
+        return result.trim();
     }
 
     @Override

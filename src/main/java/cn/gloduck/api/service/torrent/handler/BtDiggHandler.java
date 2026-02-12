@@ -121,7 +121,7 @@ public class BtDiggHandler extends AbstractTorrentHandler {
                 } else if (Objects.equals(tds.get(0).text().trim(), "Name:")) {
                     torrentInfo.setName(tds.get(1).text().trim());
                 } else if (Objects.equals(tds.get(0).text().trim(), "Size:")) {
-                    torrentInfo.setSize(UnitUtils.convertSizeUnit(tds.get(1).text().trim()));
+                    torrentInfo.setSize(UnitUtils.convertSizeUnit(tds.get(1).text().trim(), 0L));
                 } else if (Objects.equals(tds.get(0).text().trim(), "Age:")) {
                     torrentInfo.setUploadTime(parseTime(tds.get(1).text().trim()));
                 } else if (Objects.equals(tds.get(0).text().trim(), "Files:")) {
@@ -144,14 +144,10 @@ public class BtDiggHandler extends AbstractTorrentHandler {
                     if (sizeSpan != null && "span".equals(sizeSpan.tagName())) {
                         fileSizeStr = sizeSpan.text().trim();
                     }
-                    Long fileSize = null;
-                    if (StringUtils.isNotNullOrEmpty(fileSizeStr)) {
-                        fileSize = UnitUtils.convertSizeUnit(fileSizeStr);
-                    }
-
+                    long fileSize = UnitUtils.convertSizeUnit(fileSizeStr, 0L);
                     TorrentFileInfo fileInfo = new TorrentFileInfo();
                     fileInfo.setName(fileName);
-                    fileInfo.setSize(fileSize != null ? fileSize : 0L);
+                    fileInfo.setSize(fileSize);
                     fileList.add(fileInfo);
                 }
                 torrentInfo.setFiles(fileList);
@@ -188,7 +184,7 @@ public class BtDiggHandler extends AbstractTorrentHandler {
         for (Element result : results) {
             String name = Optional.ofNullable(result.selectFirst(".torrent_name a")).map(Element::text).orElse(null);
             String sizeStr = Optional.ofNullable(result.selectFirst(".torrent_size")).map(Element::text).orElse(null);
-            Long size = sizeStr != null ? UnitUtils.convertSizeUnit(sizeStr) : null;
+            long size = UnitUtils.convertSizeUnit(sizeStr, 0L);
             String magnet = Optional.ofNullable(result.selectFirst(".torrent_magnet a")).map(t -> t.attribute("href")).map(Attribute::getValue).orElse(null);
             String hash = magnet != null ? Patterns.extractFirstCapturedGroupContent(magnet, Patterns.MAGNET_HASH_PATTERN) : null;
             if (hash == null) {
