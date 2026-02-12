@@ -25,6 +25,8 @@ public class TorrentConfig {
 
     public WebConfig extTo;
 
+    public WebConfig btDigg;
+
     public static class WebConfig {
         public String url;
 
