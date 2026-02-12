@@ -9,12 +9,15 @@ import cn.gloduck.api.utils.Patterns;
 import cn.gloduck.api.utils.StringUtils;
 import cn.gloduck.api.utils.UnitUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 import java.net.URLEncoder;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.regex.Matcher;
 
 public class DmhyHandler extends AbstractTorrentHandler {
 
@@ -30,37 +33,57 @@ public class DmhyHandler extends AbstractTorrentHandler {
                 .GET()
                 .build();
         String response = sendPlainTextRequest(request);
-        String uploadTimeStr = StringUtils.subBetween(response, "<li>發佈時間: <span>", "</span></li>");
-        String sizeStr = StringUtils.subBetween(response, "<li>文件大小: <span>", "</span></li>");
-        String hashStrContainer = StringUtils.subBetween(response, "<p><strong>Magnet連接:</strong>", "</p>");
-        Matcher hashMatcher = Patterns.MAGNET_HASH_PATTERN.matcher(hashStrContainer);
-        String hash = hashMatcher.find() ? hashMatcher.group(1).toUpperCase() : null;
-        String name = StringUtils.subBetween(response, "<title>", "</title>").replace(" - 動漫花園資源網 - 動漫愛好者的自由交流平台", "");
+        Document doc = Jsoup.parse(response);
+
+        String name = Optional.ofNullable(doc.selectFirst("title"))
+                .map(t -> t.text().replace(" - 動漫花園資源網 - 動漫愛好者的自由交流平台", ""))
+                .orElse("");
+
+        Date uploadTime = null;
+        long size = 0L;
+        Elements infoLis = doc.select(".resource-info ul li");
+        for (Element infoLi : infoLis) {
+            if(infoLi.text().contains("發佈時間")){
+                String uploadTimeStr = Optional.ofNullable(infoLi.selectFirst("span")).map(Element::text).orElse(null);
+                uploadTime = DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD);
+            } else if(infoLi.text().contains("文件大小")){
+                String span = Optional.ofNullable(infoLi.selectFirst("span")).map(Element::text).orElse(null);
+                size = UnitUtils.convertSizeUnit(span, 0L);
+            }
+        }
+        String hash = null;
+        Element magnetLink = doc.selectFirst("a[href^=magnet:]");
+        if (magnetLink != null) {
+            String magnetHref = magnetLink.attr("href");
+            hash = Patterns.extractFirstCapturedGroupContent(magnetHref, Patterns.MAGNET_HASH_PATTERN).toUpperCase();
+        }
 
         TorrentInfo torrentInfo = new TorrentInfo();
         torrentInfo.setId(id);
         torrentInfo.setName(name);
         torrentInfo.setHash(hash);
-        torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
-        torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD));
-        List<TorrentFileInfo> torrentFileInfos = parseFileInfo(response);
+        torrentInfo.setSize(size);
+        torrentInfo.setUploadTime(uploadTime);
+        List<TorrentFileInfo> torrentFileInfos = parseFileInfo(doc);
         torrentInfo.setFileCount((long) torrentFileInfos.size());
         torrentInfo.setFiles(torrentFileInfos);
 
         return torrentInfo;
     }
 
-    private List<TorrentFileInfo> parseFileInfo(String html){
-        String fileListDiv = StringUtils.subBetween(html, "<div class=\"file_list\">", "</div>");
+    private List<TorrentFileInfo> parseFileInfo(Document doc){
         List<TorrentFileInfo> fileList = new ArrayList<>();
-        Matcher liMatcher = Patterns.LI_PATTERN.matcher(fileListDiv);
-        while (liMatcher.find()) {
-            String li = liMatcher.group();
-            String fileSizeStr = StringUtils.subBetween(li, "<span class=\"bt_file_size\">", "</span>");
-            String imgField = "<img" + StringUtils.subBetween(li, "<img", ">") + ">";
-            String fileSizeField = "<span class=\"bt_file_size\">" + fileSizeStr + "</span>";
-            String fileName = StringUtils.subBetween(li, imgField, fileSizeField).trim();
-            Long size = UnitUtils.convertSizeUnit(fileSizeStr);
+        Elements lis = doc.select("div.file_list li");
+        for (Element li : lis) {
+            Element imgElement = li.selectFirst("img");
+            Element fileSizeElement = li.selectFirst("span.bt_file_size");
+            String fileName = "";
+            if(imgElement != null && fileSizeElement != null){
+                fileName = StringUtils.subBetween(li.html(), imgElement.outerHtml(), fileSizeElement.outerHtml());
+            }
+
+            String fileSizeStr = Optional.ofNullable(fileSizeElement).map(Element::text).orElse(null);
+            Long size = UnitUtils.convertSizeUnit(fileSizeStr, 0L);
             TorrentFileInfo fileInfo = new TorrentFileInfo();
             fileInfo.setName(fileName);
             fileInfo.setSize(size);
@@ -79,38 +102,59 @@ public class DmhyHandler extends AbstractTorrentHandler {
         if(response.contains("沒有可顯示資源")){
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }
+        Document document = Jsoup.parse(response);
+        Element torrentTable = document.selectFirst("#topic_list tbody");
+
         ArrayList<TorrentInfo> torrentInfos = new ArrayList<>(pageSize());
-        Matcher tbodyMatcher = Patterns.TBODY_PATTERN.matcher(response);
-        if (!tbodyMatcher.find()) {
+        if (torrentTable == null) {
             throw new ApiException("Api response error data");
         }
-        String tbody = tbodyMatcher.group(1);
-        Matcher trMatcher = Patterns.TR_PATTERN.matcher(tbody);
-        while (trMatcher.find()) {
-            String tr = trMatcher.group();
-            List<String> tds = new ArrayList<>();
-            Matcher matcher = Patterns.TD_PATTERN.matcher(tr);
-            while (matcher.find()) {
-                tds.add(matcher.group(1));
-            }
+        Elements trs = torrentTable.getElementsByTag("tr");
+        for (Element tr : trs) {
+            Elements tds = tr.getElementsByTag("td");
             if (tds.size() != 9) {
                 continue;
             }
-            String uploadTimeStr = StringUtils.subBetween(tds.get(0), "<span style=\"display: none;\">", "</span>");
-            String id = StringUtils.subBetween(tds.get(2), "/topics/view/", ".html");
-            String name = StringUtils.subBetween(tds.get(2), String.format("<a href=\"/topics/view/%s.html\"  target=\"_blank\" >", id), "</a>").trim().replace("<span class=\"keyword\">", "").replace("</span>", "");
-            String sizeStr = tds.get(4).trim();
-            Matcher hashMatcher = Patterns.MAGNET_HASH_PATTERN.matcher(tds.get(3));
-            String hash = hashMatcher.find() ? hashMatcher.group(1).toUpperCase() : null;
+            // 日期在隐藏的span中
+            String uploadTimeStr = Optional.ofNullable(tds.get(0).selectFirst("span"))
+                    .map(Element::text)
+                    .orElse(null);
+            if (uploadTimeStr == null) {
+                uploadTimeStr = tds.get(0).text().trim();
+            }
+
+            // 解析标题中的id和名称
+            Element titleLink = tds.get(2).selectFirst("a[href^=/topics/view/]");
+            String id = null;
+            String name = null;
+            if (titleLink != null) {
+                String href = titleLink.attr("href");
+                id = StringUtils.subBetween(href, "/topics/view/", ".html");
+                String titleHtml = titleLink.html();
+                name = titleHtml.replaceAll("<span class=\"keyword\">", "")
+                        .replace("</span>", "")
+                        .trim();
+            }
+
+            // 从磁力链接提取hash
+            Element magnetLink = tds.get(3).selectFirst("a[href^=magnet:]");
+            String hash = null;
+            if (magnetLink != null) {
+                String magnetHref = magnetLink.attr("href");
+                hash = Patterns.extractFirstCapturedGroupContent(magnetHref, Patterns.MAGNET_HASH_PATTERN).toUpperCase();
+            }
+
+            String sizeStr = tds.get(4).text().trim();
+
             TorrentInfo torrentInfo = new TorrentInfo();
             torrentInfo.setId(id);
             torrentInfo.setName(name);
             torrentInfo.setHash(hash);
-            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
+            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr, 0L));
             torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.SLASH_SEPARATED_DATE_TIME_FORMAT_NO_PAD));
             torrentInfos.add(torrentInfo);
         }
-        boolean hasNext = response.contains("/topics/list/page/" + (index + 1));
+        boolean hasNext = document.selectFirst("a[href*=/topics/list/page/" + (index + 1) + "]") != null;
         return new ScrollPageResult<>(index, hasNext, torrentInfos);
     }
 

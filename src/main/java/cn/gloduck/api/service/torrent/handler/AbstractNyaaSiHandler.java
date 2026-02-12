@@ -5,16 +5,17 @@ import cn.gloduck.api.entity.model.torrent.TorrentFileInfo;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
 import cn.gloduck.api.utils.DateUtils;
+import cn.gloduck.api.utils.NetUtils;
 import cn.gloduck.api.utils.Patterns;
-import cn.gloduck.api.utils.StringUtils;
 import cn.gloduck.api.utils.UnitUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
-import java.net.URLEncoder;
 import java.net.http.HttpRequest;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.regex.Matcher;
 
 public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
     public AbstractNyaaSiHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
@@ -31,108 +32,126 @@ public abstract class AbstractNyaaSiHandler extends AbstractTorrentHandler {
         if (response.contains("404 Not Found")) {
             return null;
         }
-        String name = StringUtils.subBetween(response, "<h3 class=\"panel-title\">", "</h3>").trim();
-        String uploadTimeStr = StringUtils.subBetween(response, "<div class=\"col-md-1\">Date:</div>", "</div>").replace("<div class=\"col-md-5\">", "").trim() + "</div>";
-        uploadTimeStr = StringUtils.subBetween(uploadTimeStr, "data-timestamp=\"", "\"");
-        String fileSizeStr = StringUtils.subBetween(response, "<div class=\"col-md-1\">File size:</div>", "</div>").replace("<div class=\"col-md-5\">", "").trim();
-        String hash = StringUtils.subBetween(response, "<kbd>", "</kbd>").toUpperCase();
-        List<TorrentFileInfo> torrentFileInfos = parseFileInfo(response);
+        Document doc = Jsoup.parse(response);
+        String hash = Optional.ofNullable(doc.selectFirst("kbd")).map(Element::text).orElse(null);
+        if (hash == null) {
+            throw new ApiException("Hash not found");
+        }
+        String name = Optional.ofNullable(doc.selectFirst("div.panel-heading h3.panel-title")).map(Element::text).orElse(null);
+        String fileSizeStr = null;
+        long timestamp = 0;
+        Elements infos = doc.select("div.panel-body div.row");
+        for (Element info : infos) {
+            Elements labels = info.select("div.col-md-1");
+            Elements values = info.select("div.col-md-5");
+            for (int i = 0; i < labels.size() && i < values.size(); i++) {
+                String labelText = labels.get(i).text().trim();
+                Element value = values.get(i);
+                if ("File size:".equals(labelText)) {
+                    fileSizeStr = value.text().trim();
+                } else if ("Date:".equals(labelText)) {
+                    String ts = value.attr("data-timestamp");
+                    if (!ts.isEmpty()) {
+                        timestamp = Long.parseLong(ts);
+                    }
+                }
+            }
+        }
+
+        List<TorrentFileInfo> torrentFileInfos = parseFileInfo(doc);
 
         TorrentInfo torrentInfo = new TorrentInfo();
         torrentInfo.setId(id);
         torrentInfo.setName(name);
         torrentInfo.setHash(hash);
-        torrentInfo.setSize(UnitUtils.convertSizeUnit(fileSizeStr));
-        torrentInfo.setUploadTime(parseDate(uploadTimeStr));
+        torrentInfo.setSize(UnitUtils.convertSizeUnit(fileSizeStr, 0L));
+        torrentInfo.setUploadTime(timestamp > 0 ? new Date(timestamp * 1000) : null);
         torrentInfo.setFileCount((long) torrentFileInfos.size());
         torrentInfo.setFiles(torrentFileInfos);
 
         return torrentInfo;
     }
 
-    private List<TorrentFileInfo> parseFileInfo(String response) {
-        String fileListDiv = StringUtils.subBetween(response, "<div class=\"torrent-file-list panel-body\">", "</div>");
+    private List<TorrentFileInfo> parseFileInfo(Document doc) {
         List<TorrentFileInfo> fileList = new ArrayList<>();
-        Matcher liMatcher = Patterns.LI_PATTERN.matcher(fileListDiv);
-        while (liMatcher.find()) {
-            String li = liMatcher.group();
-            String fileName = StringUtils.subBetween(li, "<li><i class=\"fa fa-file\"></i>", "<span class=\"file-size\">").trim();
-            String fileSize = StringUtils.subBetween(li, "<span class=\"file-size\">(", ")</span>").trim();
+        Elements lis = doc.select("div.torrent-file-list li:has(> i.fa-file)");
+        for (Element li : lis) {
+            String fileName = Optional.ofNullable(li.selectFirst("i.fa-file"))
+                    .map(t -> t.nextSibling())
+                    .map(t -> t.toString())
+                    .map(t -> t.trim())
+                    .orElse("");
+            String fileSizeStr = java.util.Optional.ofNullable(li.selectFirst("span.file-size"))
+                    .map(Element::text)
+                    .orElse("");
+            fileSizeStr = fileSizeStr.replace("(", "").replace(")", "").trim();
+
             TorrentFileInfo fileInfo = new TorrentFileInfo();
             fileInfo.setName(fileName);
-            fileInfo.setSize(UnitUtils.convertSizeUnit(fileSize));
+            fileInfo.setSize(UnitUtils.convertSizeUnit(fileSizeStr, 0L));
             fileList.add(fileInfo);
         }
         return fileList;
     }
 
-    private Date parseDate(String date) {
-        if (date == null) {
-            return null;
-        }
-        try {
-            return new Date(Long.parseLong(date) * 1000);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
     @Override
     public ScrollPageResult<TorrentInfo> search(String keyword, Long index, String sortField, String sortOrder) {
         sortField = convertSortFiled(sortField);
-        keyword = URLEncoder.encode(keyword, StandardCharsets.UTF_8);
-        String requestUrl;
+        Map<String, String> param = new HashMap<>(8);
+        param.put("q", keyword);
+        param.put("p", String.valueOf(index));
+        param.put("c", "0_0");
         if (sortField != null) {
-            requestUrl = String.format("%s/?q=%s&s=%s&o=%s&p=%d&c=0_0", baseUrl, keyword, sortField, sortOrder, index);
-        } else {
-            requestUrl = String.format("%s/?q=%s&p=%d&c=0_0", baseUrl, keyword, index);
+            param.put("s", sortField);
+            param.put("o", sortOrder);
         }
-        HttpRequest request = requestBuilder(requestUrl)
+        String url = String.format("%s/", baseUrl);
+        HttpRequest request = requestBuilder(NetUtils.buildParamUrl(url, param))
                 .GET()
                 .build();
         String response = sendPlainTextRequest(request);
         if (response.contains("No results found")) {
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }
-        List<TorrentInfo> torrentInfos = new ArrayList<>(pageSize());
-        Matcher tbodyMatcher = Patterns.TBODY_PATTERN.matcher(response);
-        if (!tbodyMatcher.find()) {
-            throw new ApiException("Api response error data");
-        }
-        String tbody = tbodyMatcher.group(1);
-        Matcher trMatcher = Patterns.TR_PATTERN.matcher(tbody);
-        while (trMatcher.find()) {
-            String tr = trMatcher.group();
-            List<String> tds = new ArrayList<>();
-            Matcher matcher = Patterns.TD_PATTERN.matcher(tr);
-            while (matcher.find()) {
-                tds.add(matcher.group(1));
-            }
+        Document document = Jsoup.parse(response);
+        Elements trs = document.select("tbody tr.default");
+        ArrayList<TorrentInfo> torrentInfos = new ArrayList<>(pageSize());
+        for (Element tr : trs) {
+            Elements tds = tr.getElementsByTag("td");
             if (tds.size() != 8) {
                 continue;
             }
-            String id = StringUtils.subBetween(tds.get(1), "<a href=\"/view/", "\"");
-            String name;
-            if (id.contains("#comments")) {
-                id = id.replace("#comments", "");
-                List<String> tagContents = Patterns.extractFirstCapturedGroupContents(tds.get(1), Patterns.A_PATTERN);
-                name = tagContents.size() == 2 ? tagContents.get(1) : "";
-            } else {
-                name = Patterns.extractFirstCapturedGroupContent(tds.get(1), Patterns.A_PATTERN);
+            Element titleLink = tds.get(1).selectFirst("a[href^=/view/]");
+            String id = null;
+            String name = null;
+            if (titleLink != null) {
+                String href = titleLink.attr("href");
+                id = href.replace("/view/", "").trim();
+                name = titleLink.attr("title").trim();
             }
-            String sizeStr = tds.get(3).trim();
-            String uploadTimeStr = tds.get(4).trim();
-            Matcher hashMatcher = Patterns.MAGNET_HASH_PATTERN.matcher(tds.get(2));
-            String hash = hashMatcher.find() ? hashMatcher.group(1).toUpperCase() : null;
+            if (id == null) {
+                continue;
+            }
+
+            String hash = null;
+            Element magnetLink = tds.get(2).selectFirst("a[href^=magnet:]");
+            if (magnetLink != null) {
+                String magnetHref = magnetLink.attr("href");
+                hash = Patterns.extractFirstCapturedGroupContent(magnetHref, Patterns.MAGNET_HASH_PATTERN).toUpperCase();
+            }
+
+            String sizeStr = tds.get(3).text().trim();
+            String uploadTimeStr = tds.get(4).text().trim();
+
             TorrentInfo torrentInfo = new TorrentInfo();
             torrentInfo.setId(id);
             torrentInfo.setName(name);
             torrentInfo.setHash(hash);
-            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
+            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr, 0L));
             torrentInfo.setUploadTime(DateUtils.convertTimeStringToDate(uploadTimeStr, DateUtils.DASH_SEPARATED_DATE_TIME_FORMAT_PADDED));
             torrentInfos.add(torrentInfo);
         }
-        boolean hasNext = response.contains("class=\"next\"");
+        boolean hasNext = document.selectFirst("li.next") != null;
         return new ScrollPageResult<>(index, hasNext, torrentInfos);
     }
 

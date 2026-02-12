@@ -4,16 +4,18 @@ import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentFileInfo;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.utils.DateUtils;
-import cn.gloduck.api.utils.Patterns;
 import cn.gloduck.api.utils.StringUtils;
 import cn.gloduck.api.utils.UnitUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 import java.net.URLEncoder;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.regex.Matcher;
 
 public class TorrentkittyHandler extends AbstractTorrentHandler {
 
@@ -28,40 +30,31 @@ public class TorrentkittyHandler extends AbstractTorrentHandler {
                 .GET()
                 .build();
         String response = sendPlainTextRequest(request);
-        String detailTable = StringUtils.subBetween(response, "<table class=\"detailSummary\">", "</table>");
+        Document document = Jsoup.parse(response);
+        String name = Optional.of(document.getElementsByTag("h2")).map(t -> t.isEmpty() ? null : t.get(0).text().trim()).orElse("");
         TorrentInfo torrentInfo = new TorrentInfo();
-        String name = StringUtils.subBetween(detailTable, "<h2>", "</h2>");
-        name = name != null ? name.trim() : "";
         torrentInfo.setId(id);
         torrentInfo.setName(name);
-        // 正则读取tr，然后遍历
-        Matcher trMatcher = Patterns.TR_PATTERN.matcher(detailTable);
-        while (trMatcher.find()) {
-            String tr = trMatcher.group();
-            String content = null;
-            Matcher tdMatcher = Patterns.TD_PATTERN.matcher(tr);
-            if (tdMatcher.find()) {
-                content = tdMatcher.group(1);
+        Element detailTable = document.selectFirst("table.detailSummary");
+        Elements trs = detailTable.getElementsByTag("tr");
+        for (Element tr : trs) {
+            String trContent = Optional.of(tr.getElementsByTag("th")).map(t -> t.isEmpty() ? null : t.get(0).text().trim()).orElse("");
+            String tdContent = Optional.of(tr.getElementsByTag("td")).map(t -> t.isEmpty() ? null : t.get(0).text().trim()).orElse("");
+            if (trContent.contains("Torrent Hash:")) {
+                torrentInfo.setHash(tdContent);
             }
-            if (content == null) {
-                continue;
+            if (trContent.contains("Number of Files:")) {
+                torrentInfo.setFileCount(Long.parseLong(tdContent));
             }
-            content = content.trim();
-            if (tr.contains("Torrent Hash:")) {
-                torrentInfo.setHash(content);
+            if (trContent.contains("Content Size:")) {
+                torrentInfo.setSize(UnitUtils.convertSizeUnit(tdContent));
             }
-            if (tr.contains("Number of Files:")) {
-                torrentInfo.setFileCount(Long.parseLong(content));
-            }
-            if (tr.contains("Content Size:")) {
-                torrentInfo.setSize(UnitUtils.convertSizeUnit(content));
-            }
-            if (tr.contains("Created On:")) {
-                torrentInfo.setUploadTime(parseDateStr(content));
+            if (trContent.contains("Created On:")) {
+                torrentInfo.setUploadTime(parseDateStr(tdContent));
             }
         }
 
-        List<TorrentFileInfo> files = parseFileList(response);
+        List<TorrentFileInfo> files = parseFileList(document);
 
 
         torrentInfo.setFiles(files);
@@ -77,31 +70,23 @@ public class TorrentkittyHandler extends AbstractTorrentHandler {
         return DateUtils.convertTimeStringToDate(dateStr, DateUtils.DASH_SEPARATED_DATE_TIME_FORMAT);
     }
 
-    private List<TorrentFileInfo> parseFileList(String html) {
-        String tableArea = StringUtils.subBetween(html, "<table id=\"torrentDetail\">", "</table>");
-        if (tableArea == null) {
+    private List<TorrentFileInfo> parseFileList(Document document) {
+        Element tableElement = document.selectFirst("table#torrentDetail");
+        if (tableElement == null) {
             return Collections.emptyList();
         }
 
         List<TorrentFileInfo> fileList = new ArrayList<>();
-        Matcher trMatcher = Patterns.TR_PATTERN.matcher(tableArea);
-        boolean isFirst = true;
-        while (trMatcher.find()) {
-            if (isFirst) {
-                isFirst = false;
+        Elements rows = tableElement.select("tr");
+        for (Element row : rows) {
+            String fileName = Optional.ofNullable(row.selectFirst("td.name")).map(t -> t.text().trim()).orElse(null);
+            String fileSizeStr = Optional.ofNullable(row.selectFirst("td.size")).map(t -> t.text().trim()).orElse(null);
+            if(fileName == null && fileSizeStr == null){
                 continue;
             }
-            String tr = trMatcher.group();
-            String fileName = StringUtils.subBetween(tr, "<td class=\"name\">", "</td>");
-            String fileSize = StringUtils.subBetween(tr, "<td class=\"size\">", "</td>");
-            if (fileName == null) {
-                continue;
-            }
-            fileName = fileName.trim();
-            fileSize = fileSize.trim();
             TorrentFileInfo fileInfo = new TorrentFileInfo();
             fileInfo.setName(fileName);
-            fileInfo.setSize(UnitUtils.convertSizeUnit(fileSize));
+            fileInfo.setSize(UnitUtils.convertSizeUnit(fileSizeStr, 0L));
             fileList.add(fileInfo);
         }
         return fileList;
@@ -119,44 +104,59 @@ public class TorrentkittyHandler extends AbstractTorrentHandler {
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }
 
-        ArrayList<TorrentInfo> torrentInfos = new ArrayList<>(pageSize());
-        String tbody = StringUtils.subBetween(response, "<table id=\"archiveResult\">", "</table>");
-        if (tbody == null) {
+        Document document = Jsoup.parse(response);
+        Element tableElement = document.selectFirst("table#archiveResult");
+        if (tableElement == null) {
             return new ScrollPageResult<>(index, false, new ArrayList<>());
         }
 
-        Matcher trMatcher = Patterns.TR_PATTERN.matcher(tbody);
-        while (trMatcher.find()) {
-            String tr = trMatcher.group();
-            String name = StringUtils.subBetween(tr, "<td class=\"name\">", "</td>");
-            String size = StringUtils.subBetween(tr, "<td class=\"size\">", "</td>");
-            String date = StringUtils.subBetween(tr, "<td class=\"date\">", "</td>");
-            String action = StringUtils.subBetween(tr, "<td class=\"action\">", "</td>");
+        List<TorrentInfo> torrentInfos = new ArrayList<>(pageSize());
+        Elements rows = tableElement.select("tr");
+        for (Element row : rows) {
+            Elements tds = row.getElementsByTag("td");
+            if (tds.size() < 4) {
+                continue;
+            }
 
+            String name = tds.get(0).text().trim();
+            String size = tds.get(1).text().trim();
+            String date = tds.get(2).text().trim();
+            String action = tds.get(3).html();
 
             String hash = StringUtils.subBetween(action, "/information/", "\"");
             if (hash == null) {
                 continue;
             }
 
-            if (name == null) {
+            if (name.isEmpty()) {
                 name = hash;
             }
-
-            String sizeStr = size.trim();
-            String dateStr = date.trim();
 
             TorrentInfo torrentInfo = new TorrentInfo();
             torrentInfo.setId(hash);
             torrentInfo.setName(name);
             torrentInfo.setHash(hash.toUpperCase());
-            torrentInfo.setSize(UnitUtils.convertSizeUnit(sizeStr));
-            torrentInfo.setUploadTime(parseDateStr(dateStr));
+            torrentInfo.setSize(UnitUtils.convertSizeUnit(size, 0L));
+            torrentInfo.setUploadTime(parseDateStr(date));
             torrentInfos.add(torrentInfo);
         }
-        String pageElement = StringUtils.subBetween(response, "<div class=\"pagination\">", "</div>");
-        boolean isEnd = pageElement == null || pageElement.isEmpty() || pageElement.contains("<span class=\"disabled\">»</span>");
+
+        // 判断是否有下一页
+        boolean isEnd = !hasNextPage(document);
         return new ScrollPageResult<>(index, !isEnd, torrentInfos);
+    }
+
+
+    private boolean hasNextPage(Document document) {
+        Element pagination = document.selectFirst("div.pagination");
+        if (pagination == null) {
+            return false;
+        }
+        String html = pagination.html();
+        if (html.isEmpty()) {
+            return false;
+        }
+        return !html.contains("<span class=\"disabled\">»</span>");
     }
 
     @Override
