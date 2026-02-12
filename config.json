@@ -82,6 +82,14 @@
       "trustAllCertificates": false,
       "useProxy": false,
       "bypassCf": true
+    },
+    "btDigg": {
+      "url": "https://btdig.com",
+      "validStatusTimeout": 30,
+      "requestTimeout": 30,
+      "trustAllCertificates": false,
+      "useProxy": false,
+      "bypassCf": true
     }
   },
   "forward": {

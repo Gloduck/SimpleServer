@@ -36,6 +36,7 @@ public class TorrentService {
         tryInitHandler(config, config.tokyoToshokan, TokyoToshokanHandler::new);
         tryInitHandler(config, config.torrentkitty, TorrentkittyHandler::new);
         tryInitHandler(config, config.anybt, AnybtHandler::new);
+        tryInitHandler(config, config.btDigg, BtDiggHandler::new);
         handlerStatusMap = new HashMap<>(torrentHandlers.size() / 3 * 4 + 1);
         scheduledExecutor.scheduleAtFixedRate(checkHandlerStatusTask(), 0, 30, TimeUnit.MINUTES);
     }

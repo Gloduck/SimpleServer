@@ -26,6 +26,10 @@ public class StringUtils {
         return null;
     }
 
+    public static boolean isNotNullOrEmpty(String str) {
+        return str != null && !str.isEmpty();
+    }
+
     public static boolean isNullOrEmpty(String str) {
         return str == null || str.isEmpty();
     }

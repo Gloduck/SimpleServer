@@ -16,7 +16,7 @@ import java.util.Optional;
 import java.util.logging.Logger;
 
 public abstract class AbstractTorrentHandler implements TorrentHandler {
-    private final static Logger LOGGER = Logger.getLogger(AbstractTorrentHandler.class.getName());
+    protected final static Logger LOGGER = Logger.getLogger(AbstractTorrentHandler.class.getName());
 
     protected final HttpClient httpClient;
 
