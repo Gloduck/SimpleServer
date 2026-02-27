@@ -31,43 +31,11 @@
     </script>
 
     <style>
-        .gradient-text {
-            background: linear-gradient(45deg, #249ffd, #31a3fc);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .glass-effect {
-            background: rgba(255, 255, 255, 0.7);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-        }
-
-        .card-hover {
-            transition: all 0.3s ease;
-        }
-
-        .card-hover:hover {
-            transform: translateY(-8px);
-            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
-        }
-
-        .fade-in {
-            animation: fadeIn 0.5s ease-in-out;
-        }
-
         @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
+        .animate-fadeIn { animation: fadeIn 0.5s ease-in-out; }
     </style>
 </head>
 
@@ -126,7 +94,7 @@
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                         <!-- 工具卡片 -->
                         <div v-for="tool in filteredTools" :key="tool.id"
-                            class="bg-white rounded-2xl overflow-hidden shadow-lg card-hover fade-in">
+                            class="bg-white rounded-2xl overflow-hidden shadow-lg transition-all duration-300 hover:-translate-y-2 hover:shadow-xl animate-fadeIn">
                             <!-- 卡片头部（颜色条） -->
                             <div class="h-2" :style="{ backgroundColor: getCategoryColor(tool.category) }"></div>
 
