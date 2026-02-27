@@ -31,21 +31,7 @@
     </script>
 
     <style>
-        .text-wrap-multiline {
-            white-space: normal;
-            word-wrap: break-word;
-            word-break: break-all;
-        }
-
-        .content-auto {
-            content-visibility: auto;
-        }
-
-        .text-truncate {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
+        .content-auto { content-visibility: auto; }
     </style>
 </head>
 
@@ -154,7 +140,7 @@
                                 class="bg-white rounded-lg shadow p-4 hover:shadow-md transition-all cursor-pointer transform hover:-translate-y-1 duration-200 border-l-4 border-primary">
                                 <div class="flex flex-col md:flex-row md:items-start justify-between gap-3">
                                     <div class="flex-grow min-w-0">
-                                        <h3 class="font-semibold text-gray-800 mb-2 text-wrap-multiline"
+                                        <h3 class="font-semibold text-gray-800 mb-2 break-all"
                                             :title="item.name">
                                             {{ item.name }}
                                         </h3>
@@ -231,7 +217,7 @@
                         <ul v-else class="space-y-2 max-h-60 overflow-y-auto pr-2">
                             <li v-for="file in detailData.files" :key="file.name"
                                 class="flex justify-between items-center p-2 bg-neutral rounded hover:bg-gray-100 transition-colors">
-                                <span class="text-truncate max-w-[80%]" :title="file.name">{{ file.name }}</span>
+                                <span class="truncate max-w-[80%]" :title="file.name">{{ file.name }}</span>
                                 <span class="text-sm text-gray-500 whitespace-nowrap">{{ formatFileSize(file.size)
                                     }}</span>
                             </li>

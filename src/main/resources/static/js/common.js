@@ -166,7 +166,7 @@ const CommonComponents = {
                         <div class="flex items-center cursor-pointer" 
                              :class="{ 'hover:text-primary transition-colors': link }"
                              @click="handleHeaderClick">
-                            <i v-if="icon" :class="[icon, 'text-2xl mr-2 text-github']"></i>
+                            <i v-if="icon" :class="[icon, 'text-2xl mr-2 text-primary']"></i>
                             <h1 class="text-[clamp(1.2rem,2vw,1.8rem)] font-bold text-dark">
                                 <span class="text-primary">{{ title }}</span>
                             </h1>
