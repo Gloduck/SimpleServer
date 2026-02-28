@@ -26,6 +26,7 @@ public class Bootstrap {
         server.registerController(new GithubController());
         server.registerController(new ForwardController());
         server.registerController(new MdEditorController());
+        server.registerController(new ImageEditorController());
         server.addHandler(new StaticFileHandler("./", "/static/**"));
         server.start();
     }
