@@ -1,5 +1,43 @@
 // common.js - 公共工具函数和组件
 const CommonUtils = {
+    computePath: (basePath, basePathIsFile, expression) => {
+        const normalizeSlashes = (p) => p.replace(/\\/g, '/');
+        basePath = normalizeSlashes(basePath);
+        expression = normalizeSlashes(expression);
+        // 规范化basePath
+        if (basePath !== '' && !basePath.endsWith("/")) {
+            if (basePathIsFile) {
+                // 截取路径
+                basePath = basePath.slice(0, basePath.lastIndexOf("/") + 1);
+            } else {
+                basePath = basePath + "/";
+            }
+        }
+        const addStack = (stack, parts) => {
+            for (const expressionPart of parts) {
+                if (expressionPart === "..") {
+                    if (stack.length > 0) {
+                        stack.pop();
+                    } else {
+                        throw new Error("path out of range");
+                    }
+                } else if (expressionPart === "." || expressionPart === "") {
+                } else {
+                    stack.push(expressionPart);
+                }
+            }
+        }
+        const stack = [];
+        if (!expression.startsWith("/")) {
+            addStack(stack, basePath.split("/"));
+        }
+        addStack(stack, expression.split("/"));
+
+        const addSlash = basePath.startsWith("/") || expression.startsWith("/");
+        return addSlash ? "/" + stack.join("/") : stack.join("/");
+    },
+
+
     // 格式化时间
     formatTime: (timeString) => {
         if (!timeString) return '未知';
@@ -217,14 +255,14 @@ const ImageUtils = {
     },
 
     // Base64转Blob
-    base64ToBlob: (base64, mimeType ) => {
+    base64ToBlob: (base64, mimeType) => {
         const byteString = atob(base64.split(',')[1]);
         const ab = new ArrayBuffer(byteString.length);
         const ia = new Uint8Array(ab);
         for (let i = 0; i < byteString.length; i++) {
             ia[i] = byteString.charCodeAt(i);
         }
-        return new Blob([ab], { type: mimeType });
+        return new Blob([ab], {type: mimeType});
     },
 
     // 裁剪图片
@@ -257,7 +295,7 @@ const ImageUtils = {
             img.onload = () => {
                 const canvas = document.createElement('canvas');
                 const radians = degrees * Math.PI / 180;
-                
+
                 // 计算旋转后的尺寸
                 const sin = Math.abs(Math.sin(radians));
                 const cos = Math.abs(Math.cos(radians));
@@ -267,7 +305,7 @@ const ImageUtils = {
                 canvas.width = newWidth;
                 canvas.height = newHeight;
                 const ctx = canvas.getContext('2d');
-                
+
                 // 移动到中心并旋转
                 ctx.translate(newWidth / 2, newHeight / 2);
                 ctx.rotate(radians);
@@ -379,8 +417,8 @@ const ImageUtils = {
                 // 根据位置绘制水印
                 let x, y;
                 const padding = fontSize;
-                
-                switch(position) {
+
+                switch (position) {
                     case 'top-left':
                         ctx.textAlign = 'left';
                         ctx.textBaseline = 'top';
@@ -444,13 +482,13 @@ const ImageUtils = {
                     container.innerHTML = '';
                     container.style.width = width + 'px';
                     container.style.height = height + 'px';
-                    
+
                     img.style.width = '100%';
                     img.style.height = '100%';
                     img.style.objectFit = 'contain';
-                    
+
                     container.appendChild(img);
-                    resolve({ width, height, dataUrl: e.target.result });
+                    resolve({width, height, dataUrl: e.target.result});
                 };
                 img.onerror = reject;
                 img.src = e.target.result;
