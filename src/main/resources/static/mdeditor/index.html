@@ -785,13 +785,17 @@
                     const encodedContent = btoa(unescape(encodeURIComponent(content)));
                     const filePath = this.buildPath(path);
                     const endpoint = `/repos/${this.repo}/contents/${filePath}`;
+
+                    const bodyParams = {
+                        message: `Update ${path} via SimpleServer MdEditor`,
+                        content: encodedContent,
+                        sha: fileSha,
+                        branch: this.branch
+                    };
+
                     await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()), {
                         method: 'PUT',
-                        body: JSON.stringify({
-                            message: `Update ${path} via SimpleServer MdEditor`,
-                            content: encodedContent,
-                            sha: fileSha
-                        })
+                        body: JSON.stringify(bodyParams)
                     });
                 }
 
@@ -799,12 +803,16 @@
                     const filePath = this.buildPath(path);
                     const encodedContent = btoa(unescape(encodeURIComponent(content)));
                     const endpoint = `/repos/${this.repo}/contents/${filePath}`;
+
+                    const bodyParams = {
+                        message: `Create ${path} via SimpleServer MdEditor`,
+                        content: encodedContent,
+                        branch: this.branch
+                    };
+
                     await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()), {
                         method: 'PUT',
-                        body: JSON.stringify({
-                            message: `Create ${path} via SimpleServer MdEditor`,
-                            content: encodedContent
-                        })
+                        body: JSON.stringify(bodyParams)
                     });
                 }
 
@@ -812,12 +820,16 @@
                     const sha = await this.getFileSha(path);
                     const filePath = this.buildPath(path);
                     const endpoint = `/repos/${this.repo}/contents/${filePath}`;
+
+                    const bodyParams = {
+                        message: `Delete ${path} via SimpleServer MdEditor`,
+                        sha: sha,
+                        branch: this.branch
+                    };
+
                     await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()), {
                         method: 'DELETE',
-                        body: JSON.stringify({
-                            message: `Delete ${path} via SimpleServer MdEditor`,
-                            sha: sha
-                        })
+                        body: JSON.stringify(bodyParams)
                     });
                 }
 
@@ -871,13 +883,17 @@
                                 const fileRequestPath = this.buildPath(filePath);
                                 const sha = await this.getFileSha(filePath);
                                 const endpoint = `/repos/${this.repo}/contents/${fileRequestPath}`;
+
+                                const bodyParams = {
+                                    message: `Upload ${fileName} via SimpleServer MdEditor`,
+                                    content: content,
+                                    sha: sha,
+                                    branch: this.branch
+                                };
+
                                 await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()), {
                                     method: 'PUT',
-                                    body: JSON.stringify({
-                                        message: `Upload ${fileName} via SimpleServer MdEditor`,
-                                        content: content,
-                                        sha: sha
-                                    })
+                                    body: JSON.stringify(bodyParams)
                                 });
 
                                 resolve(filePath);
@@ -891,10 +907,9 @@
                 }
 
                 getBaseParam() {
-                    const params = {};
-                    if (this.branch) {
-                        params.ref = this.branch;
-                    }
+                    const params = {
+                        ref: this.branch
+                    };
                     params.timestamp = Date.now();
                     return params;
                 }
@@ -904,7 +919,7 @@
                 constructor(directoryHandle, name, uploadPath) {
                     super();
                     this.directoryHandle = directoryHandle;
-                    this.name = name;          // 文件夹显示名称
+                    this.name = name;
                     this.uploadPath = uploadPath;
                 }
 
@@ -1079,7 +1094,6 @@
 
             const getStrategy = computed(() => {
                 if (mdSource.value === 'local') {
-                    // 修复：传递正确的三个参数 (directoryHandle, name, uploadPath)
                     return new LocalStrategy(
                         localConfig.value.directoryHandle,
                         localConfig.value.directoryHandle ? localConfig.value.directoryHandle.name : '',
@@ -1119,14 +1133,54 @@
             });
 
             const settingHandlers = [
-                { key: "mdSource", source: null, getter: () => mdSource.value, setter: (value) => mdSource.value = value },
-                { key: "githubToken", source: "github", getter: () => githubConfig.value.token, setter: (value) => githubConfig.value.token = value },
-                { key: "githubRepo", source: "github", getter: () => githubConfig.value.repo, setter: (value) => githubConfig.value.repo = value },
-                { key: "githubBranch", source: "github", getter: () => githubConfig.value.branch, setter: (value) => githubConfig.value.branch = value },
-                { key: "githubRootPath", source: "github", getter: () => githubConfig.value.rootPath, setter: (value) => githubConfig.value.rootPath = value },
-                { key: "githubUploadPath", source: "github", getter: () => githubConfig.value.uploadPath, setter: (value) => githubConfig.value.uploadPath = value },
-                { key: "githubProxy", source: "github", getter: () => githubConfig.value.proxy, setter: (value) => githubConfig.value.proxy = value },
-                { key: "localUploadPath", source: "local", getter: () => localConfig.value.uploadPath, setter: (value) => localConfig.value.uploadPath = value },
+                {
+                    key: "mdSource",
+                    source: null,
+                    getter: () => mdSource.value,
+                    setter: (value) => mdSource.value = value
+                },
+                {
+                    key: "githubToken",
+                    source: "github",
+                    getter: () => githubConfig.value.token,
+                    setter: (value) => githubConfig.value.token = value
+                },
+                {
+                    key: "githubRepo",
+                    source: "github",
+                    getter: () => githubConfig.value.repo,
+                    setter: (value) => githubConfig.value.repo = value
+                },
+                {
+                    key: "githubBranch",
+                    source: "github",
+                    getter: () => githubConfig.value.branch,
+                    setter: (value) => githubConfig.value.branch = value
+                },
+                {
+                    key: "githubRootPath",
+                    source: "github",
+                    getter: () => githubConfig.value.rootPath,
+                    setter: (value) => githubConfig.value.rootPath = value
+                },
+                {
+                    key: "githubUploadPath",
+                    source: "github",
+                    getter: () => githubConfig.value.uploadPath,
+                    setter: (value) => githubConfig.value.uploadPath = value
+                },
+                {
+                    key: "githubProxy",
+                    source: "github",
+                    getter: () => githubConfig.value.proxy,
+                    setter: (value) => githubConfig.value.proxy = value
+                },
+                {
+                    key: "localUploadPath",
+                    source: "local",
+                    getter: () => localConfig.value.uploadPath,
+                    setter: (value) => localConfig.value.uploadPath = value
+                },
             ];
 
             const saveConfigToLocalStorage = (configs) => {
@@ -1382,7 +1436,7 @@
                     mode: 'wysiwyg',
                     height: '100%',
                     placeholder: '选择文件开始编辑，或新建一个文件...',
-                    toolbarConfig: { pin: true },
+                    toolbarConfig: {pin: true},
                     editorName: 'vditor',
                     toolbar: [
                         'headings', 'bold', 'italic', 'strike', 'link', '|',
@@ -1406,7 +1460,7 @@
                                     const curPath = currentFilePath.value;
                                     const uploadPath = computePath(curPath, true, strategy.fileUploadPath());
                                     const url = await strategy.uploadFile(uploadPath, file);
-                                    results.push({ url, name: file.name });
+                                    results.push({url, name: file.name});
                                 } catch (error) {
                                     console.error('Upload failed:', error);
                                     showToast(`上传 ${file.name} 失败: ${error.message}`, 'error');
@@ -1434,7 +1488,7 @@
                         }
                     },
                     preview: {
-                        theme: { current: 'light' },
+                        theme: {current: 'light'},
                         markdown: {}
                     },
                     input: () => {
@@ -1442,10 +1496,11 @@
                             isDirty.value = true;
                         }
                     },
-                    after: () => {}
+                    after: () => {
+                    }
                 });
 
-                window.addEventListener('keydown', handleKeyDown, { capture: true });
+                window.addEventListener('keydown', handleKeyDown, {capture: true});
             };
 
             const handleKeyDown = (e) => {
@@ -1543,7 +1598,7 @@
             });
 
             onBeforeUnmount(() => {
-                window.removeEventListener('keydown', handleKeyDown, { capture: true });
+                window.removeEventListener('keydown', handleKeyDown, {capture: true});
             });
 
             return {
