@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Markdown 编辑器 - GitHub</title>
+    <title>Markdown 编辑器</title>
     <!-- 引入Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 引入Font Awesome -->
@@ -336,7 +336,7 @@
                 <div class="p-3 border-b border-gray-200 bg-gray-50 flex-shrink-0">
                     <div v-if="canConnect" class="flex items-center justify-between">
                             <span class="text-xs text-gray-600 truncate" :title="displaySourceInfo">
-                                <i :class="['fab mr-1', mdSource === 'github' ? 'fa-github' : 'fa-folder-open', mdSource === 'github' ? '' : 'text-blue-500']"></i>
+                                <i :class="['mr-1', mdSource === 'github' ? 'fab fa-github' : 'fas fa-folder-open', mdSource === 'github' ? '' : 'text-blue-500']"></i>
                                 {{ displaySourceInfo }}
                             </span>
                         <div class="flex gap-1">
@@ -1214,7 +1214,7 @@
                 } catch (e) {
                     if (e.name !== 'AbortError') {
                         console.error('Failed to select directory:', e);
-                        showToast('选择文件夹失败', 'error');
+                        showToast('选择文件夹失败（当前浏览器不支持）', 'error');
                     }
                 }
             };
