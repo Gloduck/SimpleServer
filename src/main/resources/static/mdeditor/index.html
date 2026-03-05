@@ -80,306 +80,419 @@
             transition: width 0.3s ease, opacity 0.3s ease;
         }
 
-        .vditor-reset h1 { font-size: 2em; font-weight: 600; margin: 1em 0 0.5em; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3em; }
-        .vditor-reset h2 { font-size: 1.5em; font-weight: 600; margin: 1em 0 0.5em; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3em; }
-        .vditor-reset h3 { font-size: 1.25em; font-weight: 600; margin: 1em 0 0.5em; }
-        .vditor-reset p { margin: 1em 0; }
-        .vditor-reset code { padding: 0.2em 0.4em; margin: 0; font-size: 85%; background-color: rgba(175, 184, 193, 0.2); border-radius: 6px; font-family: 'Fira Code', Consolas, monospace; }
-        .vditor-reset pre { padding: 16px; overflow: auto; font-size: 85%; line-height: 1.45; background-color: #f6f8fa; border-radius: 6px; margin: 1em 0; }
-        .vditor-reset pre code { padding: 0; background-color: transparent; }
-        .vditor-reset blockquote { padding: 0 1em; color: #57606a; border-left: 0.25em solid #d0d7de; margin: 1em 0; }
-        .vditor-reset ul, .vditor-reset ol { padding-left: 2em; margin: 1em 0; }
-        .vditor-reset table { border-collapse: collapse; width: 100%; margin: 1em 0; }
-        .vditor-reset table th, .vditor-reset table td { border: 1px solid #d0d7de; padding: 6px 13px; }
-        .vditor-reset table tr:nth-child(2n) { background-color: #f6f8fa; }
-        .vditor-reset img { max-width: 100%; height: auto; }
-        .vditor-reset hr { height: 0.25em; padding: 0; margin: 1.5em 0; background-color: #d0d7de; border: 0; }
+        .vditor-reset h1 {
+            font-size: 2em;
+            font-weight: 600;
+            margin: 1em 0 0.5em;
+            border-bottom: 1px solid #d0d7de;
+            padding-bottom: 0.3em;
+        }
+
+        .vditor-reset h2 {
+            font-size: 1.5em;
+            font-weight: 600;
+            margin: 1em 0 0.5em;
+            border-bottom: 1px solid #d0d7de;
+            padding-bottom: 0.3em;
+        }
+
+        .vditor-reset h3 {
+            font-size: 1.25em;
+            font-weight: 600;
+            margin: 1em 0 0.5em;
+        }
+
+        .vditor-reset p {
+            margin: 1em 0;
+        }
+
+        .vditor-reset code {
+            padding: 0.2em 0.4em;
+            margin: 0;
+            font-size: 85%;
+            background-color: rgba(175, 184, 193, 0.2);
+            border-radius: 6px;
+            font-family: 'Fira Code', Consolas, monospace;
+        }
+
+        .vditor-reset pre {
+            padding: 16px;
+            overflow: auto;
+            font-size: 85%;
+            line-height: 1.45;
+            background-color: #f6f8fa;
+            border-radius: 6px;
+            margin: 1em 0;
+        }
+
+        .vditor-reset pre code {
+            padding: 0;
+            background-color: transparent;
+        }
+
+        .vditor-reset blockquote {
+            padding: 0 1em;
+            color: #57606a;
+            border-left: 0.25em solid #d0d7de;
+            margin: 1em 0;
+        }
+
+        .vditor-reset ul, .vditor-reset ol {
+            padding-left: 2em;
+            margin: 1em 0;
+        }
+
+        .vditor-reset table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+
+        .vditor-reset table th, .vditor-reset table td {
+            border: 1px solid #d0d7de;
+            padding: 6px 13px;
+        }
+
+        .vditor-reset table tr:nth-child(2n) {
+            background-color: #f6f8fa;
+        }
+
+        .vditor-reset img {
+            max-width: 100%;
+            height: auto;
+        }
+
+        .vditor-reset hr {
+            height: 0.25em;
+            padding: 0;
+            margin: 1.5em 0;
+            background-color: #d0d7de;
+            border: 0;
+        }
     </style>
 </head>
 
 <body class="bg-gray-100 font-sans text-dark h-screen overflow-hidden">
-    <div id="app" class="h-full flex flex-col">
-        <!-- Toast提示 -->
-        <common-toast ref="toastRef"></common-toast>
+<div id="app" class="h-full flex flex-col">
+    <!-- Toast提示 -->
+    <common-toast ref="toastRef"></common-toast>
 
-        <!-- 配置模态框 -->
-        <common-modal :visible="showConfigModal" title="GitHub 配置" @update:visible="showConfigModal = $event">
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        <i class="fab fa-github mr-2"></i>GitHub Token
-                    </label>
-                    <input type="password" v-model="config.token"
-                           placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">请在 <a href="https://github.com/settings/tokens" target="_blank" class="text-blue-500 hover:underline">GitHub Settings</a> 创建 Token，需拥有 repo 权限</p>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        <i class="fas fa-book mr-2"></i>仓库地址
-                    </label>
-                    <input type="text" v-model="config.repo"
-                           placeholder="owner/repo"
-                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">格式: username/repository 或 organization/repository</p>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        <i class="fas fa-folder mr-2"></i>根目录（可选）
-                    </label>
-                    <input type="text" v-model="config.rootPath"
-                           placeholder="docs"
-                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        <i class="fas fa-globe mr-2"></i>代理地址（可选）
-                    </label>
-                    <input type="text" v-model="config.proxy"
-                           placeholder="https://gh-proxy.com"
-                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">用于加速访问 GitHub，如 https://gh-proxy.com，留空则直连</p>
-                </div>
-            </div>
-            <div class="flex justify-end gap-3 mt-6">
-                <button type="button" @click="showConfigModal = false"
-                        class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
-                    取消
-                </button>
-                <button type="button" @click="saveConfigAndConnect"
-                        :disabled="!config.token || !config.repo"
-                        :class="['px-4 py-2 rounded-lg transition-colors flex items-center gap-2',
-                                 !config.token || !config.repo ? 'bg-gray-300 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 text-white']">
-                    <i class="fas fa-link"></i>
-                    连接
-                </button>
-            </div>
-        </common-modal>
+    <!-- 配置模态框 -->
+    <common-modal :visible="showConfigModal" :title="`${sourceName}配置`" @update:visible="showConfigModal = $event">
+        <!-- mdSource 选择 -->
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                <i class="fas fa-database mr-2"></i>数据源
+            </label>
+            <select v-model="mdSource"
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <option value="github">GitHub</option>
+                <option value="local">本地文件</option>
+            </select>
+        </div>
 
-        <!-- 新建文件模态框 -->
-        <common-modal :visible="showNewFileModal" title="新建文件" @update:visible="showNewFileModal = $event">
-            <label class="block text-sm font-medium text-gray-700 mb-2">文件路径</label>
-            <input type="text" v-model="newFilePath"
-                   :placeholder="currentFolder ? currentFolder + '/filename.md' : 'filename.md'"
-                   @keyup.enter="createNewFile"
-                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-            <div class="flex justify-end gap-3 mt-4">
-                <button type="button" @click="showNewFileModal = false"
-                        class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
-                    取消
-                </button>
-                <button type="button" @click="createNewFile"
-                        :disabled="!newFilePath"
-                        :class="['px-4 py-2 rounded-lg transition-colors',
+        <!-- GitHub 配置 -->
+        <div v-if="mdSource === 'github'" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    <i class="fab fa-github mr-2"></i>GitHub Token
+                </label>
+                <input type="password" v-model="githubConfig.token"
+                       placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <p class="text-xs text-gray-500 mt-1">请在 <a href="https://github.com/settings/tokens" target="_blank"
+                                                              class="text-blue-500 hover:underline">GitHub Settings</a>
+                    创建 Token，需拥有 repo 权限</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    <i class="fas fa-book mr-2"></i>仓库地址
+                </label>
+                <input type="text" v-model="githubConfig.repo"
+                       placeholder="owner/repo"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <p class="text-xs text-gray-500 mt-1">格式: username/repository 或 organization/repository</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    <i class="fas fa-book mr-2"></i>仓库分支
+                </label>
+                <input type="text" v-model="githubConfig.branch"
+                       placeholder="main"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <p class="text-xs text-gray-500 mt-1">仓库分支，如 main 或 master</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    <i class="fas fa-folder mr-2"></i>根目录（可选）
+                </label>
+                <input type="text" v-model="githubConfig.rootPath"
+                       placeholder="docs"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    <i class="fas fa-globe mr-2"></i>代理地址（可选）
+                </label>
+                <input type="text" v-model="githubConfig.proxy"
+                       placeholder="https://gh-proxy.com"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <p class="text-xs text-gray-500 mt-1">用于加速访问 GitHub，如 https://gh-proxy.com，留空则直连</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    <i class="fas fa-upload mr-2"></i>上传路径（可选）
+                </label>
+                <input type="text" v-model="githubConfig.uploadPath"
+                       placeholder="file"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <p class="text-xs text-gray-500 mt-1">上传图片的存储路径，如 images 或 file，留空默认为 file</p>
+            </div>
+        </div>
+
+        <!-- 本地配置 -->
+        <div v-else class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    <i class="fas fa-folder-open mr-2"></i>工作目录
+                </label>
+                <div class="flex gap-2">
+                    <input type="text" :value="localConfig.name || '点击右侧按钮选择文件夹'"
+                           readonly
+                           placeholder="点击右侧按钮选择文件夹"
+                           class="flex-grow px-4 py-2 border border-gray-300 rounded-lg bg-gray-50">
+                    <button type="button" @click="selectDirectory"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                        <i class="fas fa-folder-open"></i>
+                    </button>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">点击按钮选择本地文件夹（支持 .md 文件）</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    <i class="fas fa-upload mr-2"></i>上传路径（可选）
+                </label>
+                <input type="text" v-model="localConfig.uploadPath"
+                       placeholder="images"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <p class="text-xs text-gray-500 mt-1">上传图片的存储路径，如 images 或 uploads，留空则直接上传到根目录</p>
+            </div>
+        </div>
+
+        <div class="flex justify-end gap-3 mt-6">
+            <button type="button" @click="showConfigModal = false"
+                    class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                取消
+            </button>
+            <button type="button" @click="saveConfigAndConnect"
+                    :disabled="!canConnect"
+                    :class="['px-4 py-2 rounded-lg transition-colors flex items-center gap-2',
+                                 !canConnect ? 'bg-gray-300 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 text-white']">
+                <i class="fas fa-link"></i>
+                连接
+            </button>
+        </div>
+    </common-modal>
+
+    <!-- 新建文件模态框 -->
+    <common-modal :visible="showNewFileModal" title="新建文件" @update:visible="showNewFileModal = $event">
+        <label class="block text-sm font-medium text-gray-700 mb-2">文件路径</label>
+        <input type="text" v-model="newFilePath"
+               placeholder="filename.md 或 path/filename.md"
+               @keyup.enter="createNewFile"
+               class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+        <div class="flex justify-end gap-3 mt-4">
+            <button type="button" @click="showNewFileModal = false"
+                    class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                取消
+            </button>
+            <button type="button" @click="createNewFile"
+                    :disabled="!newFilePath"
+                    :class="['px-4 py-2 rounded-lg transition-colors',
                                  !newFilePath ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white']">
-                    创建
-                </button>
-            </div>
-        </common-modal>
+                创建
+            </button>
+        </div>
+    </common-modal>
 
-        <!-- 文件管理器模态框 -->
-        <common-modal :visible="showFileManagerModal" title="文件管理" @close="showFileManagerModal = false">
-            <div class="space-y-3 max-h-96 overflow-y-auto">
-                <div v-if="fileListLoading" class="text-center py-8 text-gray-500">
-                    <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
-                    <p>加载中...</p>
-                </div>
-                <div v-else-if="fileList.length === 0" class="text-center py-8 text-gray-500">
-                    <i class="fas fa-folder-open text-3xl mb-2"></i>
-                    <p>file 目录为空或不存在</p>
-                </div>
-                <div v-else v-for="file in fileList" :key="file.sha"
-                     class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100">
-                    <div class="flex items-center gap-3 min-w-0">
-                        <i class="fas fa-file text-gray-400 flex-shrink-0"></i>
-                        <div class="min-w-0">
-                            <p class="font-medium text-gray-700 truncate">{{ file.name }}</p>
-                            <p class="text-xs text-gray-500">{{ formatFileSize(file.size) }}</p>
-                        </div>
-                    </div>
-                    <div class="flex items-center gap-2 flex-shrink-0">
-                        <button @click="downloadFile(file)"
-                                class="p-1.5 text-blue-600 hover:bg-blue-100 rounded transition-colors"
-                                title="下载">
-                            <i class="fas fa-download"></i>
-                        </button>
-                        <button @click="deleteUploadedFile(file)"
-                                class="p-1.5 text-red-600 hover:bg-red-100 rounded transition-colors"
-                                title="删除">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
+    <!-- 主界面 -->
+    <div class="flex-grow flex flex-col overflow-hidden">
+        <!-- 简单标题栏 -->
+        <header class="bg-github text-white shadow-md py-2 px-4 flex-shrink-0">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <i class="fab fa-markdown text-xl"></i>
+                    <a href="/" class="hover:text-gray-200 transition-colors">Markdown 编辑器</a>
                 </div>
             </div>
-        </common-modal>
+        </header>
 
-        <!-- 主界面 -->
-        <div class="flex-grow flex flex-col overflow-hidden">
-            <!-- 简单标题栏 -->
-            <header class="bg-github text-white shadow-md py-2 px-4 flex-shrink-0">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-3">
-                        <i class="fab fa-markdown text-xl"></i>
-                        <a href="/" class="hover:text-gray-200 transition-colors">Markdown 编辑器</a>
-                    </div>
-                </div>
-            </header>
-
-            <!-- 主内容区 -->
-            <div class="flex-grow flex overflow-hidden">
-                <!-- 左侧文件树 -->
-                <div :class="['bg-white border-r border-gray-200 flex flex-col overflow-hidden transition-all duration-300 sidebar-transition',
+        <!-- 主内容区 -->
+        <div class="flex-grow flex overflow-hidden">
+            <!-- 左侧文件树 -->
+            <div :class="['bg-white border-r border-gray-200 flex flex-col overflow-hidden transition-all duration-300 sidebar-transition',
                              sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-48 md:w-72 flex-shrink-0']">
-                    <!-- 连接状态栏 -->
-                    <div class="p-3 border-b border-gray-200 bg-gray-50 flex-shrink-0">
-                        <div v-if="isConnected" class="flex items-center justify-between">
-                            <span class="text-xs text-gray-600 truncate" :title="config.repo">
-                                <i class="fas fa-check-circle text-green-500 mr-1"></i>
-                                {{ config.repo }}
+                <!-- 连接状态栏 -->
+                <div class="p-3 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+                    <div v-if="canConnect" class="flex items-center justify-between">
+                            <span class="text-xs text-gray-600 truncate" :title="displaySourceInfo">
+                                <i :class="['fab mr-1', mdSource === 'github' ? 'fa-github' : 'fa-folder-open', mdSource === 'github' ? '' : 'text-blue-500']"></i>
+                                {{ displaySourceInfo }}
                             </span>
-                            <div class="flex gap-1">
-                                <button type="button" @click="clearConfig"
-                                        class="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                                        title="清除配置" aria-label="清除配置">
-                                    <i class="fas fa-trash-alt" aria-hidden="true"></i>
-                                </button>
-                                <button type="button" @click="showConfigModal = true"
-                                        class="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded transition-colors"
-                                        title="设置" aria-label="设置">
-                                    <i class="fas fa-cog" aria-hidden="true"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div v-else class="text-center">
-                            <button type="button" @click="showConfigModal = true"
-                                    class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors">
-                                配置 GitHub
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- 工具栏 -->
-                    <div class="p-3 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
-                        <span class="text-sm font-medium text-gray-700">文件</span>
                         <div class="flex gap-1">
-                            <button type="button" @click="openFileManager"
-                                    class="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                                    title="文件管理" aria-label="文件管理">
-                                <i class="fas fa-folder-open" aria-hidden="true"></i>
+                            <button type="button" @click="clearConfig"
+                                    class="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                    title="清除配置" aria-label="清除配置">
+                                <i class="fas fa-trash-alt" aria-hidden="true"></i>
                             </button>
-                            <button type="button" @click="showNewFileModal = true; newFilePath = ''"
-                                    class="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                                    title="新建文件" aria-label="新建文件">
-                                <i class="fas fa-plus" aria-hidden="true"></i>
-                            </button>
-                            <button type="button" @click="refreshFileTree"
-                                    :class="['p-1.5 rounded transition-colors', isLoading ? 'text-blue-600 bg-blue-50' : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50']"
-                                    title="刷新" aria-label="刷新">
-                                <i class="fas fa-sync-alt" :class="{ 'fa-spin': isLoading }" aria-hidden="true"></i>
-                            </button>
-                            <button type="button" @click="exportConfigUrl"
-                                    class="p-1.5 text-gray-600 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
-                                    title="导出配置链接" aria-label="导出配置链接">
-                                <i class="fas fa-link" aria-hidden="true"></i>
+                            <button type="button" @click="showConfigModal = true"
+                                    class="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded transition-colors"
+                                    title="设置" aria-label="设置">
+                                <i class="fas fa-cog" aria-hidden="true"></i>
                             </button>
                         </div>
                     </div>
+                    <div v-else class="text-center">
+                        <button type="button" @click="showConfigModal = true"
+                                class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors">
+                            配置 {{ sourceName }}
+                        </button>
+                    </div>
+                </div>
 
-                    <!-- 文件树 -->
-                    <div class="flex-grow overflow-y-auto p-2">
-                        <div v-if="!isConnected" class="text-center py-8 text-gray-500">
-                            <i class="fas fa-cloud-upload-alt text-4xl mb-3 text-gray-300"></i>
-                            <p class="text-sm">请先配置 GitHub</p>
-                        </div>
-                        <div v-else-if="fileTree.length === 0 && !isLoading" class="text-center py-8 text-gray-500">
-                            <i class="fas fa-folder-open text-4xl mb-3 text-gray-300"></i>
-                            <p class="text-sm">暂无文件</p>
-                        </div>
-                        <common-loading-spinner v-else-if="isLoading"></common-loading-spinner>
-                        <ul v-else class="space-y-1">
-                            <file-tree-item
-                                v-for="item in fileTree"
+                <!-- 工具栏 -->
+                <div class="p-3 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+                    <span class="text-sm font-medium text-gray-700">文件</span>
+                    <div class="flex gap-1">
+                        <button type="button" @click="showNewFileModal = true; newFilePath = ''"
+                                class="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                title="新建文件" aria-label="新建文件">
+                            <i class="fas fa-plus" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" @click="refreshFileTree"
+                                :class="['p-1.5 rounded transition-colors', isLoading ? 'text-blue-600 bg-blue-50' : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50']"
+                                title="刷新" aria-label="刷新">
+                            <i class="fas fa-sync-alt" :class="{ 'fa-spin': isLoading }" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" @click="showAllFile = !showAllFile"
+                                :class="['p-1.5 rounded transition-colors', showAllFile ? 'text-blue-600 bg-blue-50' : 'text-gray-600 hover:text-blue-600 hover:bg-blue-50']"
+                                :title="showAllFile ? '仅显示 Markdown 文件' : '显示所有文件'"
+                                :aria-label="showAllFile ? '仅显示 Markdown 文件' : '显示所有文件'">
+                            <i class="fas" :class="showAllFile ? 'fa-file-alt' : 'fa-file'" aria-hidden="true"></i>
+                        </button>
+                        <button type="button" @click="exportConfigUrl"
+                                class="p-1.5 text-gray-600 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                                title="导出配置链接" aria-label="导出配置链接">
+                            <i class="fas fa-link" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 文件树 -->
+                <div class="flex-grow overflow-y-auto p-2">
+                    <div v-if="!canConnect" class="text-center py-8 text-gray-500">
+                        <i class="fas fa-cloud-upload-alt text-4xl mb-3 text-gray-300"></i>
+                        <p class="text-sm">请先配置 {{ sourceName }}</p>
+                    </div>
+                    <div v-else-if="showFileTree.length === 0 && !isLoading" class="text-center py-8 text-gray-500">
+                        <i class="fas fa-folder-open text-4xl mb-3 text-gray-300"></i>
+                        <p class="text-sm">暂无文件</p>
+                    </div>
+                    <common-loading-spinner v-else-if="isLoading"></common-loading-spinner>
+                    <ul v-else class="space-y-1">
+                        <file-tree-item
+                                v-for="item in showFileTree"
                                 :key="item.path"
                                 :item="item"
                                 :selected-path="currentFilePath"
                                 @select="selectFile"
-                                @delete="prepareDeleteFile">
-                            </file-tree-item>
-                        </ul>
+                                @delete="deleteFile">
+                        </file-tree-item>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- 收缩按钮 -->
+            <button type="button" @click="sidebarCollapsed = !sidebarCollapsed"
+                    class="flex-shrink-0 px-2 py-4 bg-gray-100 hover:bg-gray-200 border-y border-r border-gray-200 transition-colors"
+                    :title="sidebarCollapsed ? '展开侧边栏' : '收缩侧边栏'"
+                    :aria-label="sidebarCollapsed ? '展开侧边栏' : '收缩侧边栏'">
+                <i :class="['fas transition-transform text-gray-500', sidebarCollapsed ? 'fa-angle-right' : 'fa-angle-left']"
+                   aria-hidden="true"></i>
+            </button>
+
+            <!-- 右侧编辑器区域 -->
+            <div class="flex-grow flex flex-col overflow-hidden bg-white">
+                <!-- 编辑器工具栏（仅在选择文件时显示） -->
+                <div v-if="currentFilePath"
+                     class="bg-white border-b border-gray-300 px-4 py-2 flex items-center justify-between flex-shrink-0">
+                    <div class="flex items-center gap-3">
+                        <input type="text"
+                               :value="currentFilePath"
+                               readonly
+                               class="text-sm text-gray-600 bg-gray-100 px-3 py-1.5 rounded border border-gray-300 max-w-md">
+                        <span v-if="isDirty" class="text-xs text-amber-600">
+                                <i class="fas fa-asterisk mr-1"></i>未保存
+                            </span>
+                        <span v-if="!isDirty && lastSaved" class="text-xs text-gray-500">
+                                已保存: {{ lastSaved }}
+                            </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" @click="saveMarkdownFile"
+                                :disabled="!isDirty || isSaving"
+                                :class="['px-3 py-1.5 rounded-lg text-sm transition-colors flex items-center gap-2',
+                                             !isDirty || isSaving ? 'bg-gray-300 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 text-white']">
+                            <i :class="['fas', isSaving ? 'fa-spinner fa-spin' : 'fa-save']"></i>
+                            <span>保存</span>
+                        </button>
+                        <button type="button" @click="deleteFile(currentFilePath)"
+                                class="px-3 py-1.5 rounded-lg text-sm transition-colors flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white">
+                            <i class="fas fa-trash"></i>
+                            <span>删除</span>
+                        </button>
                     </div>
                 </div>
 
-                <!-- 收缩按钮 -->
-                <button type="button" @click="sidebarCollapsed = !sidebarCollapsed"
-                        class="flex-shrink-0 px-2 py-4 bg-gray-100 hover:bg-gray-200 border-y border-r border-gray-200 transition-colors"
-                        :title="sidebarCollapsed ? '展开侧边栏' : '收缩侧边栏'"
-                        :aria-label="sidebarCollapsed ? '展开侧边栏' : '收缩侧边栏'">
-                    <i :class="['fas transition-transform text-gray-500', sidebarCollapsed ? 'fa-angle-right' : 'fa-angle-left']" aria-hidden="true"></i>
-                </button>
-
-                <!-- 右侧编辑器区域 -->
-                <div class="flex-grow flex flex-col overflow-hidden bg-white">
-                    <!-- 编辑器工具栏（仅在选择文件时显示） -->
-                    <div v-if="currentFilePath" class="bg-white border-b border-gray-300 px-4 py-2 flex items-center justify-between flex-shrink-0">
-                        <div class="flex items-center gap-3">
-                            <input type="text"
-                                   :value="currentFilePath"
-                                   readonly
-                                   class="text-sm text-gray-600 bg-gray-100 px-3 py-1.5 rounded border border-gray-300 max-w-md">
-                            <span v-if="isDirty" class="text-xs text-amber-600">
-                                <i class="fas fa-asterisk mr-1"></i>未保存
-                            </span>
-                            <span v-if="!isDirty && lastSaved" class="text-xs text-gray-500">
-                                已保存: {{ lastSaved }}
-                            </span>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <button type="button" @click="saveFile"
-                                    :disabled="!isDirty || isSaving"
-                                    :class="['px-3 py-1.5 rounded-lg text-sm transition-colors flex items-center gap-2',
-                                             !isDirty || isSaving ? 'bg-gray-300 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 text-white']">
-                                <i :class="['fas', isSaving ? 'fa-spinner fa-spin' : 'fa-save']"></i>
-                                <span>保存</span>
-                            </button>
-                            <button type="button" @click="deleteFile(currentFilePath)"
-                                    class="px-3 py-1.5 rounded-lg text-sm transition-colors flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white">
-                                <i class="fas fa-trash"></i>
-                                <span>删除</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Vditor 编辑器 -->
-                    <div class="flex-grow overflow-hidden relative">
-                        <!-- 编辑器容器（visibility 控制可见性，避免布局问题） -->
-                        <div id="vditor" class="h-full" :style="{ visibility: currentFilePath ? 'visible' : 'hidden' }"></div>
-                        <!-- 空状态提示 -->
-                        <div v-if="!currentFilePath" class="absolute inset-0 flex items-center justify-center text-gray-400">
-                            <div class="text-center">
-                                <i class="fas fa-file-alt text-4xl mb-3"></i>
-                                <p>选择一个 Markdown 文件开始编辑</p>
-                            </div>
+                <!-- Vditor 编辑器 -->
+                <div class="flex-grow overflow-hidden relative">
+                    <!-- 编辑器容器（visibility 控制可见性，避免布局问题） -->
+                    <div id="vditor" class="h-full"
+                         :style="{ visibility: currentFilePath ? 'visible' : 'hidden' }"></div>
+                    <!-- 空状态提示 -->
+                    <div v-if="!currentFilePath"
+                         class="absolute inset-0 flex items-center justify-center text-gray-400">
+                        <div class="text-center">
+                            <i class="fas fa-file-alt text-4xl mb-3"></i>
+                            <p>选择一个 Markdown 文件开始编辑</p>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+</div>
 
-    <!-- 文件树组件模板 -->
-    <script type="text/x-template" id="file-tree-item-template">
-        <li>
-            <div :class="['file-tree-item flex items-center gap-2 px-2 py-1.5 rounded text-sm',
-                         isFolder ? 'font-medium text-gray-700' : 'text-gray-600',
+<!-- 文件树组件模板 -->
+<script type="text/x-template" id="file-tree-item-template">
+    <li>
+        <div :class="['file-tree-item group flex items-center gap-2 px-2 py-1.5 rounded text-sm',
+                         isFolder ? 'font-medium text-gray-700' : (isMdFile ? 'text-gray-600' : 'text-gray-400'),
                          isActive ? 'active' : '']"
-                 :style="{ paddingLeft: (depth * 16 + 8) + 'px' }"
-                 @click="handleClick">
-                <i :class="['fas flex-shrink-0 w-4', isFolder ? (isExpanded ? 'fa-folder-open' : 'fa-folder') : 'fa-file-alt']"
-                   :style="{ color: isFolder ? '#fbbf24' : '#6b7280' }"></i>
-                <span class="truncate">{{ item.name }}</span>
-            </div>
-            <ul v-if="isFolder && isExpanded && item.children && item.children.length > 0" class="space-y-0.5">
-                <file-tree-item
+             :style="{ paddingLeft: (depth * 16 + 8) + 'px' }"
+             @click="handleClick">
+            <i :class="['fas flex-shrink-0 w-4', isFolder ? (isExpanded ? 'fa-folder-open' : 'fa-folder') : (isMdFile ? 'fa-file-alt' : 'fa-file')]"
+               :style="{ color: isFolder ? '#fbbf24' : (isMdFile ? '#6b7280' : '#9ca3af') }"></i>
+            <span class="truncate flex-grow">{{ item.name }}</span>
+            <button v-if="!isFolder" type="button"
+                    @click.stop="handleDelete"
+                    class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-opacity"
+                    title="删除文件">
+                <i class="fas fa-trash text-xs"></i>
+            </button>
+        </div>
+        <ul v-if="isFolder && isExpanded && item.children && item.children.length > 0" class="space-y-0.5">
+            <file-tree-item
                     v-for="child in item.children"
                     :key="child.path"
                     :item="child"
@@ -387,176 +500,197 @@
                     :selected-path="selectedPath"
                     @select="$emit('select', $event)"
                     @delete="$emit('delete', $event)">
-                </file-tree-item>
-            </ul>
-        </li>
-    </script>
+            </file-tree-item>
+        </ul>
+    </li>
+</script>
 
-    <script>
-        // 文件树组件
-        const FileTreeItem = {
-            name: 'FileTreeItem',
-            template: '#file-tree-item-template',
-            props: {
-                item: {
-                    type: Object,
-                    required: true
-                },
-                depth: {
-                    type: Number,
-                    default: 0
-                },
-                selectedPath: {
-                    type: String,
-                    default: ''
-                }
+<script>
+    // 文件树组件
+    const FileTreeItem = {
+        name: 'FileTreeItem',
+        template: '#file-tree-item-template',
+        props: {
+            item: {
+                type: Object,
+                required: true
             },
-            emits: ['select', 'delete'],
-            setup(props, { emit }) {
-                const isExpanded = ref(false);
-
-                const isFolder = computed(() => props.item.type === 'dir' || (props.item.children && props.item.children.length > 0));
-                const isActive = computed(() => props.selectedPath === props.item.path);
-
-                const handleClick = () => {
-                    if (isFolder.value) {
-                        isExpanded.value = !isExpanded.value;
-                    } else {
-                        emit('select', props.item.path);
-                    }
-                };
-
-                return {
-                    isExpanded,
-                    isFolder,
-                    isActive,
-                    handleClick
-                };
+            depth: {
+                type: Number,
+                default: 0
+            },
+            selectedPath: {
+                type: String,
+                default: ''
             }
-        };
+        },
+        emits: ['select', 'delete'],
+        setup(props, {emit}) {
+            const isExpanded = ref(false);
 
-        const { createApp, ref, computed, watch, onMounted, nextTick, onBeforeUnmount } = Vue;
+            const isFolder = computed(() => props.item.type === 'directory' || (props.item.children && props.item.children.length > 0));
+            const isMdFile = computed(() => props.item.name.endsWith('.md'));
+            const isActive = computed(() => props.selectedPath === props.item.path);
 
-        const app = createApp({
-            components: {
-                'common-toast': CommonComponents.Toast,
-                'common-modal': CommonComponents.Modal,
-                'common-loading-spinner': CommonComponents.LoadingSpinner,
-                'file-tree-item': FileTreeItem
-            },
+            const handleClick = () => {
+                if (isFolder.value) {
+                    isExpanded.value = !isExpanded.value;
+                } else if (isMdFile.value) {
+                    emit('select', props.item.path);
+                }
+            };
 
-            setup() {
-                // 侧边栏状态
-                const sidebarCollapsed = ref(false);
+            const handleDelete = () => {
+                emit('delete', props.item.path);
+            };
 
-                // 配置
-                const showConfigModal = ref(true);
-                const config = ref({
-                    token: '',
-                    repo: '',
-                    rootPath: '',
-                    proxy: ''
+            return {
+                isExpanded,
+                isFolder,
+                isMdFile,
+                isActive,
+                handleClick,
+                handleDelete
+            };
+        }
+    };
+
+    const {createApp, ref, computed, watch, onMounted, nextTick, onBeforeUnmount} = Vue;
+
+    const app = createApp({
+        components: {
+            'common-toast': CommonComponents.Toast,
+            'common-modal': CommonComponents.Modal,
+            'common-loading-spinner': CommonComponents.LoadingSpinner,
+            'file-tree-item': FileTreeItem
+        },
+
+        setup() {
+            const buildPathWithParam = (path, params) => {
+                let url = path;
+                if (params) {
+                    const paramStr = Object.entries(params)
+                        .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+                        .join('&');
+                    url += `?${paramStr}`;
+                }
+                return url;
+            };
+
+            const isFilePath = (str) => {
+                try {
+                    new URL(str);
+                    return false;
+                } catch {
+                    return true;
+                }
+            };
+
+            const formatTime = CommonUtils.formatRelativeTime;
+            const computePath = CommonUtils.computePath;
+
+            // 过滤文件树（仅保留.md文件或全部）
+            const filterFileTree = (items) => {
+                if (!items || items.length === 0) return [];
+                return items.filter(item => {
+                    if (item.type === 'directory') {
+                        filterFileTree(item.children);
+                        return true;
+                    }
+                    return item.name.endsWith('.md');
+                }).map(item => {
+                    if (item.type === 'directory') {
+                        return {
+                            ...item,
+                            children: filterFileTree(item.children)
+                        };
+                    }
+                    return item;
                 });
+            };
 
-                // 文件树
-                const fileTree = ref([]);
-                const isLoading = ref(false);
-                const currentFilePath = ref('');
-                const currentFolder = ref('');
+            class StorageStrategy {
+                async convertFilePath(mdFilePath) {
+                    throw new Error('Not implemented');
+                }
 
-                // 编辑器
-                let vditor = null;
-                let currentSha = null; // 当前文件的 SHA，用于解决 409 冲突
-                const isDirty = ref(false);
-                const lastSaved = ref('');
-                const isSaving = ref(false);
+                async listFile(path) {
+                    throw new Error('Not implemented');
+                }
 
-                // 模态框
-                const showNewFileModal = ref(false);
-                const newFilePath = ref('');
-                const showDeleteModal = ref(false);
-                const deleteFilePath = ref('');
+                async loadFile(path) {
+                    throw new Error('Not implemented');
+                }
 
-                // 文件管理器
-                const showFileManagerModal = ref(false);
-                const fileList = ref([]);
-                const fileListLoading = ref(false);
+                async saveFile(path, content) {
+                    throw new Error('Not implemented');
+                }
 
-                const toastRef = ref(null);
+                async createFile(path, content) {
+                    throw new Error('Not implemented');
+                }
 
-                // GitHub API 基础地址
-                const GITHUB_API_BASE = 'https://api.github.com';
+                async deleteFile(path) {
+                    throw new Error('Not implemented');
+                }
 
-                // 工具函数
-                const showToast = (message, type = 'info') => {
-                    if (toastRef.value) {
-                        toastRef.value.show(message, type);
-                    }
-                };
+                async validConnection() {
+                    throw new Error('Not implemented');
+                }
 
-                const formatTime = CommonUtils.formatRelativeTime;
+                fileUploadPath() {
+                    throw new Error('Not implemented');
+                }
 
-                // 配置相关
-                const saveConfigToStorage = () => {
-                    try {
-                        localStorage.setItem('mdeditorConfig', JSON.stringify(config.value));
-                    } catch (e) {
-                        console.error('Failed to save config:', e);
-                    }
-                };
+                async uploadFile(fileUploadPath, file) {
+                    throw new Error('Not implemented');
+                }
 
-                const saveConfigAndConnect = () => {
-                    saveConfigToStorage();
-                    showConfigModal.value = false;
-                    connectToGithub();
-                };
+                isConnectable() {
+                    throw new Error('Not implemented');
+                }
 
-                const clearConfig = () => {
-                    if (!confirm('确定要清除 GitHub 配置吗？')) {
-                        return;
-                    }
-                    config.value.token = '';
-                    config.value.repo = '';
-                    config.value.rootPath = '';
-                    config.value.proxy = '';
-                    localStorage.removeItem('mdeditorConfig');
-                    fileTree.value = [];
-                    currentFilePath.value = '';
-                    currentSha = null;
-                    if (vditor && vditor.setValue) {
-                        setTimeout(() => vditor.setValue(''), 100);
-                    }
-                    showToast('配置已清除', 'info');
-                    showConfigModal.value = true;
-                };
+                getDisplayInfo() {
+                    throw new Error('Not implemented');
+                }
 
-                // 获取仓库默认分支
-                let defaultBranch = 'main';
-                const getDefaultBranch = async () => {
-                    try {
-                        const data = await githubApiRequest(`/repos/${config.value.repo}`);
-                        defaultBranch = data.default_branch || 'main';
-                    } catch (e) {
-                        console.warn('Failed to get default branch:', e);
-                    }
-                };
+                sourceName() {
+                    throw new Error('Not implemented');
+                }
+            }
 
-                // 获取代理 URL
-                const getProxyUrl = (url) => {
-                    if (config.value.proxy) {
-                        return `${config.value.proxy}/${url}`;
-                    }
-                    return url;
-                };
+            class GithubStrategy extends StorageStrategy {
+                constructor(token, repo, branch, rootPath, proxy, uploadPath) {
+                    super();
+                    this.token = token;
+                    this.repo = repo;
+                    this.branch = branch;
+                    this.rootPath = rootPath;
+                    this.proxy = proxy;
+                    this.uploadPath = uploadPath;
+                }
+
+                isConnectable() {
+                    return this.token && this.repo && this.branch;
+                }
+
+                getDisplayInfo() {
+                    return this.repo;
+                }
+
+                sourceName() {
+                    return "GitHub";
+                }
 
                 // GitHub API 请求
-                const githubApiRequest = async (endpoint, options = {}) => {
+                async githubApiRequest(endpoint, options = {}) {
+                    const GITHUB_API_BASE = 'https://api.github.com';
                     const url = `${GITHUB_API_BASE}${endpoint}`;
                     const response = await fetch(url, {
                         ...options,
                         headers: {
                             'Accept': 'application/vnd.github.v3+json',
-                            'Authorization': `Bearer ${config.value.token}`,
+                            'Authorization': `Bearer ${this.token}`,
                             ...options.headers
                         }
                     });
@@ -572,212 +706,172 @@
                     return response.json();
                 };
 
-                // 连接 GitHub
-                const isConnected = computed(() => {
-                    return config.value.token && config.value.repo;
-                });
-
-                const connectToGithub = async () => {
-                    if (!isConnected.value) return;
-
-                    isLoading.value = true;
-                    try {
-                        // 验证 token
-                        await githubApiRequest('/user');
-                        // 获取仓库默认分支
-                        await getDefaultBranch();
-                        await refreshFileTree();
-                        showToast('连接成功!', 'success');
-                    } catch (error) {
-                        showToast(`连接失败: ${error.message}`, 'error');
-                        console.error('GitHub API error:', error);
-                    } finally {
-                        isLoading.value = false;
+                getFormatPath(path) {
+                    if (!path) {
+                        return '';
                     }
-                };
-
-                // 构建文件夹路径
-                const getFolderPath = (path) => {
-                    const lastSlash = path.lastIndexOf('/');
-                    return lastSlash > 0 ? path.substring(0, lastSlash) : '';
-                };
-
-                // 刷新文件树
-                const refreshFileTree = async () => {
-                    if (!isConnected.value) return;
-
-                    isLoading.value = true;
-                    try {
-                        const rootPath = config.value.rootPath || '';
-                        const contents = await fetchContents(rootPath);
-                        fileTree.value = buildFileTree(contents);
-                    } catch (error) {
-                        showToast(`获取文件列表失败: ${error.message}`, 'error');
-                    } finally {
-                        isLoading.value = false;
+                    if (path.endsWith('/')) {
+                        path = path.slice(0, -1);
                     }
-                };
+                    if (path.startsWith('/')) {
+                        path = path.slice(1);
+                    }
+                    return path;
+                }
 
-                // 递归获取目录内容（添加时间戳避免缓存）
-                const fetchContents = async (path) => {
-                    const timestamp = Date.now();
-                    const endpoint = path ? `/repos/${config.value.repo}/contents/${path}?t=${timestamp}` : `/repos/${config.value.repo}/contents?t=${timestamp}`;
-                    const contents = await githubApiRequest(endpoint);
+                buildPath(basePath) {
+                    const paths = [];
+                    const formatRootPath = this.getFormatPath(this.rootPath);
+                    if (formatRootPath) {
+                        paths.push(formatRootPath);
+                    }
+                    const formatBasePath = this.getFormatPath(basePath);
+                    if (formatBasePath) {
+                        paths.push(formatBasePath);
+                    }
+                    return paths.join('/');
+                }
+
+                removeRootPath(path) {
+                    if (!path) {
+                        return path;
+                    }
+                    const formatRootPath = this.getFormatPath(this.rootPath);
+                    if (!formatRootPath) {
+                        return path;
+                    }
+                    const prefix = formatRootPath + "/";
+                    if (path.startsWith(prefix)) {
+                        return path.slice(prefix.length);
+                    }
+
+                    if (path === formatRootPath) {
+                        return "";
+                    }
+
+                    return path;
+                }
+
+                async listFile(path) {
+                    const filePath = this.buildPath(path);
+                    const endpoint = filePath ? `/repos/${this.repo}/contents/${filePath}` : `/repos/${this.repo}/contents`;
+                    const contents = await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()));
 
                     if (!Array.isArray(contents)) {
                         return [];
                     }
 
-                    // 并行获取子目录内容
-                    const promises = contents.map(async item => {
-                        if (item.type === 'dir') {
-                            try {
-                                item.children = await fetchContents(item.path);
-                                // 只保留 .md 文件
-                                item.children = item.children.filter(child =>
-                                    child.type === 'file' && child.name.endsWith('.md')
-                                );
-                                if (item.children.length === 0) {
-                                    return null; // 空文件夹不显示
-                                }
-                            } catch (e) {
-                                console.warn(`Failed to fetch ${item.path}:`, e);
-                                return null;
-                            }
-                        }
-                        return item;
+                    const map = contents
+                        .map(item => ({
+                            name: item.name,
+                            path: this.removeRootPath(item.path),
+                            type: item.type === 'dir' ? 'directory' : 'file',
+                            fullPath: this.removeRootPath(item.path)
+                        }));
+                    console.log(map);
+                    return map;
+                }
+
+                async loadFile(path) {
+                    const filePath = this.buildPath(path);
+                    const endpoint = `/repos/${this.repo}/contents/${filePath}`;
+                    const data = await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()));
+                    let content = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
+                    return {content};
+                }
+
+                async saveFile(path, content) {
+                    const fileSha = await this.getFileSha(path);
+                    const encodedContent = btoa(unescape(encodeURIComponent(content)));
+                    const filePath = this.buildPath(path);
+                    const endpoint = `/repos/${this.repo}/contents/${filePath}`;
+                    await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()), {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            message: `Update ${path} via SimpleServer MdEditor`,
+                            content: encodedContent,
+                            sha: fileSha
+                        })
                     });
+                }
 
-                    const results = await Promise.all(promises);
-                    return results.filter(item => item !== null);
-                };
+                async createFile(path, content = '') {
+                    const filePath = this.buildPath(path);
+                    const encodedContent = btoa(unescape(encodeURIComponent(content)));
+                    const endpoint = `/repos/${this.repo}/contents/${filePath}`;
+                    await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()), {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            message: `Create ${path} via SimpleServer MdEditor`,
+                            content: encodedContent
+                        })
+                    });
+                }
 
-                // 构建文件树
-                const buildFileTree = (contents) => {
-                    return contents
-                        .filter(item => item.type === 'file' ? item.name.endsWith('.md') : true)
-                        .sort((a, b) => {
-                            // 文件夹在前，文件在后
-                            if (a.type === 'dir' && b.type !== 'dir') return -1;
-                            if (a.type !== 'dir' && b.type === 'dir') return 1;
-                            return a.name.localeCompare(b.name);
-                        });
-                };
+                async deleteFile(path) {
+                    const sha = await this.getFileSha(path);
+                    const filePath = this.buildPath(path);
+                    const endpoint = `/repos/${this.repo}/contents/${filePath}`;
+                    await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()), {
+                        method: 'DELETE',
+                        body: JSON.stringify({
+                            message: `Delete ${path} via SimpleServer MdEditor`,
+                            sha: sha
+                        })
+                    });
+                }
 
-                // 选择文件
-                const selectFile = async (path) => {
-                    if (path === currentFilePath.value) return;
+                async validConnection() {
+                    await this.githubApiRequest('/user');
+                }
 
-                    if (isDirty.value) {
-                        if (!confirm('当前文件有未保存的更改，确定要放弃吗？')) {
-                            return;
-                        }
+                async convertFilePath(mdFilePath) {
+                    if (!mdFilePath) {
+                        return mdFilePath;
                     }
-
-                    currentFilePath.value = path;
-                    currentFolder.value = getFolderPath(path);
-                    isDirty.value = false;
-                    currentSha = null; // 重置 SHA
-
-                    await loadFileContent(path);
-                };
-
-                // 转换 Markdown 中的相对路径为完整 URL（用于编辑时显示）
-                const transformImageUrlsToFull = (content) => {
-                    if (!content) return content;
-                    return content.replace(
-                        /!\[([^\]]*)\]\((file\/[^)]+)\)/g,
-                        (match, alt, url) => {
-                            const fullUrl = getFileDisplayUrl(url);
-                            return `![${alt}](${fullUrl})`;
-                        }
-                    );
-                };
-
-                // 转换完整 URL 为相对路径（用于保存，保持 Markdown 可移植性）
-                const transformImageUrlsToRelative = (content) => {
-                    if (!content) return content;
-                    // 匹配原始 URL 或代理 URL
-                    const rawBaseUrl = `https://raw.githubusercontent.com/${config.value.repo}/${defaultBranch}/`;
-                    const proxyBaseUrl = config.value.proxy ? `${config.value.proxy}/${rawBaseUrl}` : '';
-
-                    // 构建正则，匹配原始 URL 或代理 URL
-                    const patterns = [rawBaseUrl];
-                    if (proxyBaseUrl && proxyBaseUrl !== rawBaseUrl) {
-                        patterns.push(proxyBaseUrl);
+                    const filePath = this.buildPath(mdFilePath);
+                    const rawUrl = `https://raw.githubusercontent.com/${this.repo}/${this.branch}/${filePath}`;
+                    if (this.proxy) {
+                        return `${this.proxy}/${rawUrl}`;
                     }
+                    return rawUrl;
+                }
 
-                    for (const baseUrl of patterns) {
-                        const regex = new RegExp(`!\\[([^\\]]*)\\]\\(${baseUrl}(file\\/[^)]+)\\)`, 'g');
-                        content = content.replace(regex, (match, alt, url) => {
-                            return `![${alt}](${url})`;
-                        });
-                    }
-                    return content;
-                };
-
-                // 加载文件内容（解决 409 问题：在加载时重新获取 SHA）
-                const loadFileContent = async (path) => {
+                async getFileSha(filePath) {
+                    let sha = null;
                     try {
-                        const endpoint = `/repos/${config.value.repo}/contents/${path}`;
-                        const data = await githubApiRequest(endpoint);
-
-                        // 保存 SHA 用于后续更新，避免 409 冲突
-                        currentSha = data.sha;
-
-                        // 使用 UTF-8 解码处理中文
-                        let content = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
-                        // 转换图片 URL 为完整路径（便于在编辑器中显示）
-                        content = transformImageUrlsToFull(content);
-
-                        // 设置到编辑器，使用 nextTick 确保 DOM 更新
-                        if (vditor) {
-                            // 延迟执行，确保 Vditor 已完全初始化
-                            setTimeout(() => {
-                                if (vditor && vditor.setValue) {
-                                    vditor.setValue(content);
-                                    isDirty.value = false;
-                                }
-                            }, 100);
-                        }
-                    } catch (error) {
-                        showToast(`加载文件失败: ${error.message}`, 'error');
+                        const fileRequestPath = this.buildPath(filePath);
+                        const endpoint = `/repos/${this.repo}/contents/${fileRequestPath}`;
+                        const checkData = await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()));
+                        sha = checkData.sha;
+                    } catch (e) {
+                        throw new Error("Fetch file sha failed");
                     }
-                };
+                    return sha;
+                }
 
-                // 上传文件到 GitHub
-                const uploadFileToGithub = async (file) => {
+                fileUploadPath() {
+                    return this.uploadPath;
+                }
+
+                async uploadFile(fileUploadPath, file) {
                     const fileName = file.name;
-                    // 统一上传到 file 文件夹
-                    const uploadPath = `file/${fileName}`;
 
                     const reader = new FileReader();
                     return new Promise((resolve, reject) => {
                         reader.onload = async () => {
                             try {
-                                // readAsDataURL 返回 data:xxx;base64,xxxxx 格式
-                                // 直接取 base64 部分，不需要再次编码
                                 const dataUrl = reader.result;
                                 let content = dataUrl.split(',')[1];
 
-                                // 如果没有逗号（普通文本文件没有 data: 前缀），直接使用原内容
                                 if (!dataUrl.includes(',')) {
                                     content = btoa(unescape(encodeURIComponent(dataUrl)));
                                 }
-
-                                // 检查文件是否已存在
-                                let sha = null;
-                                try {
-                                    const checkEndpoint = `/repos/${config.value.repo}/contents/${uploadPath}`;
-                                    const checkData = await githubApiRequest(checkEndpoint);
-                                    sha = checkData.sha;
-                                } catch (e) {
-                                    // 文件不存在，继续上传
-                                }
-
-                                // 上传文件
-                                const endpoint = `/repos/${config.value.repo}/contents/${uploadPath}`;
-                                await githubApiRequest(endpoint, {
+                                const filePath = computePath(fileUploadPath, false, fileName);
+                                const fileRequestPath = this.buildPath(filePath);
+                                const sha = await this.getFileSha(filePath);
+                                const endpoint = `/repos/${this.repo}/contents/${fileRequestPath}`;
+                                await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()), {
                                     method: 'PUT',
                                     body: JSON.stringify({
                                         message: `Upload ${fileName} via SimpleServer MdEditor`,
@@ -786,9 +880,7 @@
                                     })
                                 });
 
-                                // 返回相对路径（用于 Markdown 中）
-                                // 展示时会通过代理劫持转换为代理 URL
-                                resolve(`file/${fileName}`);
+                                resolve(filePath);
                             } catch (error) {
                                 reject(error);
                             }
@@ -796,408 +888,699 @@
                         reader.onerror = reject;
                         reader.readAsDataURL(file);
                     });
-                };
+                }
 
-                // 获取文件的展示 URL（始终转换为完整 URL，代理可选）
-                const getFileDisplayUrl = (filePath) => {
-                    if (!filePath) return '';
-                    const rawUrl = `https://raw.githubusercontent.com/${config.value.repo}/${defaultBranch}/${filePath}`;
-                    // 始终使用代理（如果有设置）
-                    if (config.value.proxy) {
-                        return `${config.value.proxy}/${rawUrl}`;
+                getBaseParam() {
+                    const params = {};
+                    if (this.branch) {
+                        params.ref = this.branch;
                     }
-                    return rawUrl;
-                };
-
-                // 初始化 Vditor 编辑器
-                const initVditor = () => {
-                    vditor = new Vditor('vditor', {
-                        mode: 'wysiwyg',  // 所见即所得模式，类似 Typora
-                        height: '100%',
-                        placeholder: '选择文件开始编辑，或新建一个文件...',
-                        toolbarConfig: {
-                            pin: true,
-                        },
-                        editorName: 'vditor',
-                        toolbar: [
-                            'headings', 'bold', 'italic', 'strike', 'link', '|',
-                            'list', 'ordered-list', 'check', 'outdent', 'indent', '|',
-                            'code', 'inline-code', 'code-block', 'table', '|',
-                            'insert', 'upload', 'line', 'quote', '|',
-                            'fullscreen', 'preview', 'export'
-                        ],
-                        upload: {
-                            url: '',  // 使用自定义处理器，不使用默认 URL
-                            max: 50 * 1024 * 1024,  // 50MB
-                            handler(files) {
-                                if (!isConnected.value) {
-                                    showToast('请先连接 GitHub', 'error');
-                                    return;
-                                }
-                                const results = [];
-                                const promises = files.map(async (file) => {
-                                    try {
-                                        const url = await uploadFileToGithub(file);
-                                        results.push({
-                                            url: url,
-                                            name: file.name
-                                        });
-                                    } catch (error) {
-                                        console.error('Upload failed:', error);
-                                        showToast(`上传 ${file.name} 失败: ${error.message}`, 'error');
-                                    }
-                                });
-                                Promise.all(promises).then(() => {
-                                    if (results.length > 0 && vditor) {
-                                        // 插入完整 URL（而不是相对路径）
-                                        const fullUrl = getFileDisplayUrl(results[0].url);
-                                        vditor.insertValue(`\n![${results[0].name}](${fullUrl})\n`);
-                                    }
-                                });
-                                return results;
-                            }
-                        },
-                        preview: {
-                            theme: {
-                                current: 'light'
-                            },
-                            markdown: {
-                                transform: (html) => {
-                                    // 将相对路径转换为完整 URL
-                                    if (html) {
-                                        // 匹配 file/ 开头的图片路径
-                                        html = html.replace(
-                                            /file\/([^"')>\s]+)/g,
-                                            (match, filePath) => {
-                                                return getFileDisplayUrl(filePath);
-                                            }
-                                        );
-                                    }
-                                    return html;
-                                }
-                            }
-                        },
-                        input: () => {
-                            if (currentFilePath.value) {
-                                isDirty.value = true;
-                            }
-                        },
-                        after: () => {
-                            // 编辑器初始化完成
-                        }
-                    });
-
-                    // 监听键盘快捷键
-                    window.addEventListener('keydown', handleKeyDown, { capture: true });
-                };
-
-                // 键盘快捷键
-                const handleKeyDown = (e) => {
-                    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (currentFilePath.value && isDirty.value) {
-                            saveFile();
-                        }
-                    }
-                };
-
-                // 保存文件（解决 409 问题：强制重新获取 SHA）
-                const saveFile = async () => {
-                    if (!currentFilePath.value || !vditor) return;
-
-                    // 在保存前重新获取最新 SHA，避免 409 冲突
-                    let latestSha = null;
-                    try {
-                        const endpoint = `/repos/${config.value.repo}/contents/${currentFilePath.value}`;
-                        const data = await githubApiRequest(endpoint);
-                        latestSha = data.sha;
-                    } catch (e) {
-                        showToast('获取文件信息失败，请重试', 'error');
-                        return;
-                    }
-
-                    // 检查 SHA 是否匹配（检测是否有其他人修改）
-                    if (currentSha && latestSha !== currentSha) {
-                        // SHA 不匹配，说明文件已被修改
-                        if (!confirm('文件已被其他方式修改，是否强制覆盖？点击确定将放弃其他修改。')) {
-                            return;
-                        }
-                    }
-
-                    isSaving.value = true;
-                    try {
-                        // 使用 getMarkdown() 获取 Markdown 文本，而不是 getValue()（返回 HTML）
-                        let content = vditor.getMarkdown ? vditor.getMarkdown() : vditor.getValue();
-                        // 转换图片 URL 为相对路径（保持 Markdown 可移植性）
-                        content = transformImageUrlsToRelative(content);
-                        // 使用 UTF-8 编码处理中文
-                        const encodedContent = btoa(unescape(encodeURIComponent(content)));
-
-                        const endpoint = `/repos/${config.value.repo}/contents/${currentFilePath.value}`;
-                        await githubApiRequest(endpoint, {
-                            method: 'PUT',
-                            body: JSON.stringify({
-                                message: `Update ${currentFilePath.value} via SimpleServer MdEditor`,
-                                content: encodedContent,
-                                sha: latestSha  // 使用最新获取的 SHA
-                            })
-                        });
-
-                        // 更新本地 SHA
-                        currentSha = latestSha;
-                        isDirty.value = false;
-                        lastSaved.value = formatTime(new Date());
-                        showToast('保存成功!', 'success');
-                    } catch (error) {
-                        if (error.message.includes('409')) {
-                            showToast('保存失败：文件已被修改，请刷新后重试', 'error');
-                        } else {
-                            showToast(`保存失败: ${error.message}`, 'error');
-                        }
-                    } finally {
-                        isSaving.value = false;
-                    }
-                };
-
-                // 新建文件
-                const createNewFile = async () => {
-                    if (!newFilePath.value) return;
-
-                    let path = newFilePath.value;
-                    if (!path.endsWith('.md')) {
-                        path += '.md';
-                    }
-
-                    const content = '';
-                    const encodedContent = btoa(unescape(encodeURIComponent(content)));
-
-                    try {
-                        const endpoint = `/repos/${config.value.repo}/contents/${path}`;
-                        await githubApiRequest(endpoint, {
-                            method: 'PUT',
-                            body: JSON.stringify({
-                                message: `Create ${path} via SimpleServer MdEditor`,
-                                content: encodedContent
-                            })
-                        });
-
-                        showNewFileModal.value = false;
-                        newFilePath.value = '';
-                        await refreshFileTree();
-                        await selectFile(path);
-                        showToast('文件创建成功!', 'success');
-                    } catch (error) {
-                        showToast(`创建失败: ${error.message}`, 'error');
-                    }
-                };
-
-                // 删除文件
-                const deleteFile = async (path) => {
-                    if (!path) return;
-                    if (!confirm(`确定要删除文件 ${path} 吗？`)) return;
-
-                    try {
-                        const endpoint = `/repos/${config.value.repo}/contents/${path}`;
-                        const data = await githubApiRequest(endpoint);
-
-                        await githubApiRequest(endpoint, {
-                            method: 'DELETE',
-                            body: JSON.stringify({
-                                message: `Delete ${path} via SimpleServer MdEditor`,
-                                sha: data.sha
-                            })
-                        });
-
-                        if (currentFilePath.value === path) {
-                            currentFilePath.value = '';
-                            currentSha = null;
-                            if (vditor) vditor.setValue('');
-                        }
-                        await refreshFileTree();
-                        showToast('文件删除成功!', 'success');
-                    } catch (error) {
-                        showToast(`删除失败: ${error.message}`, 'error');
-                    }
-                };
-
-                // 文件管理器功能
-                const openFileManager = async () => {
-                    showFileManagerModal.value = true;
-                    await fetchFileList();
-                };
-
-                const fetchFileList = async () => {
-                    if (!config.value.repo) return;
-                    fileListLoading.value = true;
-                    try {
-                        const endpoint = `/repos/${config.value.repo}/contents/file`;
-                        const data = await githubApiRequest(endpoint);
-                        // 过滤出文件（排除文件夹）
-                        fileList.value = Array.isArray(data) ? data.filter(item => !item.type || item.type === 'file') : [];
-                    } catch (error) {
-                        // 如果目录不存在，显示空列表
-                        fileList.value = [];
-                    } finally {
-                        fileListLoading.value = false;
-                    }
-                };
-
-                const downloadFile = (file) => {
-                    const url = getFileDisplayUrl(file.path);
-                    // 打开新窗口下载
-                    window.open(url, '_blank');
-                };
-
-                const deleteUploadedFile = async (file) => {
-                    if (!confirm(`确定要删除文件 ${file.name} 吗？`)) {
-                        return;
-                    }
-                    try {
-                        const endpoint = `/repos/${config.value.repo}/contents/${file.path}`;
-                        await githubApiRequest(endpoint, {
-                            method: 'DELETE',
-                            body: JSON.stringify({
-                                message: `Delete ${file.name} via SimpleServer MdEditor`,
-                                sha: file.sha
-                            })
-                        });
-                        await fetchFileList();
-                        showToast('文件删除成功!', 'success');
-                    } catch (error) {
-                        showToast(`删除失败: ${error.message}`, 'error');
-                    }
-                };
-
-                const formatFileSize = (size) => {
-                    if (!size) return '-';
-                    if (size < 1024) return size + ' B';
-                    if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB';
-                    return (size / (1024 * 1024)).toFixed(1) + ' MB';
-                };
-
-                // 从 URL 参数获取配置
-                const getConfigFromUrl = () => {
-                    const params = new URLSearchParams(window.location.search);
-                    const urlConfig = {};
-                    if (params.get('token')) urlConfig.token = params.get('token');
-                    if (params.get('repo')) urlConfig.repo = params.get('repo');
-                    if (params.get('rootPath')) urlConfig.rootPath = params.get('rootPath');
-                    if (params.get('proxy')) urlConfig.proxy = params.get('proxy');
-                    return urlConfig;
-                };
-
-                // 导出配置 URL 到剪贴板
-                const exportConfigUrl = () => {
-                    if (!config.value.token || !config.value.repo) {
-                        showToast('请先配置 GitHub', 'error');
-                        return;
-                    }
-                    const baseUrl = window.location.origin + window.location.pathname;
-                    const params = new URLSearchParams();
-                    if (config.value.token) params.set('token', config.value.token);
-                    if (config.value.repo) params.set('repo', config.value.repo);
-                    if (config.value.rootPath) params.set('rootPath', config.value.rootPath);
-                    if (config.value.proxy) params.set('proxy', config.value.proxy);
-                    const fullUrl = `${baseUrl}?${params.toString()}`;
-                    navigator.clipboard.writeText(fullUrl).then(() => {
-                        showToast('配置链接已复制到剪贴板', 'success');
-                    }).catch(err => {
-                        showToast('复制失败', 'error');
-                        console.error('Failed to copy:', err);
-                    });
-                };
-
-                // 加载配置
-                const loadConfig = () => {
-                    try {
-                        // 首先检查 URL 参数
-                        const urlConfig = getConfigFromUrl();
-                        if (Object.keys(urlConfig).length > 0) {
-                            // 使用 URL 参数覆盖本地配置
-                            config.value = { ...config.value, ...urlConfig };
-                            saveConfigToStorage();
-                            showConfigModal.value = false;
-                            if (config.value.token && config.value.repo) {
-                                connectToGithub();
-                            }
-                            return;
-                        }
-
-                        // 然后检查 localStorage
-                        const saved = localStorage.getItem('mdeditorConfig');
-                        if (saved) {
-                            const parsed = JSON.parse(saved);
-                            config.value = { ...config.value, ...parsed };
-                            showConfigModal.value = false;
-                            if (config.value.token && config.value.repo) {
-                                connectToGithub();
-                            }
-                        }
-                    } catch (e) {
-                        console.warn('Failed to load config:', e);
-                    }
-                };
-
-                // 生命周期
-                onMounted(() => {
-                    loadConfig();
-                    initVditor();
-                });
-
-                onBeforeUnmount(() => {
-                    window.removeEventListener('keydown', handleKeyDown, { capture: true });
-                });
-
-                return {
-                    // 侧边栏
-                    sidebarCollapsed,
-
-                    // 配置
-                    showConfigModal,
-                    config,
-                    saveConfigAndConnect,
-                    clearConfig,
-                    exportConfigUrl,
-
-                    // 文件树
-                    fileTree,
-                    isLoading,
-                    refreshFileTree,
-                    currentFilePath,
-                    currentFolder,
-                    selectFile,
-
-                    // 编辑器
-                    isDirty,
-                    lastSaved,
-                    saveFile,
-                    isSaving,
-                    isConnected,
-
-                    // 模态框
-                    showNewFileModal,
-                    newFilePath,
-                    createNewFile,
-                    deleteFile,
-
-                    // 文件管理器
-                    showFileManagerModal,
-                    openFileManager,
-                    fileList,
-                    fileListLoading,
-                    downloadFile,
-                    deleteUploadedFile,
-                    formatFileSize,
-
-                    // Toast
-                    toastRef
-                };
+                    params.timestamp = Date.now();
+                    return params;
+                }
             }
-        });
 
-        app.mount('#app');
-    </script>
+            class LocalStrategy extends StorageStrategy {
+                constructor(directoryHandle, name, uploadPath) {
+                    super();
+                    this.directoryHandle = directoryHandle;
+                    this.name = name;          // 文件夹显示名称
+                    this.uploadPath = uploadPath;
+                }
+
+                async convertFilePath(mdFilePath) {
+                    if (!mdFilePath) {
+                        return mdFilePath;
+                    }
+                    const fileEntry = await this.findFileHandle(this.directoryHandle, mdFilePath);
+                    const fileData = await fileEntry.getFile();
+                    return URL.createObjectURL(fileData);
+                }
+
+                isConnectable() {
+                    return this.directoryHandle && this.directoryHandle.kind === 'directory';
+                }
+
+                getDisplayInfo() {
+                    return this.name || '本地文件夹';
+                }
+
+                sourceName() {
+                    return "本地文件夹";
+                }
+
+                async listFile(path) {
+                    const dirHandle = await this.findDirHandle(this.directoryHandle, path);
+
+                    const items = [];
+                    for await (const entry of dirHandle.values()) {
+                        const entryPath = path ? `${path}/${entry.name}` : entry.name;
+                        items.push({
+                            name: entry.name,
+                            path: entryPath,
+                            type: entry.kind === 'directory' ? 'directory' : 'file',
+                            fullPath: entryPath
+                        });
+                    }
+                    return items;
+                }
+
+                async loadFile(path) {
+                    const fileHandle = await this.findFileHandle(this.directoryHandle, path);
+                    if (!fileHandle) {
+                        throw new Error('文件不存在');
+                    }
+                    const file = await fileHandle.getFile();
+                    const content = await file.text();
+                    return {content};
+                }
+
+                async saveFile(path, content) {
+                    const fileHandle = await this.findFileHandle(this.directoryHandle, path);
+                    if (!fileHandle) {
+                        throw new Error('文件不存在');
+                    }
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(content);
+                    await writable.close();
+                }
+
+                async createFile(path, content = '') {
+                    const parentHandle = await this.findParentHandle(this.directoryHandle, path);
+                    const fileName = path.split('/').pop();
+                    const fileHandle = await parentHandle.getFileHandle(fileName, {create: true});
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(content);
+                    await writable.close();
+                }
+
+                async deleteFile(path) {
+                    const parentHandle = await this.findParentHandle(this.directoryHandle, path);
+                    const fileName = path.split('/').pop();
+                    await parentHandle.removeEntry(fileName);
+                }
+
+                async validConnection() {
+                    if (!window.showDirectoryPicker) {
+                        throw new Error('本地文件夹连接失败，当前浏览器不支持');
+                    }
+                }
+
+                fileUploadPath() {
+                    return this.uploadPath;
+                }
+
+                async uploadFile(fileUploadPath, file) {
+                    const fileName = file.name;
+
+                    return new Promise(async (resolve, reject) => {
+                        try {
+                            const filePath = computePath(fileUploadPath, false, fileName);
+                            let fileHandler = await this.findFileHandle(this.directoryHandle, filePath, true);
+                            const writable = await fileHandler.createWritable();
+                            await writable.write(file);
+                            await writable.close();
+
+                            resolve(filePath);
+                        } catch (error) {
+                            reject(error);
+                        }
+                    });
+                }
+
+                async traversePath(dirHandle, path, create = false, lastPartHandler) {
+                    if (!path) {
+                        return dirHandle;
+                    }
+                    if (path.startsWith("/")) {
+                        path = path.slice(1);
+                    }
+                    const parts = path.split('/');
+                    let currentHandle = dirHandle;
+                    for (let i = 0; i < parts.length - 1; i++) {
+                        if (!parts[i]) continue;
+                        currentHandle = await currentHandle.getDirectoryHandle(parts[i], {create});
+                    }
+                    return await lastPartHandler(currentHandle, parts, create);
+                }
+
+                async findFileHandle(dirHandle, path, create = false) {
+                    return await this.traversePath(dirHandle, path, create, (handle, parts) => {
+                        return handle.getFileHandle(parts[parts.length - 1], {create});
+                    });
+                }
+
+                async findDirHandle(dirHandle, path, create = false) {
+                    return await this.traversePath(dirHandle, path, create, (handle, parts) => {
+                        return handle.getDirectoryHandle(parts[parts.length - 1], {create});
+                    });
+                }
+
+                async findParentHandle(dirHandle, path, create = false) {
+                    return await this.traversePath(dirHandle, path, create, (handle) => {
+                        return handle;
+                    });
+                }
+            }
+
+            const sidebarCollapsed = ref(false);
+            const showConfigModal = ref(true);
+            const mdSource = ref('local');
+            const githubConfig = ref({
+                token: '',
+                repo: '',
+                branch: '',
+                rootPath: '',
+                proxy: '',
+                uploadPath: ''
+            });
+            const localConfig = ref({
+                directoryHandle: null,
+                name: '',
+                uploadPath: ''
+            });
+            const showAllFile = ref(false);
+            const fileTree = ref([]);
+            const isLoading = ref(false);
+            const currentFilePath = ref('');
+            const currentFilePathMapping = ref({});
+            const isDirty = ref(false);
+            const lastSaved = ref('');
+            const isSaving = ref(false);
+            const showNewFileModal = ref(false);
+            const newFilePath = ref('');
+            const toastRef = ref(null);
+
+            const showToast = (message, type = 'info') => {
+                if (toastRef.value) {
+                    toastRef.value.show(message, type);
+                }
+            };
+
+            const getStrategy = computed(() => {
+                if (mdSource.value === 'local') {
+                    // 修复：传递正确的三个参数 (directoryHandle, name, uploadPath)
+                    return new LocalStrategy(
+                        localConfig.value.directoryHandle,
+                        localConfig.value.directoryHandle ? localConfig.value.directoryHandle.name : '',
+                        localConfig.value.uploadPath
+                    );
+                } else if (mdSource.value === 'github') {
+                    return new GithubStrategy(
+                        githubConfig.value.token,
+                        githubConfig.value.repo,
+                        githubConfig.value.branch,
+                        githubConfig.value.rootPath,
+                        githubConfig.value.proxy,
+                        githubConfig.value.uploadPath
+                    );
+                } else {
+                    throw new Error('未知的Markdown源类型');
+                }
+            });
+
+            const showFileTree = computed(() => {
+                if (showAllFile.value) {
+                    return fileTree.value;
+                }
+                return filterFileTree(fileTree.value);
+            });
+
+            const displaySourceInfo = computed(() => {
+                return getStrategy.value.getDisplayInfo();
+            });
+
+            const sourceName = computed(() => {
+                return getStrategy.value.sourceName();
+            });
+
+            const canConnect = computed(() => {
+                return getStrategy.value.isConnectable();
+            });
+
+            const settingHandlers = [
+                { key: "mdSource", source: null, getter: () => mdSource.value, setter: (value) => mdSource.value = value },
+                { key: "githubToken", source: "github", getter: () => githubConfig.value.token, setter: (value) => githubConfig.value.token = value },
+                { key: "githubRepo", source: "github", getter: () => githubConfig.value.repo, setter: (value) => githubConfig.value.repo = value },
+                { key: "githubBranch", source: "github", getter: () => githubConfig.value.branch, setter: (value) => githubConfig.value.branch = value },
+                { key: "githubRootPath", source: "github", getter: () => githubConfig.value.rootPath, setter: (value) => githubConfig.value.rootPath = value },
+                { key: "githubUploadPath", source: "github", getter: () => githubConfig.value.uploadPath, setter: (value) => githubConfig.value.uploadPath = value },
+                { key: "githubProxy", source: "github", getter: () => githubConfig.value.proxy, setter: (value) => githubConfig.value.proxy = value },
+                { key: "localUploadPath", source: "local", getter: () => localConfig.value.uploadPath, setter: (value) => localConfig.value.uploadPath = value },
+            ];
+
+            const saveConfigToLocalStorage = (configs) => {
+                try {
+                    for (let settingHandler of settingHandlers) {
+                        if (!configs.hasOwnProperty(settingHandler.key)) {
+                            continue;
+                        }
+                        const toSaveValue = configs[settingHandler.key];
+                        localStorage.setItem(settingHandler.key, toSaveValue ? toSaveValue : '');
+                    }
+                } catch (e) {
+                    console.error('Failed to save config:', e);
+                }
+            };
+
+            const saveConfigToStorage = () => {
+                try {
+                    for (let settingHandler of settingHandlers) {
+                        const value = settingHandler.getter();
+                        localStorage.setItem(settingHandler.key, value ? value : '');
+                    }
+                } catch (e) {
+                    console.error('Failed to save config:', e);
+                }
+            };
+
+            const loadConfig = () => {
+                try {
+                    for (let settingHandler of settingHandlers) {
+                        const saved = localStorage.getItem(settingHandler.key);
+                        if (saved) {
+                            settingHandler.setter(saved);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Failed to load config:', e);
+                }
+            };
+
+            const applyConfigFromUrl = () => {
+                const params = new URLSearchParams(window.location.search);
+                const urlConfig = {};
+                for (let settingHandler of settingHandlers) {
+                    const value = params.get(settingHandler.key);
+                    if (value) {
+                        urlConfig[settingHandler.key] = value;
+                    }
+                }
+                saveConfigToLocalStorage(urlConfig);
+            };
+
+            const clearConfig = () => {
+                if (!confirm(`确定要清除 ${sourceName.value} 配置吗？`)) {
+                    return;
+                }
+                for (let settingHandler of settingHandlers) {
+                    if (settingHandler.source !== mdSource.value) {
+                        continue;
+                    }
+                    settingHandler.setter('');
+                }
+                saveConfigToStorage();
+                if (mdSource.value === 'local') {
+                    localConfig.value.directoryHandle = null;
+                    localConfig.value.name = '';
+                }
+                fileTree.value = [];
+                resetCurrentFileInfo();
+                showToast('配置已清除', 'info');
+                showConfigModal.value = true;
+            };
+
+            const saveConfigAndConnect = async () => {
+                saveConfigToStorage();
+                showConfigModal.value = false;
+                await connect();
+            };
+
+            const selectDirectory = async () => {
+                try {
+                    const dirHandle = await window.showDirectoryPicker();
+                    localConfig.value.directoryHandle = dirHandle;
+                    localConfig.value.name = dirHandle.name;
+                } catch (e) {
+                    if (e.name !== 'AbortError') {
+                        console.error('Failed to select directory:', e);
+                        showToast('选择文件夹失败', 'error');
+                    }
+                }
+            };
+
+            const exportConfigUrl = () => {
+                const baseUrl = window.location.origin + window.location.pathname;
+                const params = new URLSearchParams();
+                for (let settingHandler of settingHandlers) {
+                    const value = settingHandler.getter();
+                    params.set(settingHandler.key, value ? value : "");
+                }
+                const fullUrl = `${baseUrl}?${params.toString()}`;
+                navigator.clipboard.writeText(fullUrl).then(() => {
+                    showToast('配置链接已复制到剪贴板', 'success');
+                }).catch(err => {
+                    showToast('复制失败', 'error');
+                    console.error('Failed to copy:', err);
+                });
+            };
+
+            const resetCurrentFileInfo = () => {
+                currentFilePath.value = '';
+                currentFilePathMapping.value = {};
+                isDirty.value = false;
+                setVditorContent('');
+            };
+
+            const connect = async () => {
+                if (!canConnect.value) return;
+                const strategy = getStrategy.value;
+
+                isLoading.value = true;
+                try {
+                    await strategy.validConnection();
+                    await refreshFileTree();
+                    showToast('连接成功!', 'success');
+                } catch (error) {
+                    showToast(`连接失败: ${error.message}`, 'error');
+                    console.error('Connection error:', error);
+                } finally {
+                    isLoading.value = false;
+                }
+            };
+
+            const refreshFileTree = async () => {
+                if (!canConnect.value) return;
+
+                isLoading.value = true;
+
+                try {
+                    fileTree.value = await loadFileTree('');
+                } catch (error) {
+                    showToast(`获取文件列表失败: ${error.message}`, 'error');
+                } finally {
+                    isLoading.value = false;
+                }
+            };
+
+            const loadFileTree = async (path) => {
+                const strategy = getStrategy.value;
+                const files = await strategy.listFile(path);
+                for (const file of files) {
+                    if (file.type === 'directory') {
+                        file.children = await loadFileTree(file.path);
+                    }
+                }
+                return files;
+            };
+
+            const selectFile = async (path) => {
+                if (path === currentFilePath.value) return;
+
+                if (isDirty.value) {
+                    if (!confirm('当前文件有未保存的更改，确定要放弃吗？')) {
+                        return;
+                    }
+                }
+                resetCurrentFileInfo();
+                currentFilePath.value = path;
+                await loadMarkdownFile(path);
+            };
+
+            const loadMarkdownFile = async (path) => {
+                try {
+                    const strategy = getStrategy.value;
+                    const {content} = await strategy.loadFile(path);
+
+                    const processedContent = await convertMarkdownFilePath(path, content, currentFilePathMapping.value);
+                    setVditorContent(processedContent);
+                } catch (error) {
+                    console.log(error);
+                    showToast(`加载文件失败: ${error.message}`, 'error');
+                }
+            };
+
+            // Markdown 路径转换核心逻辑
+            const processMarkdownPaths = async (content, mapping, converter) => {
+                const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+                const linkRegex = /(?<!!)\[([^\]]*)\]\(([^)]+)\)/g;
+                let processedContent = content;
+
+                const processMatches = async (regex, buildReplacement) => {
+                    const matches = [...processedContent.matchAll(regex)];
+                    for (const match of matches) {
+                        const fullMatch = match[0];
+                        const url = match[2];
+                        const result = await converter(match, url, mapping);
+                        if (result !== url) {
+                            processedContent = processedContent.replace(
+                                fullMatch,
+                                buildReplacement(match, result)
+                            );
+                        }
+                    }
+                };
+
+                await processMatches(imageRegex, (match, url) => `![${match[1]}](${url})`);
+                await processMatches(linkRegex, (match, url) => `[${match[1]}](${url})`);
+
+                return processedContent;
+            };
+
+            const convertMarkdownFilePath = async (path, content, mapping) => {
+                return await processMarkdownPaths(content, mapping, async (match, url) => {
+                    if (!isFilePath(url)) {
+                        return url;
+                    }
+                    const formatUrl = computePath(path, true, url);
+                    const filePath = computePath(currentFilePath.value, true, formatUrl);
+                    const convertedUrl = await getStrategy.value.convertFilePath(filePath);
+                    if (convertedUrl && convertedUrl !== filePath) {
+                        mapping[convertedUrl] = url;
+                        return convertedUrl;
+                    }
+                    return url;
+                });
+            };
+
+            const revertMarkdownFilePath = async (path, content, mapping) => {
+                return await processMarkdownPaths(content, mapping, (match, url, mapping) => {
+                    if (mapping.hasOwnProperty(url)) {
+                        return mapping[url];
+                    }
+                    return url;
+                });
+            };
+
+            const setVditorContent = (content) => {
+                if (vditor) {
+                    setTimeout(() => {
+                        if (vditor && vditor.setValue) {
+                            vditor.setValue(content);
+                            isDirty.value = false;
+                        }
+                    }, 100);
+                } else {
+                    throw new Error("Vditor 编辑器未初始化");
+                }
+            };
+
+            let vditor = null;
+
+            const initVditor = () => {
+                vditor = new Vditor('vditor', {
+                    mode: 'wysiwyg',
+                    height: '100%',
+                    placeholder: '选择文件开始编辑，或新建一个文件...',
+                    toolbarConfig: { pin: true },
+                    editorName: 'vditor',
+                    toolbar: [
+                        'headings', 'bold', 'italic', 'strike', 'link', '|',
+                        'list', 'ordered-list', 'check', 'outdent', 'indent', '|',
+                        'code', 'inline-code', 'code-block', 'table', '|',
+                        'insert', 'upload', 'line', 'quote', '|',
+                        'fullscreen', 'preview', 'export'
+                    ],
+                    upload: {
+                        url: '',
+                        max: 50 * 1024 * 1024,
+                        handler: (files) => {
+                            if (!canConnect.value) {
+                                showToast(`请先连接 ${sourceName.value}`, 'error');
+                                return;
+                            }
+                            const strategy = getStrategy.value;
+                            const results = [];
+                            const promises = files.map(async (file) => {
+                                try {
+                                    const curPath = currentFilePath.value;
+                                    const uploadPath = computePath(curPath, true, strategy.fileUploadPath());
+                                    const url = await strategy.uploadFile(uploadPath, file);
+                                    results.push({ url, name: file.name });
+                                } catch (error) {
+                                    console.error('Upload failed:', error);
+                                    showToast(`上传 ${file.name} 失败: ${error.message}`, 'error');
+                                }
+                            });
+                            Promise.all(promises).then(async () => {
+                                for (const result of results) {
+                                    let fileUrl = result.url;
+                                    if (isFilePath(fileUrl)) {
+                                        try {
+                                            const filePath = computePath(currentFilePath.value, true, fileUrl);
+                                            const convertFileUrl = await strategy.convertFilePath(filePath);
+                                            if (convertFileUrl && convertFileUrl !== filePath) {
+                                                currentFilePathMapping.value[convertFileUrl] = fileUrl;
+                                                fileUrl = convertFileUrl;
+                                            }
+                                        } catch (error) {
+                                            console.error('Convert file path failed:', error);
+                                        }
+                                    }
+                                    vditor.insertValue(`\n![${result.name}](${fileUrl})\n`);
+                                }
+                            });
+                            return results;
+                        }
+                    },
+                    preview: {
+                        theme: { current: 'light' },
+                        markdown: {}
+                    },
+                    input: () => {
+                        if (currentFilePath.value) {
+                            isDirty.value = true;
+                        }
+                    },
+                    after: () => {}
+                });
+
+                window.addEventListener('keydown', handleKeyDown, { capture: true });
+            };
+
+            const handleKeyDown = (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (currentFilePath.value && isDirty.value) {
+                        saveMarkdownFile();
+                    }
+                }
+            };
+
+            const saveMarkdownFile = async () => {
+                const path = currentFilePath.value;
+                if (!path || !vditor) return;
+
+                isSaving.value = true;
+                try {
+                    let content = vditor.getMarkdown ? vditor.getMarkdown() : vditor.getValue();
+                    const strategy = getStrategy.value;
+                    const processedContent = await revertMarkdownFilePath(path, content, currentFilePathMapping.value);
+                    await strategy.saveFile(path, processedContent);
+
+                    isDirty.value = false;
+                    lastSaved.value = formatTime(new Date());
+                    showToast('保存成功!', 'success');
+                } catch (error) {
+                    if (error.message.includes('409')) {
+                        showToast('保存失败：文件已被修改，请刷新后重试', 'error');
+                    } else {
+                        showToast(`保存失败: ${error.message}`, 'error');
+                    }
+                } finally {
+                    isSaving.value = false;
+                }
+            };
+
+            const createNewFile = async () => {
+                if (!newFilePath.value) return;
+
+                let path = newFilePath.value;
+                if (!path.endsWith('.md')) {
+                    path += '.md';
+                }
+
+                const content = '';
+
+                try {
+                    const strategy = getStrategy.value;
+                    await strategy.createFile(path, content);
+
+                    showNewFileModal.value = false;
+                    newFilePath.value = '';
+                    await refreshFileTree();
+                    await selectFile(path);
+                    showToast('文件创建成功!', 'success');
+                } catch (error) {
+                    showToast(`创建失败: ${error.message}`, 'error');
+                }
+            };
+
+            const deleteFile = async (path) => {
+                if (!path) return;
+                if (!confirm(`确定要删除文件 ${path} 吗？`)) return;
+
+                try {
+                    const strategy = getStrategy.value;
+                    await strategy.deleteFile(path);
+
+                    if (currentFilePath.value === path) {
+                        resetCurrentFileInfo();
+                        setVditorContent('');
+                    }
+                    await refreshFileTree();
+                    showToast('文件删除成功!', 'success');
+                } catch (error) {
+                    showToast(`删除失败: ${error.message}`, 'error');
+                }
+            };
+
+            const tryConnectToMdSource = () => {
+                if (mdSource.value === 'github' && githubConfig.value.token && githubConfig.value.repo && githubConfig.value.branch) {
+                    showConfigModal.value = false;
+                    connect();
+                } else {
+                    showConfigModal.value = true;
+                }
+            };
+
+            onMounted(() => {
+                applyConfigFromUrl();
+                loadConfig();
+                initVditor();
+                tryConnectToMdSource();
+            });
+
+            onBeforeUnmount(() => {
+                window.removeEventListener('keydown', handleKeyDown, { capture: true });
+            });
+
+            return {
+                sidebarCollapsed,
+                mdSource,
+                localConfig,
+                canConnect,
+                displaySourceInfo,
+                sourceName,
+                selectDirectory,
+                showConfigModal,
+                githubConfig,
+                saveConfigAndConnect,
+                clearConfig,
+                exportConfigUrl,
+                fileTree,
+                showFileTree,
+                showAllFile,
+                isLoading,
+                refreshFileTree,
+                currentFilePath,
+                selectFile,
+                isDirty,
+                lastSaved,
+                saveMarkdownFile,
+                isSaving,
+                showNewFileModal,
+                newFilePath,
+                createNewFile,
+                deleteFile,
+                toastRef
+            };
+        }
+    });
+
+    app.mount('#app');
+</script>
 </body>
 
 </html>
