@@ -1,5 +1,7 @@
 package cn.gloduck.server.core.util;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Locale;
@@ -7,43 +9,49 @@ import java.util.Map;
 
 public class FileUtils {
     private final static String[] MULTI_EXTENSIONS = {
-            ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.Z", ".tar.lz", ".tar.lzma", "tar.zst"
+            ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.Z", ".tar.lz", ".tar.lzma", ".tar.zst"
     };
 
     public static String getFileExtensionFromPath(String path) {
-        // 处理空路径
         if (path == null || path.isEmpty()) {
-            return "";
+            return null;
         }
 
-        // 提取文件名部分（忽略路径分隔符）
-        String filename = extractFileName(path);
-        if (filename.isEmpty()) {
-            return "";
-        }
-
-
-        // 转换为小写以进行不区分大小写的匹配
-        String lowercaseFilename = filename.toLowerCase();
-
-        // 检查多重扩展名
-        for (String ext : MULTI_EXTENSIONS) {
-            if (lowercaseFilename.endsWith(ext)) {
-                // 从原始文件名中截取实际扩展名（保留原始大小写）
-                return filename.substring(filename.length() - ext.length());
-            }
-        }
-
-        // 处理标准扩展名（最后一个点之后的部分）
-        int lastDotIndex = filename.lastIndexOf('.');
-        // 排除点位于开头或结尾的情况
-        if (lastDotIndex <= 0 || lastDotIndex == filename.length() - 1) {
-            return "";
-        }
-        return filename.substring(lastDotIndex);
+        String filename = extractFileNameFromPath(path);
+        return getExtensionFromFileName(filename);
     }
 
-    private static String extractFileName(String path) {
+    public static String getFileExtensionFromUrl(String url) {
+        if (url == null || url.isEmpty()) {
+            return null;
+        }
+
+        String filename = extractFileNameFromUrl(url);
+        return getExtensionFromFileName(filename);
+    }
+
+
+    private static String extractFileNameFromUrl(String url) {
+        if (url == null || url.isEmpty()) {
+            throw new IllegalArgumentException("url must not be null or empty");
+        }
+
+        try {
+            String path = new URI(url).getPath();
+            if (path == null || path.isEmpty()) {
+                return null;
+            }
+            return extractFileNameFromPath(path);
+        } catch (URISyntaxException ex) {
+            throw new IllegalArgumentException("Invalid url: " + url, ex);
+        }
+    }
+
+    private static String extractFileNameFromPath(String path) {
+        if (path == null || path.isEmpty()) {
+            throw new IllegalArgumentException("path must not be null or empty");
+        }
+
         int lastSeparator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
         if (lastSeparator >= 0) {
             return path.substring(lastSeparator + 1);
@@ -51,72 +59,22 @@ public class FileUtils {
         return path;
     }
 
-    public static String getFileExtensionFromUrl(String url) {
-        if (url == null || url.isEmpty()) {
-            return "";
-        }
-
-        // 移除URL中的查询参数和片段标识符
-        String cleanPath = removeQueryAndFragment(url);
-
-        // 从清理后的路径中提取文件名
-        String filename = extractFileNameFromUrl(cleanPath);
-        if (filename.isEmpty()) {
-            return "";
-        }
-
-        // 使用文件名处理逻辑获取扩展名
-        return getExtensionFromFileName(filename);
-    }
-
-    // 移除URL中的查询参数(?之后)和片段标识符(#之后)
-    private static String removeQueryAndFragment(String url) {
-        // 先移除片段标识符
-        int fragmentIndex = url.indexOf('#');
-        if (fragmentIndex != -1) {
-            url = url.substring(0, fragmentIndex);
-        }
-
-        // 再移除查询参数
-        int queryIndex = url.indexOf('?');
-        if (queryIndex != -1) {
-            url = url.substring(0, queryIndex);
-        }
-
-        return url;
-    }
-
-    // 从URL路径中提取文件名（最后一个'/'之后的内容）
-    private static String extractFileNameFromUrl(String urlPath) {
-        // 处理以斜杠结尾的情况
-        if (urlPath.endsWith("/")) {
-            return "";
-        }
-
-        int lastSlashIndex = urlPath.lastIndexOf('/');
-        if (lastSlashIndex >= 0) {
-            return urlPath.substring(lastSlashIndex + 1);
-        }
-        // 无路径分隔符
-        return urlPath;
-    }
-
-    // 核心方法：从纯文件名中提取扩展名
     private static String getExtensionFromFileName(String filename) {
+        if (filename == null || filename.isEmpty()) {
+            return null;
+        }
 
-        String lowercaseFilename = filename.toLowerCase();
+        String lowercaseFilename = filename.toLowerCase(Locale.ROOT);
 
-        // 检查多重扩展名
         for (String ext : MULTI_EXTENSIONS) {
             if (lowercaseFilename.endsWith(ext)) {
                 return filename.substring(filename.length() - ext.length());
             }
         }
 
-        // 处理标准扩展名
         int lastDotIndex = filename.lastIndexOf('.');
         if (lastDotIndex <= 0 || lastDotIndex == filename.length() - 1) {
-            return "";
+            return null;
         }
         return filename.substring(lastDotIndex);
     }
