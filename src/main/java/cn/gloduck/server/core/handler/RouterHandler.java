@@ -60,7 +60,7 @@ public class RouterHandler implements HttpHandler {
             return !actualPath.substring(prefix.length()).contains("/");
         } else if (pattern.endsWith("/**")) {
             String prefix = pattern.substring(0, pattern.length() - 3);
-            return actualPath.startsWith(prefix);
+            return Objects.equals(actualPath, prefix) || actualPath.startsWith(prefix + "/");
         }
         return Objects.equals(pattern, actualPath);
     }
