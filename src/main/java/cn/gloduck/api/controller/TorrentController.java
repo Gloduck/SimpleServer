@@ -3,8 +3,8 @@ package cn.gloduck.api.controller;
 import cn.gloduck.api.service.torrent.TorrentService;
 import cn.gloduck.common.entity.base.Result;
 import cn.gloduck.server.core.enums.HttpMethod;
-import cn.gloduck.server.core.handler.special.ClassPathFileHandler;
 import cn.gloduck.server.core.handler.ControllerHandler;
+import cn.gloduck.server.core.handler.special.StaticFileHandler;
 import cn.gloduck.server.core.handler.styles.classes.JsonControllerHandler;
 import cn.gloduck.server.core.util.HttpExchangeUtils;
 
@@ -42,7 +42,7 @@ public class TorrentController {
     }
 
     public ControllerHandler index() {
-        return new ClassPathFileHandler(Arrays.asList("/torrent", "/torrent/"), "static/torrent/index.html");
+        return new StaticFileHandler("./", "static/torrent/index.html", Arrays.asList("/torrent", "/torrent/"));
     }
 
 }

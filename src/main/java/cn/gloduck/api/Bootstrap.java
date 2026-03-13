@@ -27,11 +27,11 @@ public class Bootstrap {
         server.registerController(new ForwardController());
         server.registerController(new MdEditorController());
         server.registerController(new ImageEditorController());
-        server.addHandler(new StaticFileHandler("./", "/static/**"));
+        server.addHandler(new StaticFileHandler("./", Arrays.asList("/static/**")).disableClasspath());
         server.start();
     }
 
-    private static void setLoggerLevel(String level){
+    private static void setLoggerLevel(String level) {
         Level logLevel = Level.parse(level);
         Formatter formatter = new SpringBootStyleFormatter();
         Arrays.stream(LogManager.getLogManager().getLogger("").getHandlers()).forEach(h -> {

@@ -3,12 +3,13 @@ package cn.gloduck.api.controller;
 import cn.gloduck.api.entity.model.jrebel.JrebelLeasesV1Model;
 import cn.gloduck.api.service.jrebel.JRebelService;
 import cn.gloduck.server.core.enums.HttpMethod;
-import cn.gloduck.server.core.handler.special.ClassPathFileHandler;
 import cn.gloduck.server.core.handler.ControllerHandler;
+import cn.gloduck.server.core.handler.special.StaticFileHandler;
 import cn.gloduck.server.core.handler.styles.classes.JsonControllerHandler;
 import cn.gloduck.server.core.util.HttpExchangeUtils;
 import com.sun.net.httpserver.HttpExchange;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -17,7 +18,7 @@ public class JrebelController {
     private JRebelService jRebelService = JRebelService.instance();
 
     public ControllerHandler htmlHandler() {
-        return new ClassPathFileHandler("/jrebel", "static/jrebel/index.html");
+        return new StaticFileHandler("./", "static/jrebel/index.html", Arrays.asList("/jrebel"));
     }
 
     public ControllerHandler leasesHandler() {

@@ -4,8 +4,8 @@ import cn.gloduck.api.entity.config.ForwardConfig;
 import cn.gloduck.api.utils.ConfigUtils;
 import cn.gloduck.api.utils.NetUtils;
 import cn.gloduck.server.core.handler.ControllerHandler;
-import cn.gloduck.server.core.handler.special.ClassPathFileHandler;
 import cn.gloduck.server.core.handler.special.ForwardHandler;
+import cn.gloduck.server.core.handler.special.StaticFileHandler;
 
 import java.net.InetSocketAddress;
 import java.net.Proxy;
@@ -23,7 +23,7 @@ public class ForwardController {
     }
 
     public ControllerHandler index() {
-        return new ClassPathFileHandler(Arrays.asList("/forward", "/forward/"), "static/forward/index.html");
+        return new StaticFileHandler("./", "static/forward/index.html", Arrays.asList("/forward", "/forward/"));
     }
 
 }
