@@ -21,7 +21,7 @@ import java.util.Optional;
 
 public class StaticFileHandler implements ControllerHandler {
     private final List<ApiEndpoint> apiEndpoints;
-    private final Path runtimeDirectory;
+    private final String runtimeDirectory;
     private final String fixedResourcePath;
     private boolean runtimeDirectoryEnabled = true;
     private boolean classpathEnabled = true;
@@ -32,9 +32,7 @@ public class StaticFileHandler implements ControllerHandler {
     }
 
     public StaticFileHandler(String runtimeDirectory, String fixedResourcePath, List<String> pathPatterns) {
-        this.runtimeDirectory = Paths.get(Objects.requireNonNull(runtimeDirectory, "runtimeDirectory must not be null"))
-                .toAbsolutePath()
-                .normalize();
+        this.runtimeDirectory = Objects.requireNonNull(runtimeDirectory, "runtimeDirectory must not be null");
         for (String pathPattern : pathPatterns) {
             Objects.requireNonNull(pathPattern, "pathPattern must not be null");
         }
@@ -107,9 +105,9 @@ public class StaticFileHandler implements ControllerHandler {
 
     private ResolvedResource getResolveResource(HttpExchange exchange) throws IOException {
         String relativePath = fixedResourcePath != null ? fixedResourcePath : normalizeRelativePath(exchange.getRequestURI().getPath());
-        ResolvedResource resolvedResource = resolveFromRuntimeDirectory(relativePath);
+        ResolvedResource resolvedResource = resolveFromClasspath(relativePath);
         if (resolvedResource == null) {
-            resolvedResource = resolveFromClasspath(relativePath);
+            resolvedResource = resolveFromRuntimeDirectory(relativePath);
         }
         if (resolvedResource == null) {
             throw new java.io.FileNotFoundException("Resource not found: " + relativePath);
@@ -122,8 +120,9 @@ public class StaticFileHandler implements ControllerHandler {
             return null;
         }
 
-        Path file = runtimeDirectory.resolve(relativePath).normalize();
-        if (!file.startsWith(runtimeDirectory) || !Files.isRegularFile(file)) {
+        Path baseDirectory = Paths.get(runtimeDirectory).toAbsolutePath().normalize();
+        Path file = baseDirectory.resolve(relativePath).normalize();
+        if (!file.startsWith(baseDirectory) || !Files.isRegularFile(file)) {
             return null;
         }
         return new RuntimeResolvedResource(relativePath, file);
@@ -135,11 +134,25 @@ public class StaticFileHandler implements ControllerHandler {
         }
 
         ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-        URL resource = classLoader.getResource(relativePath);
+        String classpathResourcePath = buildClasspathResourcePath(relativePath);
+        if (classpathResourcePath == null) {
+            return null;
+        }
+        URL resource = classLoader.getResource(classpathResourcePath);
         if (resource == null) {
             return null;
         }
-        return new ClasspathResolvedResource(relativePath, resource, classLoader);
+        return new ClasspathResolvedResource(classpathResourcePath, resource, classLoader);
+    }
+
+    private String buildClasspathResourcePath(String relativePath) {
+        Path path = Paths.get(runtimeDirectory).normalize().resolve(relativePath).normalize();
+        String normalizedPath = path.toString().replace('\\', '/');
+        if (path.isAbsolute() || normalizedPath.isEmpty() || ".".equals(normalizedPath)
+                || "/".equals(normalizedPath) || normalizedPath.startsWith("../") || "..".equals(normalizedPath)) {
+            return null;
+        }
+        return normalizedPath;
     }
 
     private String normalizeRelativePath(String requestPath) {
