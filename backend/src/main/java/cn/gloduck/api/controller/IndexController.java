@@ -6,16 +6,28 @@ import cn.gloduck.server.core.handler.ControllerHandler;
 import java.util.Arrays;
 
 public class IndexController {
-
     public ControllerHandler index() {
-        return new StaticFileHandler("./", "static/index/index.html", Arrays.asList("/"));
+        return new StaticFileHandler("./front", "index.html", Arrays.asList("/"));
     }
 
-    public ControllerHandler commonJsHandler() {
-        return new StaticFileHandler("./", "static/js/common.js", Arrays.asList("/static/js/common.js"));
+    public ControllerHandler assets() {
+        return new StaticFileHandler("./front", Arrays.asList("/assets/**"));
     }
 
     public ControllerHandler favicon() {
-        return new StaticFileHandler("./", "static/favicon.ico", Arrays.asList("/favicon.ico"));
+        return new StaticFileHandler("./front", "favicon.ico", Arrays.asList("/favicon.ico"));
+    }
+
+    public ControllerHandler spaRoutes() {
+        return new StaticFileHandler("./front", "index.html", Arrays.asList(
+                "/jrebel",
+                "/torrent",
+                "/github",
+                "/imageEditor",
+                "/forward",
+                "/clipboard",
+                "/clipboard/*",
+                "/mdeditor"
+        ));
     }
 }

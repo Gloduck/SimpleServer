@@ -31,7 +31,7 @@ public class NativeReflectionRegistration implements Feature {
         }
 
         String[] resourceDirs = {
-                "static"
+                "front"
         };
 
         for (String resourceDir : resourceDirs) {

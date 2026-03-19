@@ -4,11 +4,9 @@ import cn.gloduck.api.service.torrent.TorrentService;
 import cn.gloduck.common.entity.base.Result;
 import cn.gloduck.server.core.enums.HttpMethod;
 import cn.gloduck.server.core.handler.ControllerHandler;
-import cn.gloduck.server.core.handler.special.StaticFileHandler;
 import cn.gloduck.server.core.handler.styles.classes.JsonControllerHandler;
 import cn.gloduck.server.core.util.HttpExchangeUtils;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -40,9 +38,4 @@ public class TorrentController {
             return Result.success(torrentService.search(pageIndex, pageSize, keyword, code, sortField, sortOrder));
         });
     }
-
-    public ControllerHandler index() {
-        return new StaticFileHandler("./", "static/torrent/index.html", Arrays.asList("/torrent", "/torrent/"));
-    }
-
 }

@@ -5,12 +5,10 @@ import cn.gloduck.api.service.clipboard.OnlineClipBoardService;
 import cn.gloduck.common.entity.base.Result;
 import cn.gloduck.server.core.enums.HttpMethod;
 import cn.gloduck.server.core.handler.ControllerHandler;
-import cn.gloduck.server.core.handler.special.StaticFileHandler;
 import cn.gloduck.server.core.handler.styles.classes.JsonControllerHandler;
 import cn.gloduck.server.core.util.HttpExchangeUtils;
 import cn.gloduck.server.core.util.JsonUtils;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -42,7 +40,4 @@ public class OnlineClipBoardController {
         });
     }
 
-    public ControllerHandler index() {
-        return new StaticFileHandler("./", "static/clipboard/index.html", Arrays.asList("/clipboard", "/clipboard/", "/clipboard/*"));
-    }
 }
