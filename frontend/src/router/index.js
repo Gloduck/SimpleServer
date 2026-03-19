@@ -20,9 +20,13 @@ const routes = [
   { path: '/mdeditor', component: MdEditorView, meta: { title: 'Markdown编辑器' } }
 ];
 
-export default createRouter({
+const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes
-}).afterEach((to) => {
+});
+
+router.afterEach((to) => {
   document.title = to.meta.title || 'Gloduck';
 });
+
+export default router;
