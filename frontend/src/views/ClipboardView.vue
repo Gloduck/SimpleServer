@@ -1,0 +1,665 @@
+<template>
+<!-- Toast提示 -->
+        <common-toast ref="toastRef"></common-toast>
+
+        <!-- 页面容器 -->
+        <div class="min-h-screen flex flex-col">
+            <!-- 头部 -->
+            <common-header title="网络剪贴板" icon="fas fa-clipboard" link="/"></common-header>
+
+            <!-- 主内容区 -->
+            <main class="flex-grow container mx-auto px-4 py-8">
+                <!-- 剪贴板编辑器页面 -->
+                <div v-if="clipboardId" class="max-w-full mx-auto">
+                    <!-- 剪贴板标题 -->
+                    <section class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <div class="text-center">
+                            <h2 class="text-2xl font-bold text-gray-800 mb-2">
+                                剪贴板:
+                                <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-lg font-medium">
+                                    {{ clipboardId }}
+                                </span>
+                            </h2>
+                            <p class="text-gray-600">最后更新: {{ lastUpdated || '从未更新' }}</p>
+                        </div>
+                    </section>
+
+                    <!-- 控制区域 -->
+                    <section class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <div class="flex flex-col lg:flex-row justify-between gap-6">
+                            <!-- 左侧控制 -->
+                            <div class="space-y-4 flex-grow">
+                                <div class="flex flex-wrap gap-4">
+                                    <div class="flex items-center gap-2">
+                                        <input type="checkbox" id="auto-copy" v-model="settings.autoCopy"
+                                            class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500">
+                                        <label for="auto-copy" class="text-gray-700 cursor-pointer select-none">
+                                            服务器更新时自动复制到剪贴板
+                                        </label>
+                                    </div>
+
+                                    <div class="flex items-center gap-2">
+                                        <input type="checkbox" id="auto-refresh" v-model="settings.autoRefresh"
+                                            @change="onAutoRefreshChange"
+                                            class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500">
+                                        <label for="auto-refresh" class="text-gray-700 cursor-pointer select-none">
+                                            自动刷新
+                                        </label>
+                                    </div>
+
+                                    <div class="flex items-center gap-2">
+                                        <input type="checkbox" id="auto-save" v-model="settings.autoSave"
+                                            class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500">
+                                        <label for="auto-save" class="text-gray-700 cursor-pointer select-none">
+                                            自动保存
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="flex flex-wrap gap-3">
+                                    <button @click="deleteClipboard" :disabled="!editorExist"
+                                        :class="['px-4 py-2 rounded-lg font-medium transition-all duration-300 flex items-center gap-2',
+                                                     !editorExist ? 'bg-gray-300 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 text-white']">
+                                        <i class="fas fa-trash-alt"></i>
+                                        删除剪贴板
+                                    </button>
+
+                                    <button @click="saveContent" :class="['px-4 py-2 rounded-lg font-medium transition-all duration-300 flex items-center gap-2',
+                                                    'bg-green-500 hover:bg-green-600 text-white']">
+                                        <i class="fas fa-save"></i>
+                                        保存内容
+                                    </button>
+
+                                    <button @click="copyToClipboard" :disabled="!editorExist"
+                                        :class="['px-4 py-2 rounded-lg font-medium transition-all duration-300 flex items-center gap-2',
+                                                     !editorExist ? 'bg-gray-300 cursor-not-allowed' : 'bg-purple-500 hover:bg-purple-600 text-white']">
+                                        <i class="fas fa-copy"></i>
+                                        复制内容
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- 右侧控制 -->
+                            <div class="lg:w-48">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">格式选择</label>
+                                <select v-model="settings.format" @change="onFormatChange"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="text">纯文本</option>
+                                    <option value="application/json">JSON</option>
+                                    <option value="yaml">YAML</option>
+                                    <option value="javascript">JavaScript</option>
+                                    <option value="htmlmixed">HTML</option>
+                                    <option value="css">CSS</option>
+                                    <option value="python">Python</option>
+                                    <option value="text/x-java">Java</option>
+                                    <option value="php">PHP</option>
+                                    <option value="sql">SQL</option>
+                                </select>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 编辑器区域 -->
+                    <section class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <div class="mb-4 flex justify-between items-center">
+                            <h3 class="text-lg font-semibold text-gray-800">内容编辑器</h3>
+                            <span class="text-sm text-gray-500">状态: {{ editorStatusInfo }}</span>
+                        </div>
+
+                        <div id="editor-container" class="rounded-lg overflow-hidden border border-gray-200">
+                            <textarea id="code-editor" style="display: none;"></textarea>
+                        </div>
+                    </section>
+
+                    <!-- 状态栏 -->
+                    <div class="flex justify-between items-center px-4 py-3 bg-white rounded-lg shadow">
+                        <div class="text-sm text-gray-600">
+                            <span class="font-medium">提示:</span> 使用 Ctrl+S 保存内容 | 内容会被明文保存到服务器，请不要保存敏感信息
+                        </div>
+                        <div class="text-sm text-gray-500">
+                            最后更新: {{ lastUpdated || '从未更新' }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 首页内容 -->
+                <div v-else class="max-w-4xl mx-auto">
+                    <!-- 欢迎区域 -->
+                    <section class="text-center mb-12">
+                        <!-- 搜索框 -->
+                        <div class="max-w-2xl mx-auto mb-10">
+                            <div class="relative shadow-lg rounded-xl overflow-hidden">
+                                <input type="text" v-model="newClipboardId" placeholder="输入剪贴板ID，例如: my-clipboard"
+                                    @keyup.enter="goToClipboard"
+                                    class="w-full px-6 py-4 text-lg border-0 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                                <button @click="goToClipboard"
+                                    class="absolute right-2 top-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors">
+                                    前往
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 快速创建按钮 -->
+                        <div class="space-x-4">
+                            <button @click="createRandomClipboard"
+                                class="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors">
+                                <i class="fas fa-plus-circle mr-2"></i>
+                                创建随机剪贴板
+                            </button>
+                        </div>
+                    </section>
+
+                    <!-- 使用说明 -->
+                    <section class="bg-white rounded-xl shadow-lg p-8 mb-8">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">使用说明</h2>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div class="text-center p-4">
+                                <div
+                                    class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <i class="fas fa-key text-blue-600 text-2xl"></i>
+                                </div>
+                                <h3 class="font-semibold text-gray-800 mb-2">1. 创建或访问剪贴板</h3>
+                                <p class="text-gray-600">输入一个唯一的剪贴板ID（只能包含字母、数字和连字符）</p>
+                            </div>
+
+                            <div class="text-center p-4">
+                                <div
+                                    class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <i class="fas fa-magic text-green-600 text-2xl"></i>
+                                </div>
+                                <h3 class="font-semibold text-gray-800 mb-2">2. 自动创建</h3>
+                                <p class="text-gray-600">如果剪贴板不存在，将会在第一次输入内容后自动创建</p>
+                            </div>
+
+                            <div class="text-center p-4">
+                                <div
+                                    class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <i class="fas fa-exclamation-triangle text-red-600 text-2xl"></i>
+                                </div>
+                                <h3 class="font-semibold text-gray-800 mb-2">3. 安全提醒</h3>
+                                <p class="text-gray-600">内容会被明文存储在服务器上，请勿输入敏感信息</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 热门剪贴板示例 -->
+                    <section class="bg-white rounded-xl shadow-lg p-8">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">热门剪贴板示例</h2>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <a v-for="example in examples" :key="example.id" :href="'/clipboard/' + example.id" @click.prevent="router.push('/clipboard/' + example.id)"
+                                class="block p-4 bg-gray-50 hover:bg-blue-50 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors group">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h3 class="font-medium text-gray-800 group-hover:text-blue-600">{{ example.name }}
+                                    </h3>
+                                    <i class="fas fa-external-link-alt text-gray-400 group-hover:text-blue-500"></i>
+                                </div>
+                                <p class="text-sm text-gray-600">{{ example.description }}</p>
+                            </a>
+                        </div>
+                    </section>
+                </div>
+            </main>
+
+            <!-- 页脚 -->
+            <common-footer copyright="© 2025 Gloduck"></common-footer>
+        </div>
+</template>
+
+<script>
+import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { CommonUtils } from '@/shared/common-utils.js';
+import { CommonComponents } from '@/shared/common-components.js';
+
+export default {
+    name: 'ClipboardView',
+            components: {
+                'common-header': CommonComponents.Header,
+                'common-footer': CommonComponents.Footer,
+                'common-toast': CommonComponents.Toast
+            },
+
+            setup() {
+                const route = useRoute();
+                const router = useRouter();
+                const clipboardId = ref(route.params.id || null);
+                const newClipboardId = ref('');
+                const toastRef = ref(null);
+
+                // 编辑器相关
+                let editor = null;
+                const editorStatusInfo = ref('就绪');
+                const editorExist = ref(false);
+                const lastUpdated = ref('');
+
+                // 默认设置
+                const defaultSettings = {
+                    autoCopy: false,
+                    autoRefresh: false,
+                    autoSave: false,
+                    format: 'text'
+                };
+
+                // 设置 - 从localStorage加载或使用默认值
+                const settings = ref({ ...defaultSettings });
+
+                // 状态变量
+                let lastUserEditTime = 0;
+                let isUpdatingFromServer = false;
+                let isFirstUpdate = true;
+                let refreshInterval = null;
+                let autoSaveTimeout = null;
+
+                // 首页示例
+                const examples = ref([
+                    { id: 'quick-notes', name: '快速笔记', description: '用于临时记录笔记的剪贴板' },
+                    { id: 'code-snippets', name: '代码片段', description: '共享有用的代码片段' },
+                    { id: 'meeting-minutes', name: '会议纪要', description: '团队会议记录和讨论' }
+                ]);
+
+                // 工具函数
+                const formatTime = CommonUtils.formatTime;
+
+                const showToast = (message, type = 'info') => {
+                    if (toastRef.value) {
+                        toastRef.value.show(message, type);
+                    }
+                };
+
+                // 从localStorage加载设置
+                const loadSettings = () => {
+                    try {
+                        const savedSettings = JSON.parse(localStorage.getItem('clipboardSettings'));
+                        if (savedSettings) {
+                            // 合并保存的设置和默认设置，确保所有字段都存在
+                            settings.value = { ...defaultSettings, ...savedSettings };
+                        }
+                    } catch (e) {
+                        console.warn('Failed to load settings:', e);
+                        // 如果加载失败，使用默认设置
+                        settings.value = { ...defaultSettings };
+                    }
+                };
+
+                // 保存设置到localStorage
+                const saveSettings = () => {
+                    try {
+                        localStorage.setItem('clipboardSettings', JSON.stringify(settings.value));
+                        console.log('Settings saved:', settings.value);
+                    } catch (e) {
+                        console.error('Failed to save settings:', e);
+                        showToast('保存设置失败', 'error');
+                    }
+                };
+
+                watch(settings, (newSettings) => {
+                    saveSettings();
+                }, { deep: true });
+
+                // 获取剪贴板内容
+                const fetchClipboardContent = async () => {
+                    if (!clipboardId.value) return;
+
+                    // 如果最近3秒内有用户编辑，跳过此次更新
+                    const now = Date.now();
+                    if (now - lastUserEditTime < 3000) {
+                        editorStatusInfo.value = "跳过更新（编辑中）";
+                        return;
+                    }
+
+
+                    try {
+                        isUpdatingFromServer = true;
+                        editorStatusInfo.value = "正在获取内容...";
+                        const beforeValue = editor ? editor.getValue() : '';
+
+                        const response = await fetch(`/api/clipboard/query?id=${clipboardId.value}`);
+                        const data = await CommonUtils.checkJsonResponseStatus(response);
+
+                        if (data.code === 200) {
+                            if (data.data === null) {
+                                editorStatusInfo.value = "新建";
+                                lastUpdated.value = "从未更新";
+                                editorExist.value = false;
+                                return;
+                            }
+
+                            editorExist.value = true;
+                            // 只有在内容不同时才更新编辑器
+                            const newValue = data.data.content;
+                            if (beforeValue !== newValue) {
+                                if (editor) editor.setValue(newValue);
+                                editorStatusInfo.value = "内容已更新";
+                            } else {
+                                editorStatusInfo.value = "内容已是最新";
+                            }
+
+                            lastUpdated.value = formatTime(data.data.updateDate);
+
+                            // 如果自动复制开启且内容有变化
+                            if (settings.value.autoCopy && beforeValue !== newValue) {
+                                copyToClipboard();
+                            }
+                        } else {
+                            showToast(`错误: ${data.msg}`, 'error');
+                            editorStatusInfo.value = "获取失败";
+                        }
+                    } catch (error) {
+                        showToast(`网络错误: ${error.message}`, 'error');
+                        editorStatusInfo.value = "网络错误";
+                    } finally {
+                        isUpdatingFromServer = false;
+                    }
+                };
+
+                // 保存剪贴板内容
+                const saveContent = async () => {
+                    if (!clipboardId.value || !editor) {
+                        return;
+                    }
+
+                    const content = editor.getValue();
+                    const contentType = 'text';
+
+                    try {
+                        editorStatusInfo.value = "正在保存...";
+                        const response = await fetch('/api/clipboard/save', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                id: clipboardId.value,
+                                content: content,
+                                contentType: contentType
+                            })
+                        });
+
+                        const data = await CommonUtils.checkJsonResponseStatus(response);
+                        if (data.code === 200) {
+                            showToast("内容保存成功!", 'success');
+                            lastUpdated.value = formatTime(Date.now());
+                            editorExist.value = true;
+                            editorStatusInfo.value = "保存成功";
+                            return true;
+                        } else {
+                            showToast(`保存失败: ${data.msg}`, 'error');
+                            editorStatusInfo.value = "保存失败";
+                            return false;
+                        }
+                    } catch (error) {
+                        showToast(`网络错误: ${error.message}`, 'error');
+                        editorStatusInfo.value = "网络错误";
+                        return false;
+                    }
+                };
+
+                // 删除剪贴板
+                const deleteClipboard = async () => {
+                    if (!clipboardId.value) return;
+
+                    if (!confirm("确定要删除这个剪贴板吗？此操作不可撤销！")) {
+                        return;
+                    }
+
+                    try {
+                        editorStatusInfo.value = "正在删除...";
+                        const response = await fetch(`/api/clipboard/delete?id=${clipboardId.value}`, {
+                            method: 'DELETE'
+                        });
+
+                        const data = await CommonUtils.checkJsonResponseStatus(response);
+                        if (data.code === 200) {
+                            showToast("剪贴板已成功删除", 'success');
+                            if (editor) editor.setValue("");
+                            editorStatusInfo.value = "已删除";
+                            editorExist.value = false;
+
+                            // 禁用自动刷新
+                            if (refreshInterval) {
+                                clearInterval(refreshInterval);
+                                refreshInterval = null;
+                            }
+                        } else {
+                            showToast(`删除失败: ${data.msg}`, 'error');
+                            editorStatusInfo.value = "删除失败";
+                        }
+                    } catch (error) {
+                        showToast(`网络错误: ${error.message}`, 'error');
+                        editorStatusInfo.value = "网络错误";
+                    }
+                };
+
+                // 复制内容到剪贴板
+                const copyToClipboard = () => {
+                    if (!editor) {
+                        return;
+                    }
+                    CommonUtils.copyToClipboard(editor.getValue(), showToast);
+                };
+
+                // 自动刷新变化处理
+                const onAutoRefreshChange = () => {
+                    if (settings.value.autoRefresh) {
+                        startAutoRefresh();
+                    } else {
+                        stopAutoRefresh();
+                    }
+                };
+
+                const startAutoRefresh = () => {
+                    if (refreshInterval) {
+                        clearInterval(refreshInterval);
+                    }
+                    refreshInterval = setInterval(fetchClipboardContent, 3000);
+                };
+
+                const stopAutoRefresh = () => {
+                    if (!refreshInterval) {
+                        return;
+                    }
+                    clearInterval(refreshInterval);
+                    refreshInterval = null;
+                };
+
+                // 防抖自动保存
+                const debouncedAutoSave = () => {
+                    if (autoSaveTimeout) {
+                        clearTimeout(autoSaveTimeout);
+                    }
+
+                    if (settings.value.autoSave) {
+                        autoSaveTimeout = setTimeout(async () => {
+                            if (!editorExist.value && !editor.getValue()) {
+                                return;
+                            }
+                            const success = await saveContent();
+                            if (success) {
+                                showToast("内容已自动保存", 'success');
+                            }
+                        }, 1000);
+                    }
+                };
+
+                const onFormatChange = () => {
+                    if (editor) {
+                        editor.setOption("mode", settings.value.format);
+                    }
+                };
+
+                // 初始化CodeMirror编辑器
+                const initEditor = () => {
+                    if (!clipboardId.value) return;
+
+                    const editorElement = document.getElementById('code-editor');
+                    if (!editorElement) return;
+
+                    editor = CodeMirror.fromTextArea(editorElement, {
+                        lineNumbers: true,
+                        mode: settings.value.format,
+                        theme: "eclipse",
+                        lineWrapping: true,
+                        indentUnit: 4,
+                        autofocus: true,
+                        readOnly: false
+                    });
+
+                    // 编辑器事件监听
+                    editor.on("change", () => {
+                        // 记录用户编辑时间
+                        if (!isUpdatingFromServer) {
+                            lastUserEditTime = Date.now();
+                        }
+
+                        if (isFirstUpdate) {
+                            isFirstUpdate = false;
+                            return;
+                        }
+
+                        // 如果启用了自动保存，则调用防抖保存函数
+                        if (settings.value.autoSave) {
+                            debouncedAutoSave();
+                        }
+                    });
+
+                    // 初始加载内容
+                    fetchClipboardContent();
+
+                    // 设置自动刷新
+                    if (settings.value.autoRefresh) {
+                        startAutoRefresh();
+                    }
+                };
+
+                const destroyEditor = () => {
+                    if (editor) {
+                        editor.toTextArea();
+                        editor = null;
+                    }
+                };
+
+                // 首页功能
+                const goToClipboard = () => {
+                    const id = newClipboardId.value.trim();
+
+                    if (!id) {
+                        showToast('请输入剪贴板ID', 'warning');
+                        return;
+                    }
+
+                    if (!/^[a-zA-Z0-9\-]+$/.test(id)) {
+                        showToast('ID只能包含字母、数字和连字符', 'error');
+                        return;
+                    }
+
+                    router.push(`/clipboard/${id}`);
+                };
+
+                const createRandomClipboard = () => {
+                    const randomId = 'clipboard-' + Math.random().toString(36).substring(2, 10);
+                    newClipboardId.value = randomId;
+                    goToClipboard();
+                };
+
+                // 键盘快捷键
+                const handleKeyDown = (e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                        e.preventDefault();
+                        if (clipboardId.value && editor) {
+                            saveContent();
+                        }
+                    }
+                };
+
+                // 生命周期钩子
+                onMounted(() => {
+                    // 先加载设置
+                    loadSettings();
+
+                    if (clipboardId.value) {
+                        // 有剪贴板ID，初始化编辑器
+                        initEditor();
+                    } else {
+                        // 首页，聚焦输入框
+                        const input = document.querySelector('input[placeholder*="剪贴板ID"]');
+                        if (input) input.focus();
+                    }
+
+                    // 添加键盘事件监听
+                    document.addEventListener('keydown', handleKeyDown);
+                });
+
+                watch(() => route.params.id, async (newId) => {
+                    clipboardId.value = newId || null;
+                    editorExist.value = false;
+                    lastUpdated.value = '';
+                    editorStatusInfo.value = '就绪';
+                    isFirstUpdate = true;
+
+                    if (refreshInterval) {
+                        clearInterval(refreshInterval);
+                        refreshInterval = null;
+                    }
+                    if (autoSaveTimeout) {
+                        clearTimeout(autoSaveTimeout);
+                        autoSaveTimeout = null;
+                    }
+
+                    destroyEditor();
+                    await nextTick();
+
+                    if (clipboardId.value) {
+                        initEditor();
+                    }
+                });
+
+                onBeforeUnmount(() => {
+                    // 清理定时器
+                    if (refreshInterval) clearInterval(refreshInterval);
+                    if (autoSaveTimeout) clearTimeout(autoSaveTimeout);
+                    destroyEditor();
+
+                    // 移除事件监听
+                    document.removeEventListener('keydown', handleKeyDown);
+                });
+
+                return {
+                    // 数据
+                    clipboardId,
+                    newClipboardId,
+                    toastRef,
+                    editorExist,
+                    editorStatusInfo,
+                    lastUpdated,
+                    settings,
+                    examples,
+
+                    // 方法
+                    goToClipboard,
+                    createRandomClipboard,
+                    saveContent,
+                    deleteClipboard,
+                    copyToClipboard,
+                    onAutoRefreshChange,
+                    onFormatChange,
+                    saveSettings,
+                    router
+                };
+            }
+};
+</script>
+
+<style>
+.CodeMirror {
+            height: 450px;
+            font-size: 15px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+        .CodeMirror-disabled {
+            background: #f8fafc;
+            opacity: 0.8;
+        }
+</style>
