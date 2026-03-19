@@ -1,6 +1,7 @@
 target/
 node_modules/
 backend/src/main/resources/front/
+.env
 
 ### IntelliJ IDEA ###
 .idea/*
