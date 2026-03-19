@@ -32,6 +32,10 @@ public class CsvDbFactory {
         if (csvFile.exists()) {
             return false;
         }
+        File parentDir = csvFile.getParentFile();
+        if (parentDir != null && !parentDir.exists() && !parentDir.mkdirs()) {
+            throw new RuntimeException("Create table failed: cannot create parent directory");
+        }
         try (
                 FileWriter writer = new FileWriter(csvFile);
                 CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT.withHeader(headers.toArray(new String[0])));
