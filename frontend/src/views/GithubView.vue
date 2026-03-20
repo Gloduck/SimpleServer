@@ -5,7 +5,7 @@
         <!-- 页面容器 -->
         <div class="min-h-screen flex flex-col">
             <!-- 头部 -->
-            <common-header title="GitHub仓库搜索" icon="fab fa-github" link="/"></common-header>
+            <common-header :title="$route.meta.title" :icon="$route.meta.icon" link="/"></common-header>
 
             <!-- 主内容区 -->
             <main class="flex-grow container mx-auto px-4 py-8">

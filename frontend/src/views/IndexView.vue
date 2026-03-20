@@ -2,7 +2,7 @@
 <!-- 页面容器 -->
         <div class="min-h-screen flex flex-col">
             <!-- 头部 -->
-            <common-header title="工具导航" icon="fas fa-tools" link="/">
+            <common-header :title="$route.meta.title" :icon="$route.meta.icon" link="/">
                 <template #right>
                     常用小工具集合
                 </template>
@@ -37,7 +37,6 @@
                                     ? 'bg-primary text-white shadow-md' 
                                     : 'bg-white text-gray-700 hover:bg-gray-100 shadow'
                             ]">
-                            <i :class="getCategoryIcon(category)"></i>
                             <span>{{ category }}</span>
                             <span v-if="selectedCategories.includes(category)" class="text-xs opacity-90">
                                 <i class="fas fa-check"></i>
@@ -62,7 +61,7 @@
                                 <div class="flex items-start gap-4 mb-4">
                                     <div class="w-12 h-12 rounded-xl flex items-center justify-center text-white text-xl"
                                         :style="{ backgroundColor: getCategoryColor(tool.category) }">
-                                        <i :class="getCategoryIcon(tool.category)"></i>
+                                        <i :class="tool.icon"></i>
                                     </div>
                                     <div class="flex-1 min-w-0">
                                         <h3 class="font-bold text-gray-800 text-lg truncate">{{ tool.name }}</h3>
@@ -112,6 +111,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { CommonComponents } from '@/shared/common-components.js';
+import { toolCards } from '@/shared/page-config.js';
 
 export default {
     name: 'IndexView',
@@ -137,16 +137,6 @@ export default {
                     '搜索': '#f59e0b',
                     '网络': '#ef4444',
                     '其他': '#6b7280'
-                };
-
-                // 分类图标映射
-                const categoryIcons = {
-                    '开发': 'fas fa-code',
-                    '工具': 'fas fa-wrench',
-                    '设计': 'fas fa-palette',
-                    '搜索': 'fas fa-search',
-                    '网络': 'fas fa-network-wired',
-                    '其他': 'fas fa-tools'
                 };
 
                 // 获取所有分类
@@ -180,11 +170,6 @@ export default {
                     return categoryColors[category] || '#6b7280';
                 };
 
-                // 获取分类图标
-                const getCategoryIcon = (category) => {
-                    return categoryIcons[category] || 'fas fa-tools';
-                };
-
                 // 切换分类选择
                 const toggleCategory = (category) => {
                     const index = selectedCategories.value.indexOf(category);
@@ -198,15 +183,7 @@ export default {
 
                 // 加载工具数据
                 const loadTools = () => {
-                    tools.value = [
-                        { id: 1, name: "Jrebel激活", href: "/jrebel", desc: "一键激活Jrebel开发工具", category: "开发" },
-                        { id: 2, name: "网络剪贴板", href: "/clipboard", desc: "多设备之间同步文本的网络剪贴板", category: "工具" },
-                        { id: 3, name: "磁力聚合搜索", href: "/torrent", desc: "支持多个磁力网站的磁力搜索", category: "搜索" },
-                        { id: 4, name: "转发下载工具", href: "/forward", desc: "通过转发服务器下载文件", category: "工具" },
-                        { id: 5, name: "Github项目搜索", href: "/github", desc: "搜索Github上的项目", category: "开发" },
-                        { id: 6, name: "Markdown编辑器", href: "/mdeditor", desc: "基于Vditor的Markdown在线编辑器", category: "开发" },
-                        { id: 7, name: "图片处理工具", href: "/imageEditor", desc: "在线图片缩放、压缩、裁剪工具", category: "工具" }
-                    ]
+                    tools.value = toolCards;
                 };
 
 
@@ -231,7 +208,6 @@ export default {
 
                     // 方法
                     getCategoryColor,
-                    getCategoryIcon,
                     toggleCategory,
                     goToTool
                 };

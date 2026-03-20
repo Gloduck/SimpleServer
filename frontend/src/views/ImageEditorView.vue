@@ -2,7 +2,7 @@
 <common-toast ref="toastRef"></common-toast>
 
         <div class="min-h-screen flex flex-col">
-            <common-header title="图片处理工具" icon="fas fa-image" link="/"></common-header>
+            <common-header :title="$route.meta.title" :icon="$route.meta.icon" link="/"></common-header>
 
             <main class="flex-grow container mx-auto px-4 py-8">
                 <div class="max-w-7xl mx-auto">
