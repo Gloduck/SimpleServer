@@ -38,8 +38,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SimpleServer-jar
-          path: |
-            target/SimpleServer.jar
-            target/config.json
-            target/SimpleServer.tar.gz
+          path: target/SimpleServer.tar.gz
           if-no-files-found: error
