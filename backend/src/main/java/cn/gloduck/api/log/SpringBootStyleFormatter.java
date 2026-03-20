@@ -22,41 +22,50 @@ public class SpringBootStyleFormatter extends Formatter {
     private static final String CYAN = "\u001B[36m";
     private static final String WHITE = "\u001B[37m";
     private static final String MAGENTA = "\u001B[35m";
+    private final boolean useColors;
+
+    public SpringBootStyleFormatter() {
+        this(true);
+    }
+
+    public SpringBootStyleFormatter(boolean useColors) {
+        this.useColors = useColors;
+    }
 
     @Override
     public String format(LogRecord record) {
         StringBuilder sb = new StringBuilder(256);
         Instant instant = Instant.ofEpochMilli(record.getMillis());
-        sb.append(CYAN)
+        sb.append(color(CYAN))
                 .append(DATE_FORMATTER.format(instant))
-                .append(RESET)
+                .append(color(RESET))
                 .append(" ");
 
         String levelName = record.getLevel().getName();
         String levelColor = getLevelColor(record.getLevel());
         sb.append(levelColor)
                 .append(String.format("%-7s", levelName))
-                .append(RESET)
+                .append(color(RESET))
                 .append(" ");
 
-        sb.append(MAGENTA).append(PID).append(RESET).append(" --- ");
+        sb.append(color(MAGENTA)).append(PID).append(color(RESET)).append(" --- ");
 
         sb.append("[")
-                .append(WHITE)
+                .append(color(WHITE))
                 .append(Thread.currentThread().getName())
-                .append(RESET)
+                .append(color(RESET))
                 .append("] ");
 
         String className = record.getSourceClassName();
         if (className != null) {
             String simpleClassName = className.substring(className.lastIndexOf('.') + 1);
-            sb.append(YELLOW).append(simpleClassName).append(RESET);
+            sb.append(color(YELLOW)).append(simpleClassName).append(color(RESET));
         }
 
         sb.append(" : ").append(formatMessage(record));
 
         if (record.getThrown() != null) {
-            sb.append("\n").append(RED).append("异常信息: ").append(RESET);
+            sb.append("\n").append(color(RED)).append("异常信息: ").append(color(RESET));
             Throwable throwable = record.getThrown();
             sb.append(throwable.toString()).append("\n");
             for (StackTraceElement element : throwable.getStackTrace()) {
@@ -70,21 +79,25 @@ public class SpringBootStyleFormatter extends Formatter {
 
     private String getLevelColor(Level level) {
         if (level == Level.SEVERE) {
-            return RED;
+            return color(RED);
         }
         if (level == Level.WARNING) {
-            return YELLOW;
+            return color(YELLOW);
         }
         if (level == Level.INFO) {
-            return GREEN;
+            return color(GREEN);
         }
         if (level == Level.CONFIG) {
-            return BLUE;
+            return color(BLUE);
         }
         if (level == Level.FINE || level == Level.FINER || level == Level.FINEST) {
-            return CYAN;
+            return color(CYAN);
         }
-        return WHITE;
+        return color(WHITE);
+    }
+
+    private String color(String ansiCode) {
+        return useColors ? ansiCode : "";
     }
 
     private static String getPID() {

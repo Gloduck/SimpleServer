@@ -1,6 +1,7 @@
 {
   "port": 2226,
   "logLevel": "INFO",
+  "logFile": "logs/${yyyy}-${MM}-${dd}.log",
   "workThreads": 10,
   "jrebel": {
     "companyName": "Gloduck",

@@ -3,6 +3,7 @@ package cn.gloduck.api;
 import cn.gloduck.api.controller.*;
 import cn.gloduck.api.entity.config.ServerConfig;
 import cn.gloduck.api.log.SpringBootStyleFormatter;
+import cn.gloduck.api.log.TemplateFileHandler;
 import cn.gloduck.server.core.SimpleServer;
 import cn.gloduck.server.core.handler.special.StaticFileHandler;
 
@@ -15,7 +16,7 @@ public class Bootstrap {
     public static void main(String[] args) throws IOException {
         ApplicationContext.init();
         ServerConfig config = ApplicationContext.getGlobalConfig();
-        setLoggerLevel(config.logLevel);
+        configureLogging(config);
         ApplicationShutdownHooks.registerShutdownHook();
         Integer workThreads = Optional.ofNullable(config.workThreads).orElse(5);
         SimpleServer server = new SimpleServer(config.port, workThreads);
@@ -29,12 +30,28 @@ public class Bootstrap {
         server.start();
     }
 
-    private static void setLoggerLevel(String level) {
-        Level logLevel = Level.parse(level);
-        Formatter formatter = new SpringBootStyleFormatter();
-        Arrays.stream(LogManager.getLogManager().getLogger("").getHandlers()).forEach(h -> {
-            h.setFormatter(formatter);
-            h.setLevel(logLevel);
+    private static void configureLogging(ServerConfig config) throws IOException {
+        Level logLevel = Level.parse(config.logLevel);
+        Logger rootLogger = LogManager.getLogManager().getLogger("");
+        rootLogger.setLevel(logLevel);
+
+        Formatter consoleFormatter = new SpringBootStyleFormatter();
+        Arrays.stream(rootLogger.getHandlers()).forEach(handler -> {
+            handler.setFormatter(consoleFormatter);
+            handler.setLevel(logLevel);
         });
+
+        String logFilePattern = Optional.ofNullable(config.logFile)
+                .filter(s -> !s.isBlank())
+                .orElse(null);
+        if (logFilePattern == null) {
+            return;
+        }
+
+        TemplateFileHandler fileHandler = new TemplateFileHandler(logFilePattern);
+        fileHandler.setEncoding("UTF-8");
+        fileHandler.setFormatter(new SpringBootStyleFormatter(false));
+        fileHandler.setLevel(logLevel);
+        rootLogger.addHandler(fileHandler);
     }
 }
