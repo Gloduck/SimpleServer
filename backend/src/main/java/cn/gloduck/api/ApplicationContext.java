@@ -88,11 +88,11 @@ public class ApplicationContext {
             Path appConfigPath = resolveApplicationDirectory().resolve(CONFIG_FILE_NAME);
             if (Files.exists(appConfigPath)) {
                 content = Files.readString(appConfigPath, StandardCharsets.UTF_8);
-            }
-
-            try (InputStream inputStream = ApplicationContext.class.getClassLoader().getResourceAsStream(CONFIG_FILE_NAME)) {
-                if (inputStream != null) {
-                    content = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+            } else {
+                try (InputStream inputStream = ApplicationContext.class.getClassLoader().getResourceAsStream(CONFIG_FILE_NAME)) {
+                    if (inputStream != null) {
+                        content = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+                    }
                 }
             }
             configRoot = objectMapper.readTree(content);
