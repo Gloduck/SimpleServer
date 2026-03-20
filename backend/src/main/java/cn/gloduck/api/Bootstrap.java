@@ -10,14 +10,16 @@ import cn.gloduck.server.core.handler.special.StaticFileHandler;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Optional;
-import java.util.logging.*;
+import java.util.logging.Formatter;
+import java.util.logging.Level;
+import java.util.logging.LogManager;
+import java.util.logging.Logger;
 
 public class Bootstrap {
     public static void main(String[] args) throws IOException {
         ApplicationContext.init();
         ServerConfig config = ApplicationContext.getGlobalConfig();
         configureLogging(config);
-        ApplicationShutdownHooks.registerShutdownHook();
         Integer workThreads = Optional.ofNullable(config.workThreads).orElse(5);
         SimpleServer server = new SimpleServer(config.port, workThreads);
         server.registerController(new IndexController());
