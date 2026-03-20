@@ -1,11 +1,11 @@
 package cn.gloduck.api.service.torrent;
 
+import cn.gloduck.api.ApplicationContext;
 import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentHandlerInfo;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
 import cn.gloduck.api.service.torrent.handler.*;
-import cn.gloduck.api.utils.ConfigUtils;
 import cn.gloduck.common.entity.base.ScrollPageResult;
 
 import java.net.URI;
@@ -172,7 +172,7 @@ public class TorrentService {
 
     public static TorrentService instance() {
         if (instance == null) {
-            TorrentConfig config = ConfigUtils.loadConfig("torrent", TorrentConfig.class);
+            TorrentConfig config = ApplicationContext.getConfig(TorrentConfig.class);
             instance = new TorrentService(config);
         }
         return instance;

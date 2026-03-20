@@ -1,9 +1,8 @@
 package cn.gloduck.api.service.github;
 
+import cn.gloduck.api.ApplicationContext;
 import cn.gloduck.api.entity.config.GithubConfig;
-import cn.gloduck.api.utils.ConfigUtils;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -23,7 +22,7 @@ public class GithubService {
 
     public static GithubService instance() {
         if (instance == null) {
-            GithubConfig config = ConfigUtils.loadConfig("github", GithubConfig.class);
+            GithubConfig config = ApplicationContext.getConfig(GithubConfig.class);
             instance = new GithubService(config);
         }
         return instance;

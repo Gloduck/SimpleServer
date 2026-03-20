@@ -3,7 +3,6 @@ package cn.gloduck.api;
 import cn.gloduck.api.controller.*;
 import cn.gloduck.api.entity.config.ServerConfig;
 import cn.gloduck.api.log.SpringBootStyleFormatter;
-import cn.gloduck.api.utils.ConfigUtils;
 import cn.gloduck.server.core.SimpleServer;
 import cn.gloduck.server.core.handler.special.StaticFileHandler;
 
@@ -14,8 +13,8 @@ import java.util.logging.*;
 
 public class Bootstrap {
     public static void main(String[] args) throws IOException {
-        ConfigUtils.init();
-        ServerConfig config = ConfigUtils.loadConfig(null, ServerConfig.class);
+        ApplicationContext.init();
+        ServerConfig config = ApplicationContext.getGlobalConfig();
         setLoggerLevel(config.logLevel);
         ApplicationShutdownHooks.registerShutdownHook();
         Integer workThreads = Optional.ofNullable(config.workThreads).orElse(5);

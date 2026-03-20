@@ -1,10 +1,10 @@
 package cn.gloduck.api.service.jrebel;
 
+import cn.gloduck.api.ApplicationContext;
 import cn.gloduck.api.entity.config.JrebelConfig;
 import cn.gloduck.api.entity.model.jrebel.JrebelJsonBaseModel;
 import cn.gloduck.api.entity.model.jrebel.JrebelLeasesModel;
 import cn.gloduck.api.entity.model.jrebel.JrebelLeasesV1Model;
-import cn.gloduck.api.utils.ConfigUtils;
 import lombok.NonNull;
 
 import java.nio.charset.StandardCharsets;
@@ -160,7 +160,7 @@ public class JRebelService {
 
     public static JRebelService instance() {
         if (instance == null) {
-            JrebelConfig config = ConfigUtils.loadConfig("jrebel", JrebelConfig.class);
+            JrebelConfig config = ApplicationContext.getConfig(JrebelConfig.class);
             instance = new JRebelService(config);
         }
         return instance;
