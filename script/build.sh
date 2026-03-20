@@ -11,6 +11,7 @@ BACKEND_FRONT_DIR="${BACKEND_DIR}/src/main/resources/front"
 BACKEND_TARGET_DIR="${BACKEND_DIR}/target"
 ROOT_TARGET_DIR="${PROJECT_ROOT}/target"
 CONFIG_FILE="${BACKEND_DIR}/src/main/resources/config.json"
+INCLUDE_DIR="${PROJECT_ROOT}/include"
 
 APP_NAME="SimpleServer"
 
@@ -137,12 +138,17 @@ assemble_artifacts() {
       ;;
   esac
   cp "${CONFIG_FILE}" "${OUTPUT_CONFIG_FILE}"
-  tar -czf "${ARCHIVE_FILE}" -C "${ROOT_TARGET_DIR}" "${PACKAGE_ARTIFACT}" "$(basename "${OUTPUT_CONFIG_FILE}")"
+  cp -R "${INCLUDE_DIR}/." "${ROOT_TARGET_DIR}/"
+  (
+    cd "${ROOT_TARGET_DIR}"
+    tar -czf "${ARCHIVE_FILE}" *
+  )
 }
 
 run_build() {
   [[ -d "${FRONTEND_DIR}" ]] || fail "frontend directory not found: ${FRONTEND_DIR}"
   [[ -d "${BACKEND_DIR}" ]] || fail "backend directory not found: ${BACKEND_DIR}"
+  [[ -d "${INCLUDE_DIR}" ]] || fail "include directory not found: ${INCLUDE_DIR}"
   [[ -f "${CONFIG_FILE}" ]] || fail "config file not found: ${CONFIG_FILE}"
 
   require_command node
