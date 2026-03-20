@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.CodeSource;
+import java.time.ZoneId;
 import java.util.Locale;
 
 public class ApplicationContext {
@@ -35,6 +36,10 @@ public class ApplicationContext {
             loadConfigContent();
             initialized = true;
         }
+    }
+
+    public static ZoneId getZoneId() {
+        return ZoneId.systemDefault();
     }
 
     public static ServerConfig getGlobalConfig() {

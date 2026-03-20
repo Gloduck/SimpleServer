@@ -1,7 +1,10 @@
 {
   "port": 2226,
-  "logLevel": "INFO",
-  "logFile": "logs/${yyyy}-${MM}-${dd}.log",
+  "log": {
+    "level": "INFO",
+    "file": "logs/${yyyy}-${MM}-${dd}.log",
+    "flushIntervalSeconds": 1
+  },
   "workThreads": 10,
   "jrebel": {
     "companyName": "Gloduck",

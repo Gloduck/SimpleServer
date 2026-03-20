@@ -5,7 +5,4 @@ public class ServerConfig {
 
     public Integer workThreads = 10;
 
-    public String logLevel = "INFO";
-
-    public String logFile;
 }

@@ -11,6 +11,10 @@ import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.ErrorManager;
 import java.util.logging.Formatter;
 import java.util.logging.Handler;
@@ -20,16 +24,15 @@ public class TemplateFileHandler extends Handler {
     private final Object rotateLock = new Object();
     private final String filePattern;
     private final ZoneId zoneId;
+    private final ScheduledExecutorService flushExecutor;
     private volatile Path currentFilePath;
     private volatile BufferedWriter writer;
 
-    public TemplateFileHandler(String filePattern) {
-        this(filePattern, ZoneId.systemDefault());
-    }
-
-    public TemplateFileHandler(String filePattern, ZoneId zoneId) {
+    public TemplateFileHandler(String filePattern, int flushIntervalSeconds, ZoneId zoneId) {
         this.filePattern = filePattern;
         this.zoneId = zoneId;
+        this.flushExecutor = Executors.newSingleThreadScheduledExecutor(new FlushThreadFactory());
+        this.flushExecutor.scheduleAtFixedRate(this::safeFlush, flushIntervalSeconds, flushIntervalSeconds, TimeUnit.SECONDS);
     }
 
     @Override
@@ -71,8 +74,17 @@ public class TemplateFileHandler extends Handler {
 
     @Override
     public void close() throws SecurityException {
+        flushExecutor.shutdown();
         synchronized (rotateLock) {
             closeWriter();
+        }
+    }
+
+    private void safeFlush() {
+        try {
+            flush();
+        } catch (Exception e) {
+            reportError("Failed to flush log writer", e, ErrorManager.FLUSH_FAILURE);
         }
     }
 
@@ -124,6 +136,15 @@ public class TemplateFileHandler extends Handler {
         } finally {
             writer = null;
             currentFilePath = null;
+        }
+    }
+
+    private static class FlushThreadFactory implements ThreadFactory {
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, "log-flush-thread");
+            thread.setDaemon(true);
+            return thread;
         }
     }
 }
