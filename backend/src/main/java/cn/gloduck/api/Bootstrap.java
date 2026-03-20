@@ -14,6 +14,7 @@ import java.util.logging.*;
 
 public class Bootstrap {
     public static void main(String[] args) throws IOException {
+        ConfigUtils.init();
         ServerConfig config = ConfigUtils.loadConfig(null, ServerConfig.class);
         setLoggerLevel(config.logLevel);
         ApplicationShutdownHooks.registerShutdownHook();

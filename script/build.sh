@@ -10,7 +10,7 @@ BACKEND_DIR="${PROJECT_ROOT}/backend"
 BACKEND_FRONT_DIR="${BACKEND_DIR}/src/main/resources/front"
 BACKEND_TARGET_DIR="${BACKEND_DIR}/target"
 ROOT_TARGET_DIR="${PROJECT_ROOT}/target"
-CONFIG_FILE="${PROJECT_ROOT}/config.json"
+CONFIG_FILE="${BACKEND_DIR}/src/main/resources/config.json"
 
 APP_NAME="SimpleServer"
 
