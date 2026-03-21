@@ -2,11 +2,7 @@
 <!-- 页面容器 -->
         <div class="min-h-screen flex flex-col">
             <!-- 头部 -->
-            <common-header :title="$route.meta.title" :icon="$route.meta.icon" link="/">
-                <template #right>
-                    常用小工具集合
-                </template>
-            </common-header>
+            <common-header :title="$route.meta.title" :icon="$route.meta.icon" description="常用小工具集合" link="/"></common-header>
 
             <!-- 主内容区 -->
             <main class="flex-grow container mx-auto px-4 py-8">

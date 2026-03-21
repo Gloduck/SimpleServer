@@ -9,6 +9,10 @@ const CommonComponents = {
                 type: String,
                 default: ''
             },
+            description: {
+                type: String,
+                default: ''
+            },
             link: {
                 type: String,
                 default: ''
@@ -26,8 +30,8 @@ const CommonComponents = {
                                 <span class="text-primary">{{ title }}</span>
                             </h1>
                         </div>
-                        <p v-if="$slots.right" class="text-gray-600 text-sm">
-                            <slot name="right"></slot>
+                        <p v-if="description" class="text-gray-600 text-sm">
+                            {{ description }}
                         </p>
                     </div>
                 </div>
