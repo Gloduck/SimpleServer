@@ -2,6 +2,9 @@ package cn.gloduck.server.core.util;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Locale;
@@ -28,6 +31,24 @@ public class FileUtils {
 
         String filename = extractFileNameFromUrl(url);
         return getExtensionFromFileName(filename);
+    }
+
+    public static Path resolveApplicationDirectory(Class<?> anchorClass) {
+        if (anchorClass == null) {
+            throw new IllegalArgumentException("anchorClass must not be null");
+        }
+
+        try {
+            URL location = anchorClass.getProtectionDomain().getCodeSource().getLocation();
+            if (location == null) {
+                return Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+            }
+
+            Path path = Path.of(URI.create(location.toString())).toAbsolutePath().normalize();
+            return Files.isRegularFile(path) ? path.getParent() : path;
+        } catch (Exception e) {
+            return Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+        }
     }
 
 

@@ -120,7 +120,7 @@ public class StaticFileHandler implements ControllerHandler {
             return null;
         }
 
-        Path baseDirectory = Paths.get(runtimeDirectory).toAbsolutePath().normalize();
+        Path baseDirectory = resolveRuntimeBaseDirectory();
         Path file = baseDirectory.resolve(relativePath).normalize();
         if (!file.startsWith(baseDirectory) || !Files.isRegularFile(file)) {
             return null;
@@ -153,6 +153,14 @@ public class StaticFileHandler implements ControllerHandler {
             return null;
         }
         return normalizedPath;
+    }
+
+    private Path resolveRuntimeBaseDirectory() {
+        Path configuredPath = Paths.get(runtimeDirectory);
+        if (configuredPath.isAbsolute()) {
+            return configuredPath.normalize();
+        }
+        return FileUtils.resolveApplicationDirectory(StaticFileHandler.class).resolve(configuredPath).normalize();
     }
 
     private String normalizeRelativePath(String requestPath) {

@@ -1,18 +1,16 @@
 package cn.gloduck.api;
 
 import cn.gloduck.api.entity.config.ServerConfig;
+import cn.gloduck.server.core.util.FileUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.InputStream;
-import java.net.URI;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.CodeSource;
 import java.time.ZoneId;
 import java.util.Locale;
 
@@ -69,22 +67,7 @@ public class ApplicationContext {
     }
 
     public static Path resolveApplicationDirectory() {
-        try {
-            CodeSource codeSource = ApplicationContext.class.getProtectionDomain().getCodeSource();
-            if (codeSource == null) {
-                return Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
-            }
-
-            URL location = codeSource.getLocation();
-            if (location == null) {
-                return Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
-            }
-
-            Path path = Path.of(URI.create(location.toString())).toAbsolutePath().normalize();
-            return Files.isRegularFile(path) ? path.getParent() : path;
-        } catch (Exception e) {
-            return Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
-        }
+        return FileUtils.resolveApplicationDirectory(ApplicationContext.class);
     }
 
     private static void loadConfigContent() {
