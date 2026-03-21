@@ -141,19 +141,19 @@
     </common-modal>
 
     <!-- 主界面 -->
-    <div class="flex-grow flex flex-col overflow-hidden">
-        <!-- 简单标题栏 -->
+    <div class="min-h-screen flex flex-col bg-white">
         <header class="bg-github text-white shadow-md py-2 px-4 flex-shrink-0">
             <div class="flex items-center justify-between">
                 <div class="flex items-center gap-3">
                     <i class="fab fa-markdown text-xl"></i>
-                    <a href="/" @click.prevent="router.push('/')" class="hover:text-gray-200 transition-colors">Markdown 编辑器</a>
+                    <a href="/" class="hover:text-gray-200 transition-colors">{{ $route.meta.title }}</a>
                 </div>
             </div>
         </header>
 
         <!-- 主内容区 -->
-        <div class="flex-grow flex overflow-hidden">
+        <main class="flex-grow w-full min-h-0 h-[calc(100vh-56px)] h-[calc(100dvh-56px)] overflow-hidden">
+        <div class="flex h-full overflow-hidden bg-white">
             <!-- 左侧文件树 -->
             <div :class="['bg-white border-r border-gray-200 flex flex-col overflow-hidden transition-all duration-300 sidebar-transition',
                              sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-48 md:w-72 flex-shrink-0']">
@@ -295,12 +295,12 @@
                 </div>
             </div>
         </div>
+        </main>
     </div>
 </template>
 
 <script>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
 import { CommonUtils } from '@/shared/common-utils.js';
 import { CommonComponents } from '@/shared/common-components.js';
 
@@ -392,7 +392,6 @@ export default {
         },
 
         setup() {
-            const router = useRouter();
             const buildPathWithParam = (path, params) => {
                 let url = path;
                 if (params) {
@@ -1456,8 +1455,7 @@ export default {
                 newFilePath,
                 createNewFile,
                 deleteFile,
-                toastRef,
-                router
+                toastRef
             };
         }
     };
