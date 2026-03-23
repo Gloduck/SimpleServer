@@ -1,7 +1,7 @@
 package cn.gloduck.api.service.clipboard;
 
 import cn.gloduck.api.entity.db.OnlineClipBoard;
-import cn.gloduck.dao.CsvDbFactoryPool;
+import cn.gloduck.api.dao.CsvDbFactoryPool;
 import cn.gloduck.db.CsvDbFactory;
 
 import java.util.Arrays;

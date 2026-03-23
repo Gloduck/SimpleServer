@@ -1,5 +1,4 @@
-package cn.gloduck.dao;
-
+package cn.gloduck.api.dao;
 
 import cn.gloduck.api.ApplicationContext;
 import cn.gloduck.db.CsvDbFactory;
