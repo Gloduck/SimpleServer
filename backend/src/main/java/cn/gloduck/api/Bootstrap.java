@@ -1,6 +1,7 @@
 package cn.gloduck.api;
 
 import cn.gloduck.api.controller.*;
+import cn.gloduck.api.dao.CsvDbFactoryPool;
 import cn.gloduck.api.entity.config.LogConfig;
 import cn.gloduck.api.entity.config.ServerConfig;
 import cn.gloduck.api.log.SpringBootStyleFormatter;
@@ -16,6 +17,7 @@ import java.util.logging.*;
 public class Bootstrap {
     public static void main(String[] args) throws IOException {
         ApplicationContext.init();
+        CsvDbFactoryPool.init();
         ServerConfig config = ApplicationContext.getGlobalConfig();
         configureLogging(ApplicationContext.getConfig(LogConfig.class));
         Integer workThreads = Optional.ofNullable(config.workThreads).orElse(5);

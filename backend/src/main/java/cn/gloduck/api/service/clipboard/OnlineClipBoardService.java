@@ -4,14 +4,13 @@ import cn.gloduck.api.entity.db.OnlineClipBoard;
 import cn.gloduck.api.dao.CsvDbFactoryPool;
 import cn.gloduck.db.CsvDbFactory;
 
-import java.util.Arrays;
 import java.util.Date;
 import java.util.Objects;
 
 public class OnlineClipBoardService {
     private static OnlineClipBoardService instance;
 
-    private final CsvDbFactory clipboardFactory;
+    private final CsvDbFactory clipboardFactory = CsvDbFactoryPool.clipboard;
 
     public boolean save(OnlineClipBoard data) {
         OnlineClipBoard existData = clipboardFactory
@@ -58,18 +57,6 @@ public class OnlineClipBoardService {
         return clipboardFactory.selectFrom(OnlineClipBoard.class)
                 .eq(OnlineClipBoard.Fileds.ID, id)
                 .fetchOne();
-    }
-
-
-    public OnlineClipBoardService() {
-        clipboardFactory = CsvDbFactoryPool.clipboard;
-        clipboardFactory.createDbIfNotExists(OnlineClipBoard.class.getSimpleName(), Arrays.asList(
-                OnlineClipBoard.Fileds.ID,
-                OnlineClipBoard.Fileds.CONTENT_TYPE,
-                OnlineClipBoard.Fileds.CONTENT,
-                OnlineClipBoard.Fileds.CREATE_DATE,
-                OnlineClipBoard.Fileds.UPDATE_DATE
-        ));
     }
 
     public static OnlineClipBoardService instance() {
