@@ -27,7 +27,7 @@ public class OnlineClipBoardController {
         return new JsonControllerHandler<>(HttpMethod.POST, "/api/clipboard/save", exchange -> {
             OnlineClipBoard onlineClipBoard = JsonUtils.readValue(exchange.getRequestBody(), OnlineClipBoard.class);
             boolean success = service.save(onlineClipBoard);
-            return success ? Result.success() : Result.failed();
+            return success ? Result.success() : Result.fail();
         });
     }
 
@@ -36,7 +36,7 @@ public class OnlineClipBoardController {
             Map<String, List<String>> parameters = HttpExchangeUtils.getAllRequestParameters(exchange);
             String id = HttpExchangeUtils.getStringParameter(parameters, "id");
             boolean success = service.delete(id);
-            return success ? Result.success() : Result.failed();
+            return success ? Result.success() : Result.fail();
         });
     }
 

@@ -31,7 +31,7 @@ public class Result<T> {
      * 失败结果
      */
     @SuppressWarnings("rawtypes")
-    private static final Result FAILED_RESULT = result(StatusCode.FAILED, null);
+    private static final Result FAILED_RESULT = result(StatusCode.FAIL, null);
 
     @SuppressWarnings("rawtypes")
     private static final Result ERROR_RESULT = result(StatusCode.ERROR, null);
@@ -80,7 +80,7 @@ public class Result<T> {
      * @return {@link Result}<{@link T}>
      */
     @SuppressWarnings("unchecked")
-    public static <T> Result<T> failed() {
+    public static <T> Result<T> fail() {
         return FAILED_RESULT;
     }
 
@@ -90,8 +90,8 @@ public class Result<T> {
      * @param msg 消息
      * @return {@link Result}<{@link T}>
      */
-    public static <T> Result<T> failed(String msg) {
-        return new Result<>(StatusCode.FAILED.value, msg, null);
+    public static <T> Result<T> fail(String msg) {
+        return new Result<>(StatusCode.FAIL.value, msg, null);
     }
 
     /**
@@ -176,23 +176,23 @@ public class Result<T> {
         /**
          * 成功
          */
-        SUCCESS(200, "成功"),
+        SUCCESS(200, "success"),
 
 
         /**
          * 未找到资源
          */
-        NOT_FOUND(404, "未找到资源"),
+        NOT_FOUND(404, "not found"),
 
         /**
          * 失败
          */
-        FAILED(417, "失败"),
+        FAIL(417, "fail"),
 
         /**
          * 错误
          */
-        ERROR(500, "错误");
+        ERROR(500, "error");
 
         /**
          * 默认值
