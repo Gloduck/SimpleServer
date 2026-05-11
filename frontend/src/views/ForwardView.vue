@@ -290,9 +290,8 @@ export default {
 
                     urlError.value = '';
 
-                    // 编码目标URL，使用固定的转发服务器地址
-                    const encodedUrl = encodeURIComponent(url);
-                    const proxyUrl = `/api/forward/proxy?url=${encodedUrl}`;
+                    const targetUrl = new URL(url);
+                    const proxyUrl = `/api/requestProxy${targetUrl.pathname}${targetUrl.search}${targetUrl.search ? '&' : '?'}Proxy-Host=${encodeURIComponent(`${targetUrl.protocol}//${targetUrl.host}`)}`;
 
                     // 显示下载状态面板
                     isDownloading.value = true;
