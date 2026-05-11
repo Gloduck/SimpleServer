@@ -32,11 +32,11 @@ import cn.gloduck.server.core.util.HttpExchangeUtils;
 
 public class RequestProxyHandler implements ControllerHandler {
     private static final String PROXY_HOST_KEY = "Proxy-Host";
-    private static final String PROXY_ENABLE_CORS_KEY = "Proxy-Enable-Cors";
+    private static final String PROXY_CORS_KEY = "Proxy-Cors";
     private static final String PROXY_FOLLOW_REDIRECT_KEY = "Proxy-Follow-Redirect";
     private static final Set<String> IGNORE_REQUEST_PARAMETERS = new LinkedHashSet<>(Arrays.asList(
             PROXY_HOST_KEY,
-            PROXY_ENABLE_CORS_KEY,
+            PROXY_CORS_KEY,
             PROXY_FOLLOW_REDIRECT_KEY));
     private static final Set<String> IGNORE_REQUEST_HEADERS = new LinkedHashSet<>(Arrays.asList(
             "Host",
@@ -46,7 +46,7 @@ public class RequestProxyHandler implements ControllerHandler {
             "Upgrade",
             "Expect",
             PROXY_HOST_KEY,
-            PROXY_ENABLE_CORS_KEY,
+            PROXY_CORS_KEY,
             PROXY_FOLLOW_REDIRECT_KEY));
     private static final Set<String> IGNORE_RESPONSE_HEADERS = new LinkedHashSet<>(Arrays.asList(
             "Connection",
@@ -237,9 +237,9 @@ public class RequestProxyHandler implements ControllerHandler {
     }
 
     private boolean isCorsEnabled(HttpExchange exchange, Map<String, List<String>> queryParameters) {
-        String explicitEnabled = HttpExchangeUtils.getFirstNonBlankHeader(exchange, PROXY_ENABLE_CORS_KEY);
+        String explicitEnabled = HttpExchangeUtils.getFirstNonBlankHeader(exchange, PROXY_CORS_KEY);
         if (isBlank(explicitEnabled)) {
-            explicitEnabled = HttpExchangeUtils.getStringParameter(queryParameters, PROXY_ENABLE_CORS_KEY);
+            explicitEnabled = HttpExchangeUtils.getStringParameter(queryParameters, PROXY_CORS_KEY);
         }
         return isTruthy(explicitEnabled);
     }
