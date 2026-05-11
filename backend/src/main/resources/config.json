@@ -99,6 +99,9 @@
   "forward": {
     "proxy": null
   },
+  "proxyrequest": {
+    "proxy": null
+  },
   "github": {
     "hotSearches": [
       "lyswhut/lx-music-desktop",

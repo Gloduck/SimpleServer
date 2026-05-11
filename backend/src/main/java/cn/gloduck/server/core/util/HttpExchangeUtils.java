@@ -6,6 +6,7 @@ import com.sun.net.httpserver.HttpsExchange;
 import java.io.*;
 import java.net.HttpCookie;
 import java.net.InetSocketAddress;
+import java.net.URLEncoder;
 import java.net.URLDecoder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -84,6 +85,19 @@ public class HttpExchangeUtils {
         return null;
     }
 
+    public static String getFirstNonBlankHeader(HttpExchange exchange, String name) {
+        List<String> values = exchange.getRequestHeaders().get(name);
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
     public static Boolean getBooleanParameter(Map<String, List<String>> params, String name) {
         String value = getStringParameter(params, name);
         return value != null ? Boolean.parseBoolean(value) : null;
@@ -112,7 +126,7 @@ public class HttpExchangeUtils {
 
         String query = exchange.getRequestURI().getRawQuery();
         if (query != null && !query.isEmpty()) {
-            parseIntoMap(query, params);
+            parseRequestParameters(query, params);
         }
         String method = exchange.getRequestMethod();
         String contentType = exchange.getRequestHeaders()
@@ -133,16 +147,28 @@ public class HttpExchangeUtils {
             }
             String body = sb.toString();
             if (!body.isEmpty()) {
-                parseIntoMap(body, params);
+                parseRequestParameters(body, params);
             }
         }
 
         return params;
     }
 
-    private static void parseIntoMap(String raw, Map<String, List<String>> params) {
+    public static Map<String, List<String>> parseRequestParameters(String raw) {
+        Map<String, List<String>> params = new LinkedHashMap<>();
+        parseRequestParameters(raw, params);
+        return params;
+    }
+
+    public static void parseRequestParameters(String raw, Map<String, List<String>> params) {
+        if (raw == null || raw.isEmpty()) {
+            return;
+        }
         String[] pairs = raw.split("&");
         for (String pair : pairs) {
+            if (pair.isEmpty()) {
+                continue;
+            }
             int idx = pair.indexOf('=');
             String key, value;
             if (idx > 0) {
@@ -156,6 +182,24 @@ public class HttpExchangeUtils {
         }
     }
 
+    public static String buildRequestQuery(Map<String, List<String>> parameters) {
+        if (parameters == null || parameters.isEmpty()) {
+            return null;
+        }
+        List<String> keptPairs = new ArrayList<>();
+        for (Map.Entry<String, List<String>> entry : parameters.entrySet()) {
+            for (String value : entry.getValue()) {
+                if (value == null) {
+                    keptPairs.add(urlEncode(entry.getKey()));
+                } else {
+                    keptPairs.add(urlEncode(entry.getKey())
+                            + "=" + urlEncode(value));
+                }
+            }
+        }
+        return keptPairs.isEmpty() ? null : String.join("&", keptPairs);
+    }
+
     public static void sendErrorResponse(HttpExchange exchange, int statusCode, String message) throws IOException {
         byte[] response = message.getBytes(StandardCharsets.UTF_8);
         exchange.sendResponseHeaders(statusCode, response.length);
@@ -166,6 +210,10 @@ public class HttpExchangeUtils {
 
     private static String urlDecode(String s) {
         return URLDecoder.decode(s, StandardCharsets.UTF_8);
+    }
+
+    public static String urlEncode(String s){
+        return URLEncoder.encode(s, StandardCharsets.UTF_8);
     }
 
     public static String getClientIp(HttpExchange exchange) {
