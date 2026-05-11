@@ -33,9 +33,11 @@ import cn.gloduck.server.core.util.HttpExchangeUtils;
 public class RequestProxyHandler implements ControllerHandler {
     private static final String PROXY_HOST_KEY = "Proxy-Host";
     private static final String PROXY_ENABLE_CORS_KEY = "Proxy-Enable-Cors";
+    private static final String PROXY_FOLLOW_REDIRECT_KEY = "Proxy-Follow-Redirect";
     private static final Set<String> IGNORE_REQUEST_PARAMETERS = new LinkedHashSet<>(Arrays.asList(
             PROXY_HOST_KEY,
-            PROXY_ENABLE_CORS_KEY));
+            PROXY_ENABLE_CORS_KEY,
+            PROXY_FOLLOW_REDIRECT_KEY));
     private static final Set<String> IGNORE_REQUEST_HEADERS = new LinkedHashSet<>(Arrays.asList(
             "Host",
             "Connection",
@@ -44,7 +46,8 @@ public class RequestProxyHandler implements ControllerHandler {
             "Upgrade",
             "Expect",
             PROXY_HOST_KEY,
-            PROXY_ENABLE_CORS_KEY));
+            PROXY_ENABLE_CORS_KEY,
+            PROXY_FOLLOW_REDIRECT_KEY));
     private static final Set<String> IGNORE_RESPONSE_HEADERS = new LinkedHashSet<>(Arrays.asList(
             "Connection",
             "Content-Length",
@@ -52,7 +55,8 @@ public class RequestProxyHandler implements ControllerHandler {
 
     private final List<ApiEndpoint> endpoints;
     private final String requestPathPrefix;
-    private final HttpClient httpClient;
+    private final HttpClient redirectHttpClient;
+    private final HttpClient noRedirectHttpClient;
 
     public RequestProxyHandler(String requestPathPrefix) {
         this(requestPathPrefix, (InetSocketAddress) null);
@@ -67,13 +71,18 @@ public class RequestProxyHandler implements ControllerHandler {
         this.endpoints = Arrays.stream(HttpMethod.values())
                 .map(method -> new ApiEndpoint(method, requestPathPrefix + "/**"))
                 .collect(Collectors.toList());
+        this.redirectHttpClient = buildHttpClient(proxyAddress, HttpClient.Redirect.NORMAL);
+        this.noRedirectHttpClient = buildHttpClient(proxyAddress, HttpClient.Redirect.NEVER);
+    }
+
+    private HttpClient buildHttpClient(InetSocketAddress proxyAddress, HttpClient.Redirect redirect) {
         HttpClient.Builder builder = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
-                .followRedirects(HttpClient.Redirect.NEVER);
+                .followRedirects(redirect);
         if (proxyAddress != null) {
             builder.proxy(ProxySelector.of(proxyAddress));
         }
-        this.httpClient = builder.build();
+        return builder.build();
     }
 
     @Override
@@ -91,6 +100,7 @@ public class RequestProxyHandler implements ControllerHandler {
         }
 
         boolean enableCors = isCorsEnabled(exchange, queryParameters);
+        boolean followRedirect = isRedirectEnabled(exchange, queryParameters);
         if (enableCors && isPreflightRequest(exchange)) {
             writePreflightResponse(exchange);
             return;
@@ -111,7 +121,8 @@ public class RequestProxyHandler implements ControllerHandler {
 
         HttpResponse<InputStream> response;
         try {
-            response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
+            HttpClient requestHttpClient = followRedirect ? redirectHttpClient : noRedirectHttpClient;
+            response = requestHttpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("Proxy request interrupted", e);
@@ -229,6 +240,14 @@ public class RequestProxyHandler implements ControllerHandler {
         String explicitEnabled = HttpExchangeUtils.getFirstNonBlankHeader(exchange, PROXY_ENABLE_CORS_KEY);
         if (isBlank(explicitEnabled)) {
             explicitEnabled = HttpExchangeUtils.getStringParameter(queryParameters, PROXY_ENABLE_CORS_KEY);
+        }
+        return isTruthy(explicitEnabled);
+    }
+
+    private boolean isRedirectEnabled(HttpExchange exchange, Map<String, List<String>> queryParameters) {
+        String explicitEnabled = HttpExchangeUtils.getFirstNonBlankHeader(exchange, PROXY_FOLLOW_REDIRECT_KEY);
+        if (isBlank(explicitEnabled)) {
+            explicitEnabled = HttpExchangeUtils.getStringParameter(queryParameters, PROXY_FOLLOW_REDIRECT_KEY);
         }
         return isTruthy(explicitEnabled);
     }
