@@ -68,6 +68,7 @@ public class RequestProxyHandler implements ControllerHandler {
                 .map(method -> new ApiEndpoint(method, requestPathPrefix + "/**"))
                 .collect(Collectors.toList());
         HttpClient.Builder builder = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .followRedirects(HttpClient.Redirect.NEVER);
         if (proxyAddress != null) {
             builder.proxy(ProxySelector.of(proxyAddress));
@@ -267,7 +268,7 @@ public class RequestProxyHandler implements ControllerHandler {
     }
 
     private boolean shouldIgnoreHeader(String header, Set<String> ignoreHeaders) {
-        if (header == null) {
+        if (header == null || header.startsWith(":")) {
             return true;
         }
         for (String ignoreHeader : ignoreHeaders) {
