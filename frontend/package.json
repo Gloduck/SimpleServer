@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.2.0",
+    "@vscode/codicons": "^0.0.45",
     "autoprefixer": "^10.4.27",
     "codemirror": "^5.65.18",
     "cropperjs": "^1.6.2",

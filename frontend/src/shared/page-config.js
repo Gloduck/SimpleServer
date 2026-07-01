@@ -6,6 +6,7 @@ import ImageEditorView from '@/views/ImageEditorView.vue';
 import ForwardView from '@/views/ForwardView.vue';
 import ClipboardView from '@/views/ClipboardView.vue';
 import MdEditorView from '@/views/MdEditorView.vue';
+import CodeEditorView from '@/views/CodeEditorView.vue';
 
 export const pageDefinitions = [
   {
@@ -68,6 +69,14 @@ export const pageDefinitions = [
     title: 'Markdown编辑器',
     icon: 'fas fa-pen-nib',
     desc: '基于Vditor的Markdown在线编辑器',
+    category: '开发'
+  },
+  {
+    paths: ['/codeEditor'],
+    component: CodeEditorView,
+    title: '代码编辑器',
+    icon: 'fas fa-code',
+    desc: '基于浏览器文件访问能力的在线代码编辑器',
     category: '开发'
   }
 ];

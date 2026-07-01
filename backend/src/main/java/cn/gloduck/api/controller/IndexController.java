@@ -27,7 +27,8 @@ public class IndexController {
                 "/forward",
                 "/clipboard",
                 "/clipboard/*",
-                "/mdeditor"
+                "/mdeditor",
+                "/codeEditor"
         ));
     }
 }
