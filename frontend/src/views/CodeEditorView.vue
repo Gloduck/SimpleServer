@@ -284,10 +284,11 @@ import "@vscode/codicons/dist/codicon.css";
 const STORAGE_KEY = "browser-code-editor-settings";
 const SETTINGS_URL_PARAM = "settings";
 const REQUEST_PROXY_PATH = "/api/requestProxy";
+const NPM_MIRROR_BASE = "https://registry.npmmirror.com";
 const MONACO_VERSION = "0.55.1";
-const MONACO_BASE = `https://cdn.jsdelivr.net/npm/monaco-editor@${MONACO_VERSION}/min/vs`;
+const MONACO_BASE = `${NPM_MIRROR_BASE}/monaco-editor/${MONACO_VERSION}/files/min/vs`;
 const PRETTIER_VERSION = "3.9.4";
-const PRETTIER_BASE = `https://cdn.jsdelivr.net/npm/prettier@${PRETTIER_VERSION}`;
+const PRETTIER_BASE = `${NPM_MIRROR_BASE}/prettier/${PRETTIER_VERSION}/files`;
 const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Shift+Enter" };
 const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
 const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
@@ -776,13 +777,6 @@ function loadMonaco() {
     }
 
     const configureAndLoad = () => {
-      window.MonacoEnvironment = {
-        getWorkerUrl() {
-          const worker = `self.MonacoEnvironment={baseUrl:'${MONACO_BASE}/'};importScripts('${MONACO_BASE}/base/worker/workerMain.js');`;
-          return `data:text/javascript;charset=utf-8,${encodeURIComponent(worker)}`;
-        },
-      };
-
       window.require.config({ paths: { vs: MONACO_BASE } });
       window.require(["vs/editor/editor.main"], () => resolve(window.monaco), reject);
     };
