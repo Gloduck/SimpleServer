@@ -178,6 +178,20 @@
           </section>
           <section class="setting-row keybinding-card">
             <div class="setting-title-row">
+              <span>{{ tr('settings.backend') }}</span>
+            </div>
+            <label class="setting-row checkbox-row">
+              <input v-model="settings.backend.enabled" type="checkbox" />
+              <span>{{ tr('settings.backendEnabled') }}</span>
+            </label>
+            <label class="setting-row">
+              <span>{{ tr('settings.backendBaseUrl') }}</span>
+              <input v-model="settings.backend.baseUrl" spellcheck="false" :placeholder="defaultBackendSettings.baseUrl" @change="normalizeBackendBaseUrl" />
+            </label>
+            <small class="setting-hint">{{ tr('settings.backendHint') }}</small>
+          </section>
+          <section class="setting-row keybinding-card">
+            <div class="setting-title-row">
               <span>{{ tr('settings.keybindings') }}</span>
               <button type="button" @click="resetKeybindings">{{ tr('settings.resetKeybindings') }}</button>
             </div>
@@ -276,9 +290,10 @@ const PRETTIER_VERSION = "3.9.4";
 const PRETTIER_BASE = `https://cdn.jsdelivr.net/npm/prettier@${PRETTIER_VERSION}`;
 const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Shift+Enter" };
 const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
+const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 640;
-const defaultSettings = { theme: "vs-dark", locale: "zh-CN", fontSize: 14, wordWrap: false, minimap: true, sidebarWidth: 300, shortcuts: { ...vscodeShortcuts }, ai: { ...defaultAiSettings } };
+const defaultSettings = { theme: "vs-dark", locale: "zh-CN", fontSize: 14, wordWrap: false, minimap: true, sidebarWidth: 300, shortcuts: { ...vscodeShortcuts }, ai: { ...defaultAiSettings }, backend: { ...defaultBackendSettings } };
 const AI_COMPLETION_MANUAL_TRIGGER_WINDOW_MS = 2000;
 const AI_COMPLETION_MANUAL_PREFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_SUFFIX_CHARS = 500;
@@ -332,6 +347,10 @@ const messages = {
     "settings.aiAgentModelToAdd": "选择模型添加",
     "settings.aiAddAgentModel": "添加",
     "settings.aiHint": "当前直接从浏览器请求 OpenAI-compatible API，Base URL 可填根地址或 /v1 地址；适合本机自用，公开部署会暴露 API Key。",
+    "settings.backend": "后端服务器",
+    "settings.backendEnabled": "启用后端服务器",
+    "settings.backendBaseUrl": "后端地址",
+    "settings.backendHint": "用于 request_proxy 等需要后端转发的工具。默认地址是当前页面同源后端；未启用时 request_proxy 不会提供给 AI。",
     "settings.keybindings": "快捷键映射",
     "settings.resetKeybindings": "恢复默认",
     "settings.shortcutHint": "默认采用 VS Code 快捷键。可输入 Ctrl/Cmd/Shift/Alt 加按键，例如 Ctrl+S、Shift+Alt+F。",
@@ -400,6 +419,8 @@ const messages = {
     "ai.error.missingConfig": "请先在设置中填写 API Key 和模型。",
     "ai.error.missingApiKey": "请先在设置中填写 API Key。",
     "ai.error.noWorkspace": "请先打开工作区。",
+    "ai.error.backendDisabled": "后端服务器未启用，请先在设置中启用后端服务器。",
+    "ai.error.invalidBackendBaseUrl": "后端地址不合法。",
     "menu.fileTree": "文件树菜单",
     "menu.changes": "变更菜单",
     "menu.editor": "编辑器菜单",
@@ -470,6 +491,10 @@ const messages = {
     "settings.aiAgentModelToAdd": "Select model to add",
     "settings.aiAddAgentModel": "Add",
     "settings.aiHint": "Requests are sent directly from the browser to an OpenAI-compatible API. Base URL can be the root or /v1 URL. This is suitable for local use; public deployment exposes the API key.",
+    "settings.backend": "Backend Server",
+    "settings.backendEnabled": "Enable Backend Server",
+    "settings.backendBaseUrl": "Backend URL",
+    "settings.backendHint": "Used by tools that need backend forwarding, such as request_proxy. The default URL is the current same-origin backend; request_proxy is unavailable while disabled.",
     "settings.keybindings": "Keyboard Shortcuts",
     "settings.resetKeybindings": "Reset",
     "settings.shortcutHint": "VS Code shortcuts are used by default. Use Ctrl/Cmd/Shift/Alt plus a key, for example Ctrl+S or Shift+Alt+F.",
@@ -538,6 +563,8 @@ const messages = {
     "ai.error.missingConfig": "Fill in API key and model in Settings first.",
     "ai.error.missingApiKey": "Fill in API key in Settings first.",
     "ai.error.noWorkspace": "Open a workspace first.",
+    "ai.error.backendDisabled": "Backend server is disabled. Enable it in Settings first.",
+    "ai.error.invalidBackendBaseUrl": "Invalid backend URL.",
     "menu.fileTree": "File tree menu",
     "menu.changes": "Changes menu",
     "menu.editor": "Editor menu",
@@ -1282,6 +1309,35 @@ function uniqueStrings(values) {
   return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
 }
 
+function getCurrentBackendBaseUrl() {
+  return window.location.origin && window.location.origin !== "null" ? window.location.origin : "";
+}
+
+function normalizeBackendBaseUrlValue(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+function normalizeBackendBaseUrl() {
+  settings.backend.baseUrl = normalizeBackendBaseUrlValue(settings.backend.baseUrl) || defaultBackendSettings.baseUrl;
+}
+
+function isBackendEnabled() {
+  return Boolean(settings.backend?.enabled);
+}
+
+function validateBackendEnabled() {
+  if (!isBackendEnabled()) throw new Error(tr("ai.error.backendDisabled"));
+}
+
+function getBackendBaseUrl() {
+  const baseUrl = normalizeBackendBaseUrlValue(settings.backend?.baseUrl) || defaultBackendSettings.baseUrl;
+  try {
+    return new URL(baseUrl).href.replace(/\/+$/, "");
+  } catch {
+    throw new Error(tr("ai.error.invalidBackendBaseUrl"));
+  }
+}
+
 function validateAiConfig(model) {
   if (!rootHandle.value) throw new Error(tr("ai.error.noWorkspace"));
   if (!settings.ai.apiKey.trim() || !model) throw new Error(tr("ai.error.missingConfig"));
@@ -1647,18 +1703,23 @@ async function runAiAgent(prompt, signal) {
 }
 
 function getAgentInstructions() {
-  return [
+  const instructions = [
     "You are an autonomous coding assistant inside a browser-based Monaco editor.",
     "Use tools to inspect and edit the workspace. Never claim a file changed unless a tool reports success.",
     "All edit tools modify only in-memory editor models. The user must save files manually; new files created by write_file and files marked by delete_file are not written to disk until saved by the user.",
     "Resolve references like 'the file you created' from Recent chat and AI-touched files before using the current editor file. If multiple files match, ask a short clarification instead of editing or deleting the current file by default.",
     "When inspecting several known files, prefer one read_files call over many read_file calls.",
-    "Use request_proxy when you need to fetch external HTTP resources that may be blocked by browser CORS.",
     "When applying several local edits, prefer one replace_in_files call over many replace_in_file calls.",
     "Prefer replace_in_file with exact old_text and minimal new_text for local edits, similar to patch hunks.",
     "Use write_file only for new files, tiny files, generated files, or when no stable exact local replacement is possible.",
     "Prefer small, targeted edits. Explain changed files briefly after tool work is complete; do not paste whole modified files in chat.",
-  ].join(" ");
+  ];
+  if (isBackendEnabled()) {
+    instructions.push("Use request_proxy when you need to fetch external HTTP resources that may be blocked by browser CORS.");
+  } else {
+    instructions.push("External HTTP fetches through request_proxy are disabled because the backend server setting is not enabled.");
+  }
+  return instructions.join(" ");
 }
 
 function buildAgentPrompt(prompt) {
@@ -1694,20 +1755,23 @@ function formatRecentAiMessages(options = {}) {
 }
 
 function getAiToolDefinitions() {
-  return [
+  const tools = [
     { type: "function", name: "list_files", description: "List workspace files and directories. By default only lists the first level; set recursive to true to include descendants.", parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root." }, max_items: { type: "number", description: "Maximum items to return." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
     { type: "function", name: "read_file", description: "Read a text file. Dirty in-memory content is returned when present.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "read_files", description: "Read multiple text files in one call. Dirty in-memory content is returned when present.", parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, max_chars_per_file: { type: "number" } }, required: ["paths"] } },
     { type: "function", name: "search_text", description: "Search text across workspace files.", parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string" }, max_results: { type: "number" } }, required: ["query"] } },
-    { type: "function", name: "request_proxy", description: "Fetch an external HTTP/HTTPS URL through the backend request proxy to avoid browser CORS limits. Returns status, headers and truncated text response.", parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, max_chars: { type: "number", description: "Maximum response body characters to return. Defaults to 20000." } }, required: ["url"] } },
     { type: "function", name: "get_current_file", description: "Get current editor file, cursor and selected text.", parameters: { type: "object", properties: {} } },
     { type: "function", name: "replace_in_file", description: "Replace the first exact text occurrence in a file in memory. Use this for minimal local edits; do not pass whole-file old_text/new_text unless the file is tiny and no smaller exact edit is possible.", parameters: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } },
     { type: "function", name: "replace_in_files", description: "Apply multiple exact local replacements in one call. Prefer this after batch-reading files and planning several patch hunks.", parameters: { type: "object", properties: { edits: { type: "array", items: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } } }, required: ["edits"] } },
     { type: "function", name: "write_file", description: "Create or replace a whole file in memory. Use only for new files, tiny files, generated files, or when exact local replacement is not stable. Does not save to disk.", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
     { type: "function", name: "delete_file", description: "Mark a file for deletion in memory. Existing disk files are deleted only when the user saves the deletion; unsaved new files are removed immediately from memory.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "open_file", description: "Open a file in the editor.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
-    { type: "function", name: "show_diff", description: "Show diff for an in-memory changed file.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+    { type: "function", name: "show_diff", description: "Show diff for an in-memory changed file.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } }
   ];
+  if (isBackendEnabled()) {
+    tools.push({ type: "function", name: "request_proxy", description: "Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits. Returns status, headers and truncated text response.", parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, max_chars: { type: "number", description: "Maximum response body characters to return. Defaults to 20000." } }, required: ["url"] } });
+  }
+  return tools;
 }
 
 function parseAiToolArguments(call) {
@@ -1932,8 +1996,11 @@ function loadSettings() {
     const saved = imported || JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
     const shortcuts = { ...vscodeShortcuts, ...(saved.shortcuts || {}) };
     const ai = { ...defaultAiSettings, ...(saved.ai || {}) };
+    const backend = { ...defaultBackendSettings, ...(saved.backend || {}) };
     if (!aiReasoningEfforts.includes(ai.reasoningEffort)) ai.reasoningEffort = defaultAiSettings.reasoningEffort;
-    const loaded = { ...defaultSettings, ...saved, sidebarWidth: clampSidebarWidth(saved.sidebarWidth), shortcuts, ai };
+    backend.enabled = Boolean(backend.enabled);
+    backend.baseUrl = normalizeBackendBaseUrlValue(backend.baseUrl) || defaultBackendSettings.baseUrl;
+    const loaded = { ...defaultSettings, ...saved, sidebarWidth: clampSidebarWidth(saved.sidebarWidth), shortcuts, ai, backend };
     if (imported) localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
     return loaded;
   } catch {
@@ -2091,6 +2158,7 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
 }
 
 async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, follow_redirect: followRedirect = true, enable_cors: enableCors = true, max_chars: maxChars = 20000 } = {}) {
+  validateBackendEnabled();
   if (!url) throw new Error("url is required");
   const target = new URL(url);
   if (!["http:", "https:"].includes(target.protocol)) throw new Error("Only http and https URLs are supported");
@@ -2098,11 +2166,9 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, fol
   if ((requestMethod === "GET" || requestMethod === "HEAD") && body != null) throw new Error(`${requestMethod} requests cannot include a body`);
 
   const requestHeaders = buildProxyRequestHeaders(headers);
-  requestHeaders.set("Proxy-Host", target.origin);
-  requestHeaders.set("Proxy-Cors", enableCors ? "true" : "false");
-  requestHeaders.set("Proxy-Follow-Redirect", followRedirect ? "true" : "false");
+  const proxyUrl = buildRequestProxyUrl(target, enableCors, followRedirect);
 
-  const response = await fetch(`${REQUEST_PROXY_PATH}${target.pathname || "/"}${target.search}`, {
+  const response = await fetch(proxyUrl, {
     method: requestMethod,
     headers: requestHeaders,
     body: requestMethod === "GET" || requestMethod === "HEAD" ? undefined : String(body ?? ""),
@@ -2120,6 +2186,16 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, fol
     truncated: text.length > limit,
     body: text.slice(0, limit),
   };
+}
+
+function buildRequestProxyUrl(target, enableCors, followRedirect) {
+  const separator = target.search ? "&" : "?";
+  const proxyParams = new URLSearchParams({
+    "Proxy-Host": target.origin,
+    "Proxy-Cors": enableCors ? "true" : "false",
+    "Proxy-Follow-Redirect": followRedirect ? "true" : "false",
+  });
+  return `${getBackendBaseUrl()}${REQUEST_PROXY_PATH}${target.pathname || "/"}${target.search}${separator}${proxyParams.toString()}`;
 }
 
 function buildProxyRequestHeaders(headers) {
