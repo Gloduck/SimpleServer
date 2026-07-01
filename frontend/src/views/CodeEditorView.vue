@@ -1205,6 +1205,7 @@ function updateKeybindings() {
 
 function registerKeybindings() {
   keybindingDisposables.splice(0).forEach((disposable) => disposable.dispose());
+  const targetEditors = [editor.value, diffEditor.value?.getOriginalEditor(), diffEditor.value?.getModifiedEditor()].filter(Boolean);
   const actions = [
     { id: "browser-editor-save", label: tr("action.save"), shortcut: settings.shortcuts.save, run: saveActiveFile },
     { id: "browser-editor-format", label: tr("action.format"), shortcut: settings.shortcuts.format, run: formatActiveFile },
@@ -1217,12 +1218,14 @@ function registerKeybindings() {
       setStatus(tr("status.shortcutInvalid", { shortcut: action.shortcut }), action.label);
       return;
     }
-    keybindingDisposables.push(editor.value.addAction({
-      id: `${action.id}-${index}-${Date.now()}`,
-      label: action.label,
-      keybindings: [keybinding],
-      run: action.run,
-    }));
+    targetEditors.forEach((targetEditor, editorIndex) => {
+      keybindingDisposables.push(targetEditor.addAction({
+        id: `${action.id}-${index}-${editorIndex}-${Date.now()}`,
+        label: action.label,
+        keybindings: [keybinding],
+        run: action.run,
+      }));
+    });
   });
 }
 
