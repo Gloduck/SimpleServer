@@ -269,6 +269,7 @@ import "@vscode/codicons/dist/codicon.css";
 
 const STORAGE_KEY = "browser-code-editor-settings";
 const SETTINGS_URL_PARAM = "settings";
+const REQUEST_PROXY_PATH = "/api/requestProxy";
 const MONACO_VERSION = "0.55.1";
 const MONACO_BASE = `https://cdn.jsdelivr.net/npm/monaco-editor@${MONACO_VERSION}/min/vs`;
 const PRETTIER_VERSION = "3.9.4";
@@ -1652,6 +1653,7 @@ function getAgentInstructions() {
     "All edit tools modify only in-memory editor models. The user must save files manually; new files created by write_file and files marked by delete_file are not written to disk until saved by the user.",
     "Resolve references like 'the file you created' from Recent chat and AI-touched files before using the current editor file. If multiple files match, ask a short clarification instead of editing or deleting the current file by default.",
     "When inspecting several known files, prefer one read_files call over many read_file calls.",
+    "Use request_proxy when you need to fetch external HTTP resources that may be blocked by browser CORS.",
     "When applying several local edits, prefer one replace_in_files call over many replace_in_file calls.",
     "Prefer replace_in_file with exact old_text and minimal new_text for local edits, similar to patch hunks.",
     "Use write_file only for new files, tiny files, generated files, or when no stable exact local replacement is possible.",
@@ -1697,6 +1699,7 @@ function getAiToolDefinitions() {
     { type: "function", name: "read_file", description: "Read a text file. Dirty in-memory content is returned when present.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "read_files", description: "Read multiple text files in one call. Dirty in-memory content is returned when present.", parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, max_chars_per_file: { type: "number" } }, required: ["paths"] } },
     { type: "function", name: "search_text", description: "Search text across workspace files.", parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string" }, max_results: { type: "number" } }, required: ["query"] } },
+    { type: "function", name: "request_proxy", description: "Fetch an external HTTP/HTTPS URL through the backend request proxy to avoid browser CORS limits. Returns status, headers and truncated text response.", parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, max_chars: { type: "number", description: "Maximum response body characters to return. Defaults to 20000." } }, required: ["url"] } },
     { type: "function", name: "get_current_file", description: "Get current editor file, cursor and selected text.", parameters: { type: "object", properties: {} } },
     { type: "function", name: "replace_in_file", description: "Replace the first exact text occurrence in a file in memory. Use this for minimal local edits; do not pass whole-file old_text/new_text unless the file is tiny and no smaller exact edit is possible.", parameters: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } },
     { type: "function", name: "replace_in_files", description: "Apply multiple exact local replacements in one call. Prefer this after batch-reading files and planning several patch hunks.", parameters: { type: "object", properties: { edits: { type: "array", items: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } } }, required: ["edits"] } },
@@ -1718,6 +1721,7 @@ async function runAiToolCall(call, args = {}) {
       case "read_file": return okTool(await aiToolReadFile(args.path));
       case "read_files": return okTool(await aiToolReadFiles(args));
       case "search_text": return okTool(await aiToolSearchText(args));
+      case "request_proxy": return okTool(await aiToolRequestProxy(args));
       case "get_current_file": return okTool(aiToolGetCurrentFile());
       case "replace_in_file": return okTool(await aiToolReplaceInFile(args));
       case "replace_in_files": return okTool(await aiToolReplaceInFiles(args));
@@ -2084,6 +2088,53 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
     }
   }
   return { summary: `${results.length} match(es)`, results };
+}
+
+async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, follow_redirect: followRedirect = true, enable_cors: enableCors = true, max_chars: maxChars = 20000 } = {}) {
+  if (!url) throw new Error("url is required");
+  const target = new URL(url);
+  if (!["http:", "https:"].includes(target.protocol)) throw new Error("Only http and https URLs are supported");
+  const requestMethod = String(method || "GET").trim().toUpperCase();
+  if ((requestMethod === "GET" || requestMethod === "HEAD") && body != null) throw new Error(`${requestMethod} requests cannot include a body`);
+
+  const requestHeaders = buildProxyRequestHeaders(headers);
+  requestHeaders.set("Proxy-Host", target.origin);
+  requestHeaders.set("Proxy-Cors", enableCors ? "true" : "false");
+  requestHeaders.set("Proxy-Follow-Redirect", followRedirect ? "true" : "false");
+
+  const response = await fetch(`${REQUEST_PROXY_PATH}${target.pathname || "/"}${target.search}`, {
+    method: requestMethod,
+    headers: requestHeaders,
+    body: requestMethod === "GET" || requestMethod === "HEAD" ? undefined : String(body ?? ""),
+    credentials: "omit",
+  });
+  const text = await response.text();
+  const limit = Math.max(1000, Math.min(Number(maxChars) || 20000, 120000));
+  return {
+    summary: `${requestMethod} ${target.href} -> ${response.status} (${Math.min(text.length, limit)} chars)`,
+    url: target.href,
+    status: response.status,
+    status_text: response.statusText,
+    http_ok: response.ok,
+    headers: Object.fromEntries(response.headers.entries()),
+    truncated: text.length > limit,
+    body: text.slice(0, limit),
+  };
+}
+
+function buildProxyRequestHeaders(headers) {
+  const requestHeaders = new Headers();
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) return requestHeaders;
+  Object.entries(headers).forEach(([name, value]) => {
+    if (value == null || shouldSkipProxyRequestHeader(name)) return;
+    requestHeaders.set(name, String(value));
+  });
+  return requestHeaders;
+}
+
+function shouldSkipProxyRequestHeader(name) {
+  const normalized = String(name || "").trim().toLowerCase();
+  return ["host", "connection", "content-length", "transfer-encoding", "upgrade", "expect", "proxy-host", "proxy-cors", "proxy-follow-redirect"].includes(normalized);
 }
 
 function aiToolGetCurrentFile() {
