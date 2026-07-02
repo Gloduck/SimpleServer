@@ -306,7 +306,19 @@
             <span>{{ FileUtils.formatFileSize(activeImageFile.size) }} · {{ activeImageFile.mimeType || tr('imagePreview.type') }}</span>
           </div>
         </div>
-        <div ref="diffHost" class="monaco-host diff-host" :class="{ visible: activeDiffPath }" :aria-label="tr('diff.aria')"></div>
+        <div v-if="activeUnsupportedFile && !activeDiffPath" class="unsupported-preview" :aria-label="tr('unsupportedFile.aria')">
+          <span class="codicon codicon-file-binary" aria-hidden="true"></span>
+          <h2>{{ tr('unsupportedFile.title') }}</h2>
+          <p>{{ tr('unsupportedFile.description') }}</p>
+          <small>{{ activeUnsupportedFile.name }} · {{ FileUtils.formatFileSize(activeUnsupportedFile.size) }}</small>
+        </div>
+        <div v-if="activeDiffUnsupportedFile" class="unsupported-preview diff-placeholder" :aria-label="tr('diff.aria')">
+          <span class="codicon codicon-diff-modified" aria-hidden="true"></span>
+          <h2>{{ tr('diff.unsupportedTitle') }}</h2>
+          <p>{{ tr('diff.unsupportedDescription') }}</p>
+          <small>{{ activeDiffUnsupportedFile.path }} · {{ activeDiffUnsupportedFile.deleted ? tr('changes.deleted') : tr('status.unsaved') }}</small>
+        </div>
+        <div ref="diffHost" class="monaco-host diff-host" :class="{ visible: activeDiffPath && !activeDiffUnsupportedFile }" :aria-label="tr('diff.aria')"></div>
       </section>
 
       <footer class="status-bar">
@@ -554,6 +566,12 @@ const messages = {
     "confirm.revert": "确定回滚“{path}”的未保存修改吗？",
     "imagePreview.aria": "图片预览",
     "imagePreview.type": "图片",
+    "unsupportedFile.aria": "不支持文件预览",
+    "unsupportedFile.title": "不支持预览当前文件",
+    "unsupportedFile.description": "此文件不是可编辑文本，编辑器不会读取或修改内容。你仍然可以关闭、标记删除并保存删除。",
+    "unsupportedFile.type": "不支持预览",
+    "diff.unsupportedTitle": "文件内容不支持对比预览",
+    "diff.unsupportedDescription": "此文件有变更，但当前编辑器无法展示具体内容差异。保存后会应用文件级操作。",
     "prompt.newFile": "输入新文件路径",
     "prompt.newFolder": "输入新文件夹路径",
     "error.unsupportedBrowser": "当前浏览器不支持 File System Access API。请使用 Chrome、Edge 或 Arc，并通过 localhost 或 HTTPS 打开页面。",
@@ -727,6 +745,12 @@ const messages = {
     "confirm.revert": "Revert unsaved changes in “{path}”?",
     "imagePreview.aria": "Image Preview",
     "imagePreview.type": "Image",
+    "unsupportedFile.aria": "Unsupported File Preview",
+    "unsupportedFile.title": "Preview is not supported for this file",
+    "unsupportedFile.description": "This file is not editable text, so the editor will not read or change its content. You can still close it, mark it for deletion, and save the deletion.",
+    "unsupportedFile.type": "Unsupported preview",
+    "diff.unsupportedTitle": "File content diff is not supported",
+    "diff.unsupportedDescription": "This file has changes, but the editor cannot display a content diff. Saving will apply the file-level operation.",
     "prompt.newFile": "Enter new file path",
     "prompt.newFolder": "Enter new folder path",
     "error.unsupportedBrowser": "This browser does not support the File System Access API. Use Chrome, Edge, or Arc, and open the page from localhost or HTTPS.",
@@ -871,6 +895,12 @@ const activeFile = computed(() => {
 });
 const activeTextFile = computed(() => isTextFileState(activeFile.value) ? activeFile.value : null);
 const activeImageFile = computed(() => activeFile.value?.fileType === "image" ? activeFile.value : null);
+const activeUnsupportedFile = computed(() => activeFile.value?.fileType === "unsupported" ? activeFile.value : null);
+const activeDiffFile = computed(() => {
+  dirtyRevision.value;
+  return activeDiffPath.value ? openFiles.get(activeDiffPath.value) : null;
+});
+const activeDiffUnsupportedFile = computed(() => activeDiffFile.value && !isTextFileState(activeDiffFile.value) ? activeDiffFile.value : null);
 const activeLanguage = computed({ get: () => activeFile.value?.language || "plaintext", set: (value) => { if (activeFile.value) activeFile.value.language = value; } });
 const dialogIconClass = computed(() => ({
   alert: dialogState.tone === "danger" ? "codicon-error" : "codicon-info",
@@ -1374,7 +1404,7 @@ async function openFile(node) {
     }
     const file = await node.handle.getFile();
     if (FileUtils.isImageFile(file)) return openImageFile(node, file);
-    if (!isReadableTextFile(file)) throw new Error(`${tr("error.unsupportedFile")}: ${node.name}`);
+    if (!isReadableTextFile(file)) return openUnsupportedFile(node, file);
     const content = await file.text();
     const language = getLanguageId(node.name);
     const monacoLanguage = getMonacoLanguageId(language);
@@ -1396,11 +1426,31 @@ async function openFile(node) {
 }
 
 function openImageFile(node, file) {
-  const objectUrl = URL.createObjectURL(file);
-  const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "image", objectUrl, size: file.size, mimeType: file.type, dirty: false, closed: false, language: "plaintext", monacoLanguage: "plaintext" };
-  openFiles.set(node.path, fileState);
+  const fileState = createImageFileState(node, file, { closed: false });
   activateFile(node.path);
   setStatus(tr("status.openedFile", { name: node.name }), `${tr("imagePreview.type")} | ${FileUtils.formatFileSize(file.size)}`);
+  return fileState;
+}
+
+function createImageFileState(node, file, options = {}) {
+  const objectUrl = URL.createObjectURL(file);
+  const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "image", objectUrl, size: file.size, mimeType: file.type, dirty: false, closed: options.closed ?? true, language: "plaintext", monacoLanguage: "plaintext", isNew: false, deleted: false };
+  openFiles.set(node.path, fileState);
+  touchDirtyState();
+  return fileState;
+}
+
+function openUnsupportedFile(node, file) {
+  const fileState = createUnsupportedFileState(node, file, { closed: false });
+  activateFile(node.path);
+  setStatus(tr("status.openedFile", { name: node.name }), `${tr("unsupportedFile.type")} | ${FileUtils.formatFileSize(file.size)}`);
+  return fileState;
+}
+
+function createUnsupportedFileState(node, file, options = {}) {
+  const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "unsupported", size: file.size, mimeType: file.type, dirty: false, closed: options.closed ?? true, language: "plaintext", monacoLanguage: "plaintext", isNew: false, deleted: false };
+  openFiles.set(node.path, fileState);
+  touchDirtyState();
   return fileState;
 }
 
@@ -1422,6 +1472,11 @@ function activateFile(path) {
     setStatus(path, `${tr("imagePreview.type")} | ${FileUtils.formatFileSize(file.size)}`);
     return;
   }
+  if (file.fileType === "unsupported") {
+    editor.value?.setModel(null);
+    setStatus(path, `${tr("unsupportedFile.type")} | ${FileUtils.formatFileSize(file.size)}`);
+    return;
+  }
   editor.value.setModel(file.model);
   editor.value.focus();
   setStatus(path, `${getLanguageLabel(file.language)} | ${file.dirty ? tr("status.unsaved") : tr("status.saved")}`);
@@ -1432,6 +1487,11 @@ function activateDiff(path) {
   if (!file) return;
   activePath.value = path;
   activeDiffPath.value = path;
+  if (!isTextFileState(file)) {
+    diffEditor.value?.setModel(null);
+    setStatus(tr("status.diff", { path }), file.deleted ? tr("changes.deleted") : tr("status.unsaved"));
+    return;
+  }
   diffEditor.value.setModel({ original: file.originalModel, modified: file.model });
   nextTick(() => diffEditor.value?.layout());
   setStatus(tr("status.diff", { path }), file.deleted ? tr("changes.deleted") : `${getLanguageLabel(file.language)} | ${file.dirty ? tr("status.unsaved") : tr("status.saved")}`);
@@ -1482,6 +1542,10 @@ async function saveActiveFile() {
       setStatus(tr("status.deleted", { path }), new Date().toLocaleTimeString(settings.locale));
       return;
     }
+    if (!isTextFileState(file)) {
+      setStatus(tr("error.unsupportedFile"), file.path);
+      return;
+    }
     if (!file.handle) file.handle = markRaw(await getFileHandleForPath(file.path, true));
     const writable = await file.handle.createWritable();
     await writable.write(file.model.getValue());
@@ -1504,7 +1568,7 @@ async function saveActiveFile() {
 }
 
 function changeActiveLanguage() {
-  if (!activeFile.value) return;
+  if (!activeTextFile.value) return;
   activeFile.value.monacoLanguage = getMonacoLanguageId(activeFile.value.language);
   monaco.editor.setModelLanguage(activeFile.value.model, activeFile.value.monacoLanguage);
   if (activeFile.value.originalModel) monaco.editor.setModelLanguage(activeFile.value.originalModel, activeFile.value.monacoLanguage);
@@ -1512,7 +1576,7 @@ function changeActiveLanguage() {
 }
 
 function updateDirtyState(file) {
-  file.dirty = Boolean(file.isNew || file.deleted) || file.model.getValue() !== file.savedValue;
+  file.dirty = Boolean(file.isNew || file.deleted) || (isTextFileState(file) && file.model.getValue() !== file.savedValue);
   openFiles.set(file.path, file);
   touchDirtyState();
 }
@@ -1652,8 +1716,10 @@ async function revertFile(path) {
     return;
   }
   file.deleted = false;
-  file.model.setValue(file.savedValue);
-  file.originalModel?.setValue(file.savedValue);
+  if (isTextFileState(file)) {
+    file.model.setValue(file.savedValue);
+    file.originalModel?.setValue(file.savedValue);
+  }
   file.dirty = false;
   if (file.closed) {
     removeFileState(path);
@@ -1661,7 +1727,7 @@ async function revertFile(path) {
     openFiles.set(path, file);
   }
   touchDirtyState();
-  if (!file.closed && activeDiffPath.value === path) activateDiff(path);
+  if (!file.closed && activeDiffPath.value === path) activateFile(path);
   setStatus(tr("status.reverted", { path }), getLanguageLabel(file.language));
 }
 
@@ -2534,9 +2600,18 @@ function isReadableTextFile(file) {
 }
 
 function normalizeWorkspacePath(path) {
-  const normalized = String(path || "").trim().replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/");
+  const normalized = decodeWorkspacePath(path).trim().replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/");
   if (!normalized || normalized.split("/").some((part) => part === "..")) throw new Error(tr("error.invalidPath"));
   return normalized;
+}
+
+function decodeWorkspacePath(path) {
+  const value = String(path || "");
+  try {
+    return decodeURI(value);
+  } catch {
+    return value;
+  }
 }
 
 function findNodeByPath(nodes, path) {
@@ -2593,6 +2668,26 @@ async function ensureFileState(path, options = {}) {
   openFiles.set(node.path, fileState);
   touchDirtyState();
   return fileState;
+}
+
+async function ensureAnyFileState(path, options = {}) {
+  const normalized = normalizeWorkspacePath(path);
+  const existing = openFiles.get(normalized);
+  if (existing) {
+    existing.closed = options.closed ?? existing.closed;
+    openFiles.set(normalized, existing);
+    touchDirtyState();
+    return existing;
+  }
+  const node = findNodeByPath(tree.value, normalized);
+  if (!node || node.kind !== "file") {
+    if (options.create) return createVirtualFileState(normalized, options);
+    throw new Error(`File not found: ${normalized}`);
+  }
+  const diskFile = await node.handle.getFile();
+  if (FileUtils.isImageFile(diskFile)) return createImageFileState(node, diskFile, options);
+  if (!isReadableTextFile(diskFile)) return createUnsupportedFileState(node, diskFile, options);
+  return ensureFileState(normalized, options);
 }
 
 function createVirtualFileState(path, options = {}) {
@@ -2880,8 +2975,8 @@ function aiToolGetCurrentFile() {
   const file = activeFile.value;
   if (!file) return { summary: "No active file" };
   const selection = editor.value?.getSelection();
-  const selectedText = selection ? file.model.getValueInRange(selection) : "";
-  return { path: file.path, language: file.language, dirty: file.dirty, deleted: Boolean(file.deleted), position: editor.value?.getPosition(), selection: selectedText.slice(0, 8000) };
+  const selectedText = selection && isTextFileState(file) ? file.model.getValueInRange(selection) : "";
+  return { path: file.path, language: file.language, file_type: file.fileType, dirty: file.dirty, deleted: Boolean(file.deleted), position: isTextFileState(file) ? editor.value?.getPosition() : null, selection: selectedText.slice(0, 8000) };
 }
 
 async function aiToolReplaceInFile({ path, old_text: oldText, new_text: newText }) {
@@ -2932,20 +3027,20 @@ async function aiToolDeleteFile(path) {
 }
 
 async function aiToolOpenFile(path) {
-  const file = await ensureFileState(path, { closed: false });
+  const file = await ensureAnyFileState(path, { closed: false });
   file.closed = false;
   activateFile(file.path);
   return { summary: `Opened ${file.path}`, path: file.path };
 }
 
 async function aiToolShowDiff(path) {
-  const file = await ensureFileState(path, { closed: true });
+  const file = await ensureAnyFileState(path, { closed: true });
   activateDiff(file.path);
-  return { summary: `Showing diff for ${file.path}`, path: file.path, dirty: file.dirty };
+  return { summary: `Showing diff for ${file.path}`, path: file.path, file_type: file.fileType, dirty: file.dirty };
 }
 
 async function markFileDeleted(path, options = {}) {
-  const file = await ensureFileState(path, { closed: options.closed ?? true });
+  const file = await ensureAnyFileState(path, { closed: options.closed ?? true });
   if (file.isNew && !file.handle) {
     removeFileState(file.path);
     return file;
@@ -2953,7 +3048,7 @@ async function markFileDeleted(path, options = {}) {
   file.deleted = true;
   file.isNew = false;
   file.closed = options.closed ?? file.closed;
-  file.model.setValue("");
+  if (isTextFileState(file)) file.model.setValue("");
   file.dirty = true;
   openFiles.set(file.path, file);
   touchDirtyState();
@@ -3312,6 +3407,11 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 12px 32px var(--shadow); }
 .code-editor-view .image-preview-meta { display: grid; justify-items: center; gap: 4px; max-width: min(680px, 100%); color: var(--muted); font-size: 12px; text-align: center; }
 .code-editor-view .image-preview-meta strong { max-width: 100%; overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.code-editor-view .unsupported-preview { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px; padding: 28px; overflow: auto; background: var(--editor); color: var(--muted); text-align: center; }
+.code-editor-view .unsupported-preview .codicon { color: var(--accent-strong); font-size: 42px; }
+.code-editor-view .unsupported-preview h2 { margin: 0; color: var(--text); font-size: clamp(18px, 3vw, 28px); font-weight: 650; }
+.code-editor-view .unsupported-preview p { max-width: 560px; margin: 0; line-height: 1.6; }
+.code-editor-view .unsupported-preview small { max-width: min(680px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .empty-state { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 14px; padding: 28px; color: var(--muted); text-align: center; }
 .code-editor-view .empty-state h2 { margin: 0; color: var(--text); font-size: clamp(22px, 4vw, 36px); font-weight: 650; }
 .code-editor-view .empty-state p { max-width: 560px; margin: 0; line-height: 1.6; }
