@@ -881,6 +881,7 @@ const selectedChangePaths = reactive(new Set());
 const activePath = ref("");
 const activeDiffPath = ref("");
 const previewVisible = ref(false);
+const previewContent = ref("");
 const dirtyRevision = ref(0);
 const activeView = ref("explorer");
 const sidePanelVisible = ref(true);
@@ -956,14 +957,6 @@ const activeLanguage = computed({ get: () => activeFile.value?.language || "plai
 const previewMode = computed(() => getPreviewMode(activeTextFile.value));
 const canPreviewActiveFile = computed(() => Boolean(previewMode.value));
 const previewPaneVisible = computed(() => Boolean(previewVisible.value && canPreviewActiveFile.value));
-const previewContent = computed(() => {
-  dirtyRevision.value;
-  const file = activeTextFile.value;
-  if (!file) return "";
-  const content = file.model.getValue();
-  if (previewMode.value === "markdown") return rewritePreviewResourceAttributes(renderMarkdown(content), file);
-  return buildHtmlPreviewDocument(content, file);
-});
 const dialogIconClass = computed(() => ({
   alert: dialogState.tone === "danger" ? "codicon-error" : "codicon-info",
   confirm: dialogState.tone === "danger" ? "codicon-warning" : "codicon-question",
@@ -976,6 +969,7 @@ watch(() => aiMessages.length, () => { nextTick(scrollAiMessagesToBottom); });
 watch(searchMatchCase, () => { if (searchSearched.value && searchQuery.value.trim()) runGlobalSearch(); });
 watch(() => dirtyFiles.value.map((file) => file.path).join("\0"), pruneSelectedChangePaths);
 watch(previewPaneVisible, () => { nextTick(layoutVisibleEditors); });
+watch(() => `${previewPaneVisible.value}\0${activePath.value}\0${dirtyRevision.value}\0${settings.locale}`, updatePreviewContent);
 watch(settings, persistSettings, { deep: true });
 
 onMounted(async () => {
@@ -1030,6 +1024,7 @@ onBeforeUnmount(() => {
   aiAbortController.value?.abort();
   openFiles.forEach((file) => disposeFileModels(file, { force: true }));
   disposeWorkspaceModels({ force: true });
+  revokePreviewResourceUrls();
   editor.value?.dispose();
   diffEditor.value?.dispose();
   document.removeEventListener("click", hideAllContextMenus);
@@ -1052,10 +1047,6 @@ function getPreviewMode(file) {
   return "";
 }
 
-function buildHtmlPreviewDocument(content, file) {
-  return rewritePreviewResourceAttributes(String(content || ""), file);
-}
-
 function togglePreview() {
   if (!canPreviewActiveFile.value) return;
   previewVisible.value = !previewVisible.value;
@@ -1066,28 +1057,90 @@ function layoutVisibleEditors() {
   diffEditor.value?.layout();
 }
 
-function rewritePreviewResourceAttributes(html, file) {
-  return String(html || "").replace(/\b(src|href)\s*=\s*(["'])([^"']+)\2/gi, (match, attribute, quote, value) => {
-    const resolved = getPreviewResourceUrl(value, file);
-    return resolved === value ? match : `${attribute}=${quote}${resolved}${quote}`;
-  });
+let previewRenderSerial = 0;
+let previewResourceObjectUrls = new Map();
+
+async function updatePreviewContent() {
+  const serial = ++previewRenderSerial;
+  const file = activeTextFile.value;
+  if (!previewPaneVisible.value || !file) {
+    previewContent.value = "";
+    replacePreviewResourceUrls(new Map());
+    return;
+  }
+
+  const objectUrls = new Map();
+  const raw = file.model.getValue();
+  const rendered = previewMode.value === "markdown" ? renderMarkdown(raw) : String(raw || "");
+  const resolved = await rewritePreviewResourceAttributes(rendered, file, objectUrls);
+  if (serial !== previewRenderSerial) {
+    revokeObjectUrlMap(objectUrls);
+    return;
+  }
+  previewContent.value = resolved;
+  replacePreviewResourceUrls(objectUrls);
 }
 
-function getPreviewResourceUrl(value, file) {
+async function rewritePreviewResourceAttributes(html, file, objectUrls) {
+  const source = String(html || "");
+  const matches = Array.from(source.matchAll(/\b(src|href)\s*=\s*(["'])([^"']+)\2/gi));
+  if (!matches.length) return source;
+  let output = "";
+  let cursor = 0;
+  for (const match of matches) {
+    const [fullMatch, attribute, quote, value] = match;
+    const resolved = await getPreviewResourceUrl(value, file, objectUrls);
+    output += source.slice(cursor, match.index);
+    output += resolved === value ? fullMatch : `${attribute}=${quote}${resolved}${quote}`;
+    cursor = match.index + fullMatch.length;
+  }
+  return output + source.slice(cursor);
+}
+
+async function getPreviewResourceUrl(value, file, objectUrls) {
   const url = String(value || "").trim();
   if (!url || url.startsWith("#") || url.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(url)) return value;
   const [pathPart] = splitPreviewUrlSuffix(url);
+  if (!pathPart) return value;
   let resourcePath;
   try {
     resourcePath = normalizeWorkspacePath(pathPart.startsWith("/") ? pathPart : joinWorkspacePath(getDirectoryPath(file.path), pathPart));
   } catch {
     return value;
   }
-  const resource = openFiles.get(resourcePath);
-  if (!resource) return value;
+  let resource;
+  try {
+    resource = await ensureAnyFileState(resourcePath, { closed: true });
+  } catch {
+    return value;
+  }
   if (isTextFileState(resource)) return getTextDataUrl(resource);
   if (resource.fileType === "image" && resource.objectUrl) return resource.objectUrl;
+  if (resource.handle) return getPreviewBlobUrl(resource, objectUrls);
   return value;
+}
+
+async function getPreviewBlobUrl(file, objectUrls) {
+  if (objectUrls.has(file.path)) return objectUrls.get(file.path);
+  const diskFile = await file.handle.getFile();
+  const objectUrl = URL.createObjectURL(diskFile);
+  objectUrls.set(file.path, objectUrl);
+  return objectUrl;
+}
+
+function replacePreviewResourceUrls(nextUrls) {
+  const previousUrls = previewResourceObjectUrls;
+  previewResourceObjectUrls = nextUrls;
+  revokeObjectUrlMap(previousUrls);
+}
+
+function revokePreviewResourceUrls() {
+  replacePreviewResourceUrls(new Map());
+}
+
+function revokeObjectUrlMap(urls) {
+  urls.forEach((url) => URL.revokeObjectURL(url));
+  urls.clear();
 }
 
 function splitPreviewUrlSuffix(url) {
