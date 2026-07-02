@@ -916,7 +916,7 @@ const searchSearched = ref(false);
 let searchSerial = 0;
 const aiAgentModelOptions = computed(() => {
   const configured = parseCommaList(settings.ai.agentModels);
-  return uniqueStrings([...(configured.length ? configured : [settings.ai.agentModel, defaultAiSettings.agentModel]), ...aiAvailableModels.value]);
+  return uniqueStrings(configured.length ? configured : [settings.ai.agentModel, defaultAiSettings.agentModel]);
 });
 const aiModelOptions = computed(() => uniqueStrings([settings.ai.completionModel, ...aiAgentModelOptions.value, defaultAiSettings.completionModel, ...aiAvailableModels.value]));
 const aiContextLength = computed(() => formatRecentAiMessages({ includePendingUserMessage: true }).length);
