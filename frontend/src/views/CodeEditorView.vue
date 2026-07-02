@@ -298,7 +298,14 @@
           <p>{{ tr('empty.description') }}</p>
           <button @click="openFolder">{{ tr('action.openFolder') }}</button>
         </div>
-        <div ref="editorHost" class="monaco-host" :class="{ visible: activePath && !activeDiffPath }" :aria-label="tr('editor.aria')"></div>
+        <div ref="editorHost" class="monaco-host" :class="{ visible: activeTextFile && !activeDiffPath }" :aria-label="tr('editor.aria')"></div>
+        <div v-if="activeImageFile && !activeDiffPath" class="image-preview" :aria-label="tr('imagePreview.aria')">
+          <img :src="activeImageFile.objectUrl" :alt="activeImageFile.name" />
+          <div class="image-preview-meta">
+            <strong>{{ activeImageFile.name }}</strong>
+            <span>{{ FileUtils.formatFileSize(activeImageFile.size) }} · {{ activeImageFile.mimeType || tr('imagePreview.type') }}</span>
+          </div>
+        </div>
         <div ref="diffHost" class="monaco-host diff-host" :class="{ visible: activeDiffPath }" :aria-label="tr('diff.aria')"></div>
       </section>
 
@@ -309,7 +316,7 @@
         </div>
         <div class="status-right-group">
           <span id="status-right">{{ status.right }}</span>
-          <select v-model="activeLanguage" :disabled="!activeFile || activeFile.deleted" :aria-label="tr('status.language')" @change="changeActiveLanguage">
+          <select v-model="activeLanguage" :disabled="!activeTextFile || activeFile.deleted" :aria-label="tr('status.language')" @change="changeActiveLanguage">
             <option v-for="language in languageOptions" :key="language.id" :value="language.id">{{ language.label }}</option>
           </select>
         </div>
@@ -337,14 +344,14 @@
 
 <script setup>
 import { computed, defineComponent, h, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
-import "@vscode/codicons/dist/codicon.css";
 import { CdnUtils } from "@/shared/cdn-utils.js";
+import { FileUtils } from "@/shared/file-utils.js";
 import { MarkdownUtils } from "@/shared/markdown-utils.js";
 
 const STORAGE_KEY = "browser-code-editor-settings";
 const SETTINGS_URL_PARAM = "settings";
 const REQUEST_PROXY_PATH = "/api/requestProxy";
-const MONACO_BASE = CdnUtils.monaco.base;
+CdnUtils.loadCodicons().catch((error) => console.error("Failed to load codicons:", error));
 const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Shift+Enter" };
 const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
 const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
@@ -515,6 +522,8 @@ const messages = {
     "confirm.deleteFolderHint": "\n\n该文件夹会被递归删除。",
     "confirm.deleteDirtyHint": "\n\n包含 {count} 个未保存标签，删除后这些修改会丢失。",
     "confirm.revert": "确定回滚“{path}”的未保存修改吗？",
+    "imagePreview.aria": "图片预览",
+    "imagePreview.type": "图片",
     "prompt.newFile": "输入新文件路径",
     "prompt.newFolder": "输入新文件夹路径",
     "error.unsupportedBrowser": "当前浏览器不支持 File System Access API。请使用 Chrome、Edge 或 Arc，并通过 localhost 或 HTTPS 打开页面。",
@@ -528,6 +537,7 @@ const messages = {
     "error.format": "格式化失败",
     "error.invalidPath": "路径不合法",
     "error.invalidName": "名称不合法",
+    "error.unsupportedFile": "不支持打开该文件类型",
     "shortcut.save": "保存",
     "shortcut.format": "格式化文档",
     "shortcut.commandPalette": "命令面板",
@@ -678,6 +688,8 @@ const messages = {
     "confirm.deleteFolderHint": "\n\nThis folder will be deleted recursively.",
     "confirm.deleteDirtyHint": "\n\nIt contains {count} unsaved tab(s). Those changes will be lost.",
     "confirm.revert": "Revert unsaved changes in “{path}”?",
+    "imagePreview.aria": "Image Preview",
+    "imagePreview.type": "Image",
     "prompt.newFile": "Enter new file path",
     "prompt.newFolder": "Enter new folder path",
     "error.unsupportedBrowser": "This browser does not support the File System Access API. Use Chrome, Edge, or Arc, and open the page from localhost or HTTPS.",
@@ -691,6 +703,7 @@ const messages = {
     "error.format": "Failed to format",
     "error.invalidPath": "Invalid path",
     "error.invalidName": "Invalid name",
+    "error.unsupportedFile": "Unsupported file type",
     "shortcut.save": "Save",
     "shortcut.format": "Format Document",
     "shortcut.commandPalette": "Command Palette",
@@ -816,6 +829,8 @@ const activeFile = computed(() => {
   dirtyRevision.value;
   return openFiles.get(activePath.value);
 });
+const activeTextFile = computed(() => activeFile.value?.fileType === "text" ? activeFile.value : null);
+const activeImageFile = computed(() => activeFile.value?.fileType === "image" ? activeFile.value : null);
 const activeLanguage = computed({ get: () => activeFile.value?.language || "plaintext", set: (value) => { if (activeFile.value) activeFile.value.language = value; } });
 
 watch(() => settings.locale, () => { document.documentElement.lang = settings.locale; });
@@ -892,25 +907,7 @@ function tr(key, params = {}) {
 }
 
 function loadMonaco() {
-  return new Promise((resolve, reject) => {
-    if (window.monaco) {
-      resolve(window.monaco);
-      return;
-    }
-
-    const configureAndLoad = () => {
-      window.require.config({ paths: { vs: MONACO_BASE } });
-      window.require(["vs/editor/editor.main"], () => resolve(window.monaco), reject);
-    };
-
-    if (window.require) {
-      configureAndLoad();
-      return;
-    }
-
-    CdnUtils.loadScript(CdnUtils.monaco.loader, () => window.require, "Monaco loader")
-      .then(configureAndLoad, reject);
-  });
+  return CdnUtils.loadMonaco();
 }
 
 function showPanel(view) {
@@ -1169,7 +1166,8 @@ function createOriginalModel(content, monacoLanguage, path) {
 async function ensureWorkspaceModelForNode(node, token) {
   if (token?.isCancellationRequested || !node || node.kind !== "file") return null;
   const openFileState = openFiles.get(node.path);
-  if (openFileState && !openFileState.deleted) return openFileState.model;
+  if (openFileState && !openFileState.deleted) return openFileState.fileType === "text" ? openFileState.model : null;
+  if (FileUtils.isImageFileName(node.name)) return null;
   if (!node.handle) return null;
   const existing = monaco.editor.getModel(getWorkspaceModelUri(node.path));
   if (existing) {
@@ -1264,14 +1262,15 @@ async function openFile(node) {
       return openFiles.get(node.path);
     }
     const file = await node.handle.getFile();
-    if (!isReadableTextFile(file) && !confirm(tr("confirm.binary", { name: node.name }))) return;
+    if (FileUtils.isImageFile(file)) return openImageFile(node, file);
+    if (!isReadableTextFile(file)) throw new Error(`${tr("error.unsupportedFile")}: ${node.name}`);
     const content = await file.text();
     const language = getLanguageId(node.name);
     const monacoLanguage = getMonacoLanguageId(language);
     const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
     workspaceModelPaths.delete(node.path);
     const originalModel = createOriginalModel(content, monacoLanguage, node.path);
-    const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), model, originalModel, savedValue: content, dirty: false, closed: false, language, monacoLanguage };
+    const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "text", model, originalModel, savedValue: content, dirty: false, closed: false, language, monacoLanguage };
     fileState.modelContentDisposable = model.onDidChangeContent(() => {
       updateDirtyState(fileState);
     });
@@ -1283,6 +1282,15 @@ async function openFile(node) {
     reportError("error.openFile", error);
     return null;
   }
+}
+
+function openImageFile(node, file) {
+  const objectUrl = URL.createObjectURL(file);
+  const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "image", objectUrl, size: file.size, mimeType: file.type, dirty: false, closed: false, language: "plaintext", monacoLanguage: "plaintext" };
+  openFiles.set(node.path, fileState);
+  activateFile(node.path);
+  setStatus(tr("status.openedFile", { name: node.name }), `${tr("imagePreview.type")} | ${FileUtils.formatFileSize(file.size)}`);
+  return fileState;
 }
 
 function activateFile(path) {
@@ -1298,6 +1306,11 @@ function activateFile(path) {
   activeDiffPath.value = "";
   diffEditor.value?.setModel(null);
   activePath.value = path;
+  if (file.fileType === "image") {
+    editor.value?.setModel(null);
+    setStatus(path, `${tr("imagePreview.type")} | ${FileUtils.formatFileSize(file.size)}`);
+    return;
+  }
   editor.value.setModel(file.model);
   editor.value.focus();
   setStatus(path, `${getLanguageLabel(file.language)} | ${file.dirty ? tr("status.unsaved") : tr("status.saved")}`);
@@ -2219,7 +2232,7 @@ function getPrettierConfig(language) {
 
 async function loadPrettierBundle(pluginNames) {
   if (!prettierStandalonePromise) {
-    prettierStandalonePromise = CdnUtils.loadScript(CdnUtils.prettier.standalone, () => window.prettier, "Prettier standalone");
+    prettierStandalonePromise = CdnUtils.loadPrettierStandalone();
   }
   const [prettier, plugins] = await Promise.all([
     prettierStandalonePromise,
@@ -2230,7 +2243,7 @@ async function loadPrettierBundle(pluginNames) {
 
 function loadPrettierPlugin(name) {
   if (!prettierPluginPromises.has(name)) {
-    prettierPluginPromises.set(name, CdnUtils.loadScript(CdnUtils.prettier.plugin(name), () => window.prettierPlugins?.[name], `Prettier plugin ${name}`));
+    prettierPluginPromises.set(name, CdnUtils.loadPrettierPlugin(name));
   }
   return prettierPluginPromises.get(name);
 }
@@ -2360,7 +2373,7 @@ function shouldHideName(name) {
 }
 
 function isReadableTextFile(file) {
-  return file.size <= WORKSPACE_MODEL_MAX_FILE_SIZE && (!file.type || file.type.startsWith("text/") || Boolean(getLanguageId(file.name)));
+  return file.size <= WORKSPACE_MODEL_MAX_FILE_SIZE && FileUtils.isTextFile(file);
 }
 
 function normalizeWorkspacePath(path) {
@@ -2396,7 +2409,10 @@ function listTreeLevel(nodes, maxItems = 200) {
 async function ensureFileState(path, options = {}) {
   const normalized = normalizeWorkspacePath(path);
   const existing = openFiles.get(normalized);
-  if (existing) return existing;
+  if (existing) {
+    if (existing.fileType !== "text") throw new Error(`File is not readable text: ${normalized}`);
+    return existing;
+  }
   const node = findNodeByPath(tree.value, normalized);
   if (!node || node.kind !== "file") {
     if (options.create) return createVirtualFileState(normalized, options);
@@ -2669,6 +2685,10 @@ function closeOpenFilesUnderPath(path) {
 }
 
 function disposeFileModels(file, { force = false } = {}) {
+  if (file.objectUrl) {
+    URL.revokeObjectURL(file.objectUrl);
+    file.objectUrl = "";
+  }
   file.modelContentDisposable?.dispose();
   if (force || !workspaceModelPaths.has(file.path)) {
     file.model?.dispose();
@@ -2684,7 +2704,7 @@ function countTreeNodes(nodes) {
 
 function getLanguageId(fileName) {
   const name = String(fileName || "").split(/[\\/]/).pop().toLowerCase();
-  const extension = name.includes(".") ? name.split(".").pop() : "";
+  const extension = FileUtils.getFileExtension(name);
   const index = getMonacoLanguageIndex();
   return index.byFileName.get(name) || index.byExtension.get(extension) || "plaintext";
 }
@@ -2965,6 +2985,10 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .editor-stage { position: relative; min-width: 0; min-height: 0; }
 .code-editor-view .monaco-host { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
 .code-editor-view .monaco-host.visible { opacity: 1; pointer-events: auto; }
+.code-editor-view .image-preview { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; align-items: center; justify-items: center; gap: 18px; padding: 24px; overflow: auto; background: var(--editor); }
+.code-editor-view .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 12px 32px var(--shadow); }
+.code-editor-view .image-preview-meta { display: grid; justify-items: center; gap: 4px; max-width: min(680px, 100%); color: var(--muted); font-size: 12px; text-align: center; }
+.code-editor-view .image-preview-meta strong { max-width: 100%; overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .empty-state { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 14px; padding: 28px; color: var(--muted); text-align: center; }
 .code-editor-view .empty-state h2 { margin: 0; color: var(--text); font-size: clamp(22px, 4vw, 36px); font-weight: 650; }
 .code-editor-view .empty-state p { max-width: 560px; margin: 0; line-height: 1.6; }

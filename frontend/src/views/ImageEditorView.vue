@@ -245,6 +245,7 @@
 <script>
 import { ref, watch, nextTick, onUnmounted } from 'vue';
 import { CommonUtils } from '@/shared/common-utils.js';
+import { CdnUtils } from '@/shared/cdn-utils.js';
 import { ImageUtils } from '@/shared/image-utils.js';
 import { CommonComponents } from '@/shared/common-components.js';
 
@@ -261,6 +262,7 @@ export default {
                 const fileInput = ref(null);
                 const cropperImage = ref(null);
                 let cropper = null;
+                let CropperClass = null;
 
                 const images = ref([]);
                 const selectedImage = ref(null);
@@ -322,10 +324,10 @@ export default {
 
                     selectedImage.value = images.value[currentIndex.value];
                     await nextTick();
-                    initCropper();
+                    await initCropper();
                 };
 
-                const initCropper = () => {
+                const initCropper = async () => {
                     if (cropper) {
                         cropper.destroy();
                         cropper = null;
@@ -333,7 +335,15 @@ export default {
 
                     if (!cropperImage.value || !selectedImage.value) return;
 
-                    cropper = new Cropper(cropperImage.value, {
+                    try {
+                        CropperClass = CropperClass || await CdnUtils.loadCropper();
+                    } catch (error) {
+                        console.error('Failed to load Cropper:', error);
+                        showToast(`图片裁剪工具加载失败: ${error.message}`, 'error');
+                        return;
+                    }
+
+                    cropper = new CropperClass(cropperImage.value, {
                         aspectRatio: isNaN(aspectRatio.value) ? NaN : aspectRatio.value,
                         viewMode: 1,
                         autoCropArea: 0.8,
@@ -401,7 +411,7 @@ export default {
                             selectedImage.value = result;
                             await nextTick();
                             if (operation.value === 'crop') {
-                                initCropper();
+                                await initCropper();
                             }
                             showToast('处理完成');
                         }
@@ -610,7 +620,7 @@ export default {
                     
                     await nextTick();
                     if (operation.value === 'crop') {
-                        initCropper();
+                        await initCropper();
                     }
                     showToast('已还原到原始图片');
                 };

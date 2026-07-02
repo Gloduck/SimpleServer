@@ -303,6 +303,13 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { CommonUtils } from '@/shared/common-utils.js';
 import { CommonComponents } from '@/shared/common-components.js';
+import { CdnUtils } from '@/shared/cdn-utils.js';
+
+const VDITOR_CDN_BASE = CdnUtils.vditor.base;
+
+function loadVditor() {
+    return CdnUtils.loadVditor();
+}
 
 // 文件树组件
 const FileTreeItem = {
@@ -1257,9 +1264,11 @@ export default {
 
             let vditor = null;
 
-            const initVditor = () => {
+            const initVditor = async () => {
+                const Vditor = await loadVditor();
                 vditor = new Vditor('vditor', {
                     mode: 'wysiwyg',
+                    cdn: VDITOR_CDN_BASE,
                     height: '100%',
                     placeholder: '选择文件开始编辑，或新建一个文件...',
                     toolbarConfig: {pin: true},
@@ -1416,11 +1425,16 @@ export default {
                 }
             };
 
-            onMounted(() => {
+            onMounted(async () => {
                 applyConfigFromUrl();
                 loadConfig();
-                initVditor();
-                tryConnectToMdSource();
+                try {
+                    await initVditor();
+                    tryConnectToMdSource();
+                } catch (error) {
+                    console.error('Failed to initialize Vditor:', error);
+                    showToast(`Markdown 编辑器加载失败: ${error.message}`, 'error');
+                }
             });
 
             onBeforeUnmount(() => {
