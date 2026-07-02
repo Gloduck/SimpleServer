@@ -2525,7 +2525,7 @@ async function compressAiContext() {
 
 async function runAiAgent(prompt, signal) {
   const conversation = [{ role: "user", content: buildAgentPrompt(prompt) }];
-  for (let round = 0; round < 8; round += 1) {
+  for (let round = 0; round < 10; round += 1) {
     const payload = { model: settings.ai.agentModel.trim(), instructions: getAgentInstructions(), input: conversation, tools: getAiToolDefinitions() };
     if (settings.ai.reasoningEffort && settings.ai.reasoningEffort !== "default") payload.reasoning = { effort: settings.ai.reasoningEffort };
     const response = await callOpenAiResponses(payload, signal);
@@ -2583,6 +2583,7 @@ function getAgentInstructions() {
     "Use tools to inspect and edit the workspace. Never claim a file changed unless a tool reports success.",
     "All edit tools modify only in-memory editor models. The user must save files manually; new files created by write_file and files marked by delete_file are not written to disk until saved by the user.",
     "Resolve references like 'the file you created' from Recent chat and AI-touched files before using the current editor file. If multiple files match, ask a short clarification instead of editing or deleting the current file by default.",
+    "You have at most 10 tool-call rounds per user request; batch related reads and edits, avoid retry loops, and finish with the best available result before exhausting the limit.",
     "When inspecting several known files, prefer one read_files call over many read_file calls.",
     "Use refresh_tree when you need to rescan the workspace file tree before locating files.",
     "When applying several local edits, prefer one replace_in_files call over many replace_in_file calls.",
@@ -2643,7 +2644,7 @@ function getAiToolDefinitions() {
     { type: "function", name: "run_javascript", description: "Execute a JavaScript snippet in an isolated browser Web Worker for calculations, parsing, or transforming provided input data. The code is the body of an async function with an input variable available; use return to produce a result. No DOM/editor/workspace access.", parameters: { type: "object", properties: { code: { type: "string", description: "JavaScript async function body. Example: return input.items.map(x => x * 2);" }, input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." }, timeout_ms: { type: "number", description: "Optional timeout in milliseconds. Defaults to 2000, max 5000." } }, required: ["code"] } },
     { type: "function", name: "get_current_file", description: "Get current editor file, cursor and selected text.", parameters: { type: "object", properties: {} } },
     { type: "function", name: "replace_in_file", description: "Replace the first exact text occurrence in a file in memory. Use this for minimal local edits; do not pass whole-file old_text/new_text unless the file is tiny and no smaller exact edit is possible.", parameters: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } },
-    { type: "function", name: "replace_in_files", description: "Apply multiple exact local replacements in one call. Prefer this after batch-reading files and planning several patch hunks.", parameters: { type: "object", properties: { edits: { type: "array", items: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } } }, required: ["edits"] } },
+    { type: "function", name: "replace_in_files", description: "Apply multiple exact local replacements in one call. Prefer this after batch-reading files and planning several patch hunks. Returns per-edit results; individual edit failures do not abort the whole batch.", parameters: { type: "object", properties: { edits: { type: "array", items: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } } }, required: ["edits"] } },
     { type: "function", name: "write_file", description: "Create or replace a whole file in memory. Use only for new files, tiny files, generated files, or when exact local replacement is not stable. Does not save to disk.", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
     { type: "function", name: "delete_file", description: "Mark a file for deletion in memory. Existing disk files are deleted only when the user saves the deletion; unsaved new files are removed immediately from memory.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "open_file", description: "Open a file in the editor.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
@@ -3333,10 +3334,24 @@ async function aiToolReplaceInFile({ path, old_text: oldText, new_text: newText 
 async function aiToolReplaceInFiles({ edits } = {}) {
   if (!Array.isArray(edits) || !edits.length) throw new Error("edits is required");
   const results = [];
-  for (const edit of edits.slice(0, 50)) {
-    results.push(await aiToolReplaceInFile(edit));
+  for (const [index, edit] of edits.slice(0, 50).entries()) {
+    const editNumber = index + 1;
+    try {
+      results.push({ index, edit_number: editNumber, ok: true, ...(await aiToolReplaceInFile(edit)) });
+    } catch (error) {
+      results.push({
+        index,
+        edit_number: editNumber,
+        ok: false,
+        path: edit?.path || null,
+        error: error.message || String(error),
+      });
+    }
   }
-  return { summary: `Applied ${results.length} edit(s)`, results };
+  const applied = results.filter((result) => result.ok).length;
+  const failed = results.length - applied;
+  const failedEditNumbers = results.filter((result) => !result.ok).map((result) => result.edit_number);
+  return { summary: `Applied ${applied}/${results.length} edit(s)${failed ? `; failed edit(s): ${failedEditNumbers.join(", ")}` : ""}`, applied, failed, failed_edit_numbers: failedEditNumbers, results };
 }
 
 async function aiToolWriteFile({ path, content }) {
