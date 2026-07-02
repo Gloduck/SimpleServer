@@ -2583,8 +2583,8 @@ function getAiToolDefinitions() {
   const tools = [
     { type: "function", name: "list_files", description: "List workspace files and directories. By default only lists the first level; set recursive to true to include descendants.", parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root." }, max_items: { type: "number", description: "Maximum items to return." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
     { type: "function", name: "refresh_tree", description: "Refresh the workspace file tree from disk. Use this before locating newly created, deleted, or externally changed files.", parameters: { type: "object", properties: { collapse_all: { type: "boolean", description: "Whether to collapse all directories after refreshing. Defaults to false." } } } },
-    { type: "function", name: "read_file", description: "Read a text file. Dirty in-memory content is returned when present.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
-    { type: "function", name: "read_files", description: "Read multiple text files in one call. Dirty in-memory content is returned when present.", parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, max_chars_per_file: { type: "number" } }, required: ["paths"] } },
+    { type: "function", name: "read_file", description: "Read a text file. Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads.", parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "number", description: "Optional 1-based starting line number. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return." } }, required: ["path"] } },
+    { type: "function", name: "read_files", description: "Read multiple text files in one call. Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads applied to each file.", parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, offset: { type: "number", description: "Optional 1-based starting line number applied to each file. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return per file." }, max_chars_per_file: { type: "number" } }, required: ["paths"] } },
     { type: "function", name: "read_image", description: "Read an image file and attach it to the next model turn for visual analysis. Use this for screenshots, diagrams, mockups, and other workspace image files.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "search_text", description: "Search text across workspace files.", parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string" }, max_results: { type: "number" } }, required: ["query"] } },
     { type: "function", name: "run_javascript", description: "Execute a JavaScript snippet in an isolated browser Web Worker for calculations, parsing, or transforming provided input data. The code is the body of an async function with an input variable available; use return to produce a result. No DOM/editor/workspace access.", parameters: { type: "object", properties: { code: { type: "string", description: "JavaScript async function body. Example: return input.items.map(x => x * 2);" }, input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." }, timeout_ms: { type: "number", description: "Optional timeout in milliseconds. Defaults to 2000, max 5000." } }, required: ["code"] } },
@@ -2611,7 +2611,7 @@ async function runAiToolCall(call, args = {}) {
     switch (call.name) {
       case "list_files": return okTool(await aiToolListFiles(args));
       case "refresh_tree": return okTool(await aiToolRefreshTree(args));
-      case "read_file": return okTool(await aiToolReadFile(args.path));
+      case "read_file": return okTool(await aiToolReadFile(args));
       case "read_files": return okTool(await aiToolReadFiles(args));
       case "search_text": return okTool(await aiToolSearchText(args));
       case "run_javascript": return await aiToolRunJavaScript(args);
@@ -2982,11 +2982,12 @@ async function aiToolRefreshTree({ collapse_all: collapseAll = false } = {}) {
   return { summary: `Refreshed ${count} item(s)`, count };
 }
 
-async function aiToolReadFile(path) {
+async function aiToolReadFile({ path, offset, limit } = {}) {
   const file = await ensureFileState(path, { closed: true });
   const content = file.model.getValue();
   const maxLength = 120000;
-  return { path: file.path, language: file.language, dirty: file.dirty, deleted: Boolean(file.deleted), truncated: content.length > maxLength, content: content.slice(0, maxLength) };
+  const partial = getLineBasedContentSlice(content, { offset, limit, maxChars: maxLength });
+  return { path: file.path, language: file.language, dirty: file.dirty, deleted: Boolean(file.deleted), ...partial };
 }
 
 async function aiToolReadImage(path) {
@@ -3009,16 +3010,39 @@ async function aiToolReadImage(path) {
   return { path: normalized, mimeType, size: file.size, dataUrl };
 }
 
-async function aiToolReadFiles({ paths, max_chars_per_file: maxCharsPerFile = 60000 } = {}) {
+async function aiToolReadFiles({ paths, offset, limit, max_chars_per_file: maxCharsPerFile = 60000 } = {}) {
   if (!Array.isArray(paths) || !paths.length) throw new Error("paths is required");
-  const limit = Math.max(1000, Math.min(Number(maxCharsPerFile) || 60000, 120000));
+  const maxChars = Math.max(1000, Math.min(Number(maxCharsPerFile) || 60000, 120000));
   const files = [];
   for (const path of paths.slice(0, 20)) {
     const file = await ensureFileState(path, { closed: true });
     const content = file.model.getValue();
-    files.push({ path: file.path, language: file.language, dirty: file.dirty, deleted: Boolean(file.deleted), truncated: content.length > limit, content: content.slice(0, limit) });
+    files.push({ path: file.path, language: file.language, dirty: file.dirty, deleted: Boolean(file.deleted), ...getLineBasedContentSlice(content, { offset, limit, maxChars }) });
   }
   return { summary: `Read ${files.length} file(s)`, files };
+}
+
+function getLineBasedContentSlice(content, { offset, limit, maxChars }) {
+  const text = String(content ?? "");
+  const maxLength = Math.max(1, Math.min(Number(maxChars) || 120000, 120000));
+  const hasLineRange = offset != null || limit != null;
+  if (!hasLineRange) return { truncated: text.length > maxLength, content: text.slice(0, maxLength) };
+
+  const lines = text.split(/\r?\n/);
+  const totalLines = lines.length;
+  const startLine = Math.max(1, Math.floor(Number(offset) || 1));
+  const startIndex = Math.min(startLine - 1, totalLines);
+  const maxLines = limit == null ? totalLines - startIndex : Math.max(1, Math.floor(Number(limit) || 1));
+  const endIndex = Math.min(totalLines, startIndex + maxLines);
+  const sliced = lines.slice(startIndex, endIndex).join("\n");
+  const truncatedByChars = sliced.length > maxLength;
+  return {
+    start_line: startIndex < totalLines ? startIndex + 1 : totalLines + 1,
+    end_line: endIndex,
+    total_lines: totalLines,
+    truncated: startIndex > 0 || endIndex < totalLines || truncatedByChars,
+    content: sliced.slice(0, maxLength),
+  };
 }
 
 async function aiToolSearchText({ query, path = "", max_results: maxResults = 30 } = {}) {
