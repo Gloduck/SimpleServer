@@ -261,7 +261,7 @@
                             <p class="text-gray-500">此仓库没有README文件</p>
                         </div>
 
-                        <div v-else class="markdown-body" v-html="renderMarkdown(readmeContent)"></div>
+                        <div v-else v-html="renderMarkdown(readmeContent)"></div>
                     </div>
                 </div>
             </div>
@@ -275,7 +275,7 @@
                 <div class="space-y-6">
                     <div class="bg-neutral p-4 rounded-lg">
                         <h4 class="text-sm text-gray-500 mb-1">版本说明</h4>
-                        <div v-if="selectedRelease.body" class="markdown-body text-sm"
+                        <div v-if="selectedRelease.body" class="text-sm"
                             v-html="renderMarkdown(selectedRelease.body)"></div>
                         <div v-else class="text-gray-500 italic">此版本没有说明</div>
                     </div>
@@ -377,6 +377,7 @@
 <script>
 import { ref, onMounted } from 'vue';
 import { CommonUtils } from '@/shared/common-utils.js';
+import { MarkdownUtils } from '@/shared/markdown-utils.js';
 import { CommonComponents } from '@/shared/common-components.js';
 
 export default {
@@ -623,24 +624,7 @@ export default {
                     }
                 };
 
-                // 渲染Markdown
-                const renderMarkdown = (markdown) => {
-                    if (!markdown) return '';
-
-                    // 配置marked
-                    marked.setOptions({
-                        gfm: true,
-                        breaks: true,
-                        highlight: function (code, lang) {
-                            if (lang && hljs.getLanguage(lang)) {
-                                return hljs.highlight(code, { language: lang }).value;
-                            }
-                            return hljs.highlightAuto(code).value;
-                        }
-                    });
-
-                    return marked.parse(markdown);
-                };
+                const renderMarkdown = MarkdownUtils.renderMarkdown;
 
                 // 显示发布版本详情
                 const showReleaseDetail = (release) => {
@@ -718,28 +702,3 @@ export default {
             }
 };
 </script>
-
-<style>
-.markdown-body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-            font-size: 16px;
-            line-height: 1.5;
-            word-wrap: break-word;
-        }
-        .markdown-body code {
-            padding: 0.2em 0.4em;
-            margin: 0;
-            font-size: 85%;
-            background-color: rgba(175, 184, 193, 0.2);
-            border-radius: 6px;
-        }
-        .markdown-body pre {
-            padding: 16px;
-            overflow: auto;
-            font-size: 85%;
-            line-height: 1.45;
-            background-color: #f6f8fa;
-            border-radius: 6px;
-            margin-bottom: 16px;
-        }
-</style>

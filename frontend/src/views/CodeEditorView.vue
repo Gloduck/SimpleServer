@@ -280,6 +280,7 @@
 <script setup>
 import { computed, defineComponent, h, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
 import "@vscode/codicons/dist/codicon.css";
+import { MarkdownUtils } from "@/shared/markdown-utils.js";
 
 const STORAGE_KEY = "browser-code-editor-settings";
 const SETTINGS_URL_PARAM = "settings";
@@ -606,6 +607,7 @@ const languageOptions = [
 ].map(([id, label]) => ({ id, label }));
 
 const aiReasoningEfforts = ["default", "low", "medium", "high", "xhigh"];
+const renderMarkdown = MarkdownUtils.renderMarkdown;
 
 const shortcutItems = [
   { key: "save", labelKey: "shortcut.save" },
@@ -1424,90 +1426,12 @@ function handleAiPromptKeydown(event) {
   sendAiPrompt();
 }
 
-function renderMarkdown(content) {
-  const lines = String(content || "").replace(/\r\n?/g, "\n").split("\n");
-  const html = [];
-  let listType = "";
-  let codeLines = null;
-
-  const closeList = () => {
-    if (!listType) return;
-    html.push(`</${listType}>`);
-    listType = "";
-  };
-
-  for (const line of lines) {
-    const fence = line.match(/^```/);
-    if (fence) {
-      if (codeLines) {
-        html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-        codeLines = null;
-      } else {
-        closeList();
-        codeLines = [];
-      }
-      continue;
-    }
-    if (codeLines) {
-      codeLines.push(line);
-      continue;
-    }
-    if (!line.trim()) {
-      closeList();
-      continue;
-    }
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      closeList();
-      html.push(`<h${heading[1].length}>${renderInlineMarkdown(heading[2])}</h${heading[1].length}>`);
-      continue;
-    }
-    const bullet = line.match(/^\s*[-*+]\s+(.+)$/);
-    if (bullet) {
-      if (listType !== "ul") {
-        closeList();
-        listType = "ul";
-        html.push("<ul>");
-      }
-      html.push(`<li>${renderInlineMarkdown(bullet[1])}</li>`);
-      continue;
-    }
-    const numbered = line.match(/^\s*\d+\.\s+(.+)$/);
-    if (numbered) {
-      if (listType !== "ol") {
-        closeList();
-        listType = "ol";
-        html.push("<ol>");
-      }
-      html.push(`<li>${renderInlineMarkdown(numbered[1])}</li>`);
-      continue;
-    }
-    const quote = line.match(/^>\s?(.+)$/);
-    closeList();
-    html.push(quote ? `<blockquote>${renderInlineMarkdown(quote[1])}</blockquote>` : `<p>${renderInlineMarkdown(line)}</p>`);
-  }
-  if (codeLines) html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-  closeList();
-  return html.join("");
-}
-
-function renderInlineMarkdown(content) {
-  return escapeHtml(content)
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
-}
-
 function formatJsonForDisplay(value) {
   try {
     return JSON.stringify(value ?? null, null, 2);
   } catch {
     return String(value ?? "");
   }
-}
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]);
 }
 
 function registerInlineCompletions() {
@@ -2563,18 +2487,7 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .ai-tool-details { display: grid; gap: 8px; }
 .code-editor-view .ai-tool-details strong { display: block; margin-bottom: 4px; }
 .code-editor-view .ai-tool-details pre { max-height: 240px; margin: 0; overflow: auto; padding: 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--editor); color: var(--text); font-family: Consolas, 'Courier New', monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
-.code-editor-view .ai-message-content { color: var(--text); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
-.code-editor-view .ai-message-content > * { margin: 0 0 7px; }
-.code-editor-view .ai-message-content > *:last-child { margin-bottom: 0; }
-.code-editor-view .ai-message-content h1,
-.code-editor-view .ai-message-content h2,
-.code-editor-view .ai-message-content h3 { color: var(--text); font-size: 13px; line-height: 1.35; }
-.code-editor-view .ai-message-content ul,
-.code-editor-view .ai-message-content ol { padding-left: 18px; }
-.code-editor-view .ai-message-content blockquote { padding-left: 9px; border-left: 2px solid var(--border); color: var(--muted); }
-.code-editor-view .ai-message-content pre { margin: 0 0 7px; overflow: auto; padding: 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--editor); color: var(--text); }
-.code-editor-view .ai-message-content code { font-family: Consolas, 'Courier New', monospace; font-size: 12px; }
-.code-editor-view .ai-message-content :not(pre) > code { padding: 1px 4px; border-radius: 3px; background: var(--input); }
+.code-editor-view .ai-message-content { color: var(--text); font-size: 12px; }
 .code-editor-view .ai-chat-form { display: grid; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--border); background: var(--panel); }
 .code-editor-view .ai-chat-form textarea { width: 100%; resize: vertical; min-height: 78px; max-height: 180px; border: 1px solid var(--border); border-radius: 5px; background: var(--input); color: var(--text); padding: 8px; line-height: 1.4; }
 .code-editor-view .ai-chat-form button { padding: 7px 10px; }
