@@ -362,6 +362,7 @@ const AI_COMPLETION_MANUAL_TRIGGER_WINDOW_MS = 2000;
 const AI_COMPLETION_MANUAL_PREFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_SUFFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_MAX_OUTPUT_TOKENS = 512;
+const AI_IMAGE_MAX_FILE_SIZE = 20 * 1024 * 1024;
 const WORKSPACE_MODEL_MAX_FILE_SIZE = 5 * 1024 * 1024;
 const WORKSPACE_FILE_ACTION_LIMIT = 1000;
 const WORKSPACE_REFERENCE_FILE_LIMIT = 2000;
@@ -2038,14 +2039,47 @@ async function runAiAgent(prompt, signal) {
     const toolCalls = extractFunctionCalls(response);
     if (!toolCalls.length) return;
     conversation.push(...(response.output || []));
+    const imageInputs = [];
     for (const call of toolCalls) {
       const args = parseAiToolArguments(call);
+      if (call.name === "read_image") {
+        const result = await runAiReadImageToolCall(args, imageInputs);
+        addAiMessage("tool", result.summary || "", { expanded: false, tool: { name: call.name, ok: result.ok, args, result } });
+        conversation.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
+        continue;
+      }
       const result = await runAiToolCall(call, args);
       addAiMessage("tool", result.summary || "", { expanded: false, tool: { name: call.name, ok: result.ok, args, result } });
       conversation.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
     }
+    if (imageInputs.length) conversation.push(buildImageInputMessage(imageInputs));
   }
   addAiMessage("assistant", "Reached the tool-call round limit. Review the current changes before continuing.");
+}
+
+async function runAiReadImageToolCall(args, imageInputs) {
+  try {
+    const image = await aiToolReadImage(args.path);
+    imageInputs.push(image);
+    return {
+      ok: true,
+      summary: `Attached image ${image.path} to the next model turn`,
+      path: image.path,
+      mime_type: image.mimeType,
+      size: image.size,
+    };
+  } catch (error) {
+    return { ok: false, summary: error.message || String(error) };
+  }
+}
+
+function buildImageInputMessage(images) {
+  const content = [];
+  images.forEach((image) => {
+    content.push({ type: "input_text", text: `Image attached from read_image: ${image.path}` });
+    content.push({ type: "input_image", image_url: image.dataUrl, detail: "auto" });
+  });
+  return { role: "user", content };
 }
 
 function getAgentInstructions() {
@@ -2058,6 +2092,7 @@ function getAgentInstructions() {
     "When applying several local edits, prefer one replace_in_files call over many replace_in_file calls.",
     "Prefer replace_in_file with exact old_text and minimal new_text for local edits, similar to patch hunks.",
     "Use write_file only for new files, tiny files, generated files, or when no stable exact local replacement is possible.",
+    "Use read_image when the user asks you to inspect an image file; the tool attaches the image to the next model turn as visual input.",
     "Prefer small, targeted edits. Explain changed files briefly after tool work is complete; do not paste whole modified files in chat.",
   ];
   if (isBackendEnabled()) {
@@ -2105,6 +2140,7 @@ function getAiToolDefinitions() {
     { type: "function", name: "list_files", description: "List workspace files and directories. By default only lists the first level; set recursive to true to include descendants.", parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root." }, max_items: { type: "number", description: "Maximum items to return." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
     { type: "function", name: "read_file", description: "Read a text file. Dirty in-memory content is returned when present.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "read_files", description: "Read multiple text files in one call. Dirty in-memory content is returned when present.", parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, max_chars_per_file: { type: "number" } }, required: ["paths"] } },
+    { type: "function", name: "read_image", description: "Read an image file and attach it to the next model turn for visual analysis. Use this for screenshots, diagrams, mockups, and other workspace image files.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "search_text", description: "Search text across workspace files.", parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string" }, max_results: { type: "number" } }, required: ["query"] } },
     { type: "function", name: "get_current_file", description: "Get current editor file, cursor and selected text.", parameters: { type: "object", properties: {} } },
     { type: "function", name: "replace_in_file", description: "Replace the first exact text occurrence in a file in memory. Use this for minimal local edits; do not pass whole-file old_text/new_text unless the file is tiny and no smaller exact edit is possible.", parameters: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } },
@@ -2462,6 +2498,26 @@ async function aiToolReadFile(path) {
   const content = file.model.getValue();
   const maxLength = 120000;
   return { path: file.path, language: file.language, dirty: file.dirty, deleted: Boolean(file.deleted), truncated: content.length > maxLength, content: content.slice(0, maxLength) };
+}
+
+async function aiToolReadImage(path) {
+  const normalized = normalizeWorkspacePath(path);
+  const opened = openFiles.get(normalized);
+  let file;
+  if (opened) {
+    if (opened.fileType !== "image") throw new Error(`File is not an image: ${normalized}`);
+    if (!opened.handle) throw new Error(`Image has no readable file handle: ${normalized}`);
+    file = await opened.handle.getFile();
+  } else {
+    const node = findNodeByPath(tree.value, normalized);
+    if (!node || node.kind !== "file") throw new Error(`File not found: ${normalized}`);
+    file = await node.handle.getFile();
+  }
+  if (!FileUtils.isImageFile(file)) throw new Error(`File is not an image: ${normalized}`);
+  if (file.size > AI_IMAGE_MAX_FILE_SIZE) throw new Error(`Image is too large: ${normalized}`);
+  const mimeType = FileUtils.getImageMimeType(file.name || normalized, file.type);
+  const dataUrl = FileUtils.normalizeImageDataUrl(await FileUtils.readFileAsDataUrl(file), mimeType);
+  return { path: normalized, mimeType, size: file.size, dataUrl };
 }
 
 async function aiToolReadFiles({ paths, max_chars_per_file: maxCharsPerFile = 60000 } = {}) {

@@ -50,6 +50,42 @@ function formatFileSize(bytes) {
     return `${parseFloat((bytes / Math.pow(unit, index)).toFixed(2))} ${units[index]}`;
 }
 
+function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+    });
+}
+
+function normalizeImageDataUrl(dataUrl, mimeType) {
+    const value = String(dataUrl || '');
+    const commaIndex = value.indexOf(',');
+    if (!value.startsWith('data:') || commaIndex === -1) throw new Error('Failed to encode image as data URL');
+    if (/^data:[^;,]+;base64,/i.test(value)) return value;
+    if (/^data:.*;base64,/i.test(value)) return `data:${mimeType};base64,${value.slice(commaIndex + 1)}`;
+    throw new Error('Failed to encode image as base64 data URL');
+}
+
+function getImageMimeType(fileName, fallback = '') {
+    const mimeType = String(fallback || '').trim().toLowerCase();
+    if (mimeType.startsWith('image/')) return mimeType;
+    const mimeTypes = {
+        apng: 'image/apng',
+        avif: 'image/avif',
+        bmp: 'image/bmp',
+        gif: 'image/gif',
+        ico: 'image/x-icon',
+        jpeg: 'image/jpeg',
+        jpg: 'image/jpeg',
+        png: 'image/png',
+        svg: 'image/svg+xml',
+        webp: 'image/webp',
+    };
+    return mimeTypes[getFileExtension(fileName)] || 'image/png';
+}
+
 const FileUtils = {
     getFileName,
     getFileExtension,
@@ -57,6 +93,9 @@ const FileUtils = {
     isImageFileName,
     isTextFile,
     formatFileSize,
+    readFileAsDataUrl,
+    normalizeImageDataUrl,
+    getImageMimeType,
 };
 
 export { FileUtils };
