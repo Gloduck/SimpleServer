@@ -1934,7 +1934,7 @@ function formatJsonForDisplay(value) {
 
 function registerInlineCompletions() {
   inlineCompletionDisposables.splice(0).forEach((disposable) => disposable.dispose());
-  const languages = Array.from(new Set(languageOptions.map((item) => getMonacoLanguageId(item.id))));
+  const languages = getEditorFeatureLanguageIds();
   languages.forEach((language) => {
     inlineCompletionDisposables.push(monaco.languages.registerInlineCompletionsProvider(language, {
       async provideInlineCompletions(model, position, context, token) {
@@ -1972,7 +1972,7 @@ function registerInlineCompletions() {
 
 function registerReferenceProviders() {
   referenceProviderDisposables.splice(0).forEach((disposable) => disposable.dispose());
-  const languages = Array.from(new Set(languageOptions.map((item) => getMonacoLanguageId(item.id))));
+  const languages = getEditorFeatureLanguageIds();
   languages.forEach((language) => {
     referenceProviderDisposables.push(monaco.languages.registerReferenceProvider(language, {
       provideReferences(model, position, context, token) {
@@ -1980,6 +1980,11 @@ function registerReferenceProviders() {
       },
     }));
   });
+}
+
+function getEditorFeatureLanguageIds() {
+  const monacoLanguages = monaco?.languages?.getLanguages?.().map((language) => language.id) || [];
+  return Array.from(new Set(["plaintext", ...languageOptions.map((item) => item.id), ...monacoLanguages]));
 }
 
 async function provideWorkspaceReferences(model, position, token) {
