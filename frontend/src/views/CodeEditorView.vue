@@ -298,21 +298,15 @@
           <p>{{ tr('empty.description') }}</p>
           <button @click="openFolder">{{ tr('action.openFolder') }}</button>
         </div>
-        <div ref="editorHost" class="monaco-host" :class="{ visible: activeTextFile && !activeDiffPath }" :aria-label="tr('editor.aria')"></div>
-        <div v-if="activeImageFile && !activeDiffPath" class="image-preview" :aria-label="tr('imagePreview.aria')">
+        <div ref="editorHost" class="monaco-host" :class="{ visible: (activeFile?.model && !activeDiffPath) || activeDiffUnsupportedFile }" :aria-label="tr('editor.aria')"></div>
+        <div v-if="activeImageFile && !activeDiffPath" class="image-preview" :aria-label="tr('imagePreview.aria')" @click="focusActivePreviewEditor">
           <img :src="activeImageFile.objectUrl" :alt="activeImageFile.name" />
           <div class="image-preview-meta">
             <strong>{{ activeImageFile.name }}</strong>
             <span>{{ FileUtils.formatFileSize(activeImageFile.size) }} · {{ activeImageFile.mimeType || tr('imagePreview.type') }}</span>
           </div>
         </div>
-        <div v-if="activeUnsupportedFile && !activeDiffPath" class="unsupported-preview" :aria-label="tr('unsupportedFile.aria')">
-          <span class="codicon codicon-file-binary" aria-hidden="true"></span>
-          <h2>{{ tr('unsupportedFile.title') }}</h2>
-          <p>{{ tr('unsupportedFile.description') }}</p>
-          <small>{{ activeUnsupportedFile.name }} · {{ FileUtils.formatFileSize(activeUnsupportedFile.size) }}</small>
-        </div>
-        <div v-if="activeDiffUnsupportedFile" class="unsupported-preview diff-placeholder" :aria-label="tr('diff.aria')">
+        <div v-if="activeDiffUnsupportedFile" class="unsupported-preview diff-placeholder" :aria-label="tr('diff.aria')" @click="focusActivePreviewEditor">
           <span class="codicon codicon-diff-modified" aria-hidden="true"></span>
           <h2>{{ tr('diff.unsupportedTitle') }}</h2>
           <p>{{ tr('diff.unsupportedDescription') }}</p>
@@ -1116,6 +1110,11 @@ function collectFileNodes(nodes, maxItems = Number.POSITIVE_INFINITY) {
 function handleGlobalCommandPaletteShortcut(event) {
   if (dialogState.visible) return;
   if (event.isComposing) return;
+  if (isShortcutEvent(settings.shortcuts.save, event)) {
+    event.preventDefault();
+    saveActiveFile();
+    return;
+  }
   if (isShortcutEvent(settings.shortcuts.commandPalette, event)) {
     event.preventDefault();
     openCommandPalette();
@@ -1284,6 +1283,10 @@ function getOriginalModelUri(path) {
   return monaco.Uri.parse(`inmemory://original/${encodeURIComponent(path)}`);
 }
 
+function getPreviewModelUri(path) {
+  return monaco.Uri.parse(`inmemory://preview/${encodeURIComponent(path)}`);
+}
+
 function getWorkspacePathFromModel(model) {
   if (model?.uri?.scheme !== "file") return "";
   return decodeURI(model.uri.path.replace(/^\/+/, ""));
@@ -1302,6 +1305,16 @@ function getOrCreateWorkspaceModel(content, monacoLanguage, path, syncContent = 
 
 function createOriginalModel(content, monacoLanguage, path) {
   return markRaw(monaco.editor.createModel(content, monacoLanguage, getOriginalModelUri(path)));
+}
+
+function getOrCreatePreviewModel(content, path) {
+  const uri = getPreviewModelUri(path);
+  const existing = monaco.editor.getModel(uri);
+  if (existing) {
+    if (existing.getValue() !== content) existing.setValue(content);
+    return markRaw(existing);
+  }
+  return markRaw(monaco.editor.createModel(content, "plaintext", uri));
 }
 
 async function ensureWorkspaceModelForNode(node, token) {
@@ -1435,6 +1448,7 @@ function openImageFile(node, file) {
 function createImageFileState(node, file, options = {}) {
   const objectUrl = URL.createObjectURL(file);
   const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "image", objectUrl, size: file.size, mimeType: file.type, dirty: false, closed: options.closed ?? true, language: "plaintext", monacoLanguage: "plaintext", isNew: false, deleted: false };
+  fileState.model = getOrCreatePreviewModel(getReadonlyPreviewContent(fileState), node.path);
   openFiles.set(node.path, fileState);
   touchDirtyState();
   return fileState;
@@ -1449,9 +1463,30 @@ function openUnsupportedFile(node, file) {
 
 function createUnsupportedFileState(node, file, options = {}) {
   const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "unsupported", size: file.size, mimeType: file.type, dirty: false, closed: options.closed ?? true, language: "plaintext", monacoLanguage: "plaintext", isNew: false, deleted: false };
+  fileState.model = getOrCreatePreviewModel(getReadonlyPreviewContent(fileState), node.path);
   openFiles.set(node.path, fileState);
   touchDirtyState();
   return fileState;
+}
+
+function getReadonlyPreviewContent(file) {
+  const title = file.fileType === "image" ? tr("imagePreview.type") : tr("unsupportedFile.title");
+  return [
+    title,
+    "",
+    file.fileType === "image" ? tr("imagePreview.aria") : tr("unsupportedFile.description"),
+    "",
+    `Path: ${file.path}`,
+    `Size: ${FileUtils.formatFileSize(file.size)}`,
+    file.mimeType ? `MIME: ${file.mimeType}` : "",
+    file.deleted ? `Status: ${tr("changes.deleted")}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function refreshReadonlyPreviewModel(file) {
+  if (!file?.model || file.fileType === "text") return;
+  const content = getReadonlyPreviewContent(file);
+  if (file.model.getValue() !== content) file.model.setValue(content);
 }
 
 function activateFile(path) {
@@ -1468,18 +1503,30 @@ function activateFile(path) {
   diffEditor.value?.setModel(null);
   activePath.value = path;
   if (file.fileType === "image") {
-    editor.value?.setModel(null);
+    activateReadonlyPreviewEditor(file);
     setStatus(path, `${tr("imagePreview.type")} | ${FileUtils.formatFileSize(file.size)}`);
     return;
   }
   if (file.fileType === "unsupported") {
-    editor.value?.setModel(null);
+    activateReadonlyPreviewEditor(file);
     setStatus(path, `${tr("unsupportedFile.type")} | ${FileUtils.formatFileSize(file.size)}`);
     return;
   }
+  editor.value.updateOptions({ readOnly: false });
   editor.value.setModel(file.model);
   editor.value.focus();
   setStatus(path, `${getLanguageLabel(file.language)} | ${file.dirty ? tr("status.unsaved") : tr("status.saved")}`);
+}
+
+function activateReadonlyPreviewEditor(file) {
+  refreshReadonlyPreviewModel(file);
+  editor.value.updateOptions({ readOnly: true });
+  editor.value.setModel(file.model);
+  nextTick(() => editor.value?.focus());
+}
+
+function focusActivePreviewEditor() {
+  if (activeFile.value?.model || activeDiffUnsupportedFile.value?.model) editor.value?.focus();
 }
 
 function activateDiff(path) {
@@ -1489,6 +1536,7 @@ function activateDiff(path) {
   activeDiffPath.value = path;
   if (!isTextFileState(file)) {
     diffEditor.value?.setModel(null);
+    activateReadonlyPreviewEditor(file);
     setStatus(tr("status.diff", { path }), file.deleted ? tr("changes.deleted") : tr("status.unsaved"));
     return;
   }
@@ -1518,7 +1566,12 @@ function activateLastOpenFile(excludedPath = "") {
   activePath.value = "";
   activeDiffPath.value = "";
   diffEditor.value?.setModel(null);
-  nextPath ? activateFile(nextPath) : editor.value.setModel(null);
+  if (nextPath) {
+    activateFile(nextPath);
+  } else {
+    editor.value.updateOptions({ readOnly: false });
+    editor.value.setModel(null);
+  }
 }
 
 function removeFileState(path) {
@@ -1719,6 +1772,8 @@ async function revertFile(path) {
   if (isTextFileState(file)) {
     file.model.setValue(file.savedValue);
     file.originalModel?.setValue(file.savedValue);
+  } else {
+    refreshReadonlyPreviewModel(file);
   }
   file.dirty = false;
   if (file.closed) {
@@ -2639,7 +2694,7 @@ function listTreeLevel(nodes, maxItems = 200) {
 }
 
 function isTextFileState(file) {
-  return Boolean(file?.model && file.fileType !== "image");
+  return Boolean(file?.model && file.fileType === "text");
 }
 
 async function ensureFileState(path, options = {}) {
@@ -3049,6 +3104,7 @@ async function markFileDeleted(path, options = {}) {
   file.isNew = false;
   file.closed = options.closed ?? file.closed;
   if (isTextFileState(file)) file.model.setValue("");
+  else refreshReadonlyPreviewModel(file);
   file.dirty = true;
   openFiles.set(file.path, file);
   touchDirtyState();
