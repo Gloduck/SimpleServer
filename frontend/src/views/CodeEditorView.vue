@@ -123,6 +123,7 @@
           <div class="ai-header-actions">
             <span class="ai-context-length">{{ tr('ai.contextLength', { count: aiContextLength }) }}</span>
             <button type="button" class="small-button" :disabled="aiBusy || aiMessages.length === 0" @click="compressAiContext">{{ tr('ai.compressContext') }}</button>
+            <button type="button" class="small-button" :disabled="aiBusy || !canResetAiConversation" @click="resetAiConversation">{{ tr('ai.resetConversation') }}</button>
             <button class="icon-button" :title="tr('ai.stop')" :aria-label="tr('ai.stop')" :disabled="!aiBusy" @click="stopAiTask">
               <span class="codicon codicon-debug-stop" aria-hidden="true"></span>
             </button>
@@ -557,6 +558,8 @@ const messages = {
     "ai.compressContext": "压缩上下文",
     "ai.contextCompressed": "上下文已压缩",
     "ai.contextSummaryTitle": "上下文摘要",
+    "ai.resetConversation": "重置对话",
+    "ai.conversationReset": "当前对话已重置",
     "ai.agentModel": "对话模型",
     "ai.reasoningEffort": "思考等级",
     "ai.reasoning.default": "默认",
@@ -749,6 +752,8 @@ const messages = {
     "ai.compressContext": "Compress Context",
     "ai.contextCompressed": "Context compressed",
     "ai.contextSummaryTitle": "Context Summary",
+    "ai.resetConversation": "Reset Chat",
+    "ai.conversationReset": "Current chat reset",
     "ai.agentModel": "Chat Model",
     "ai.reasoningEffort": "Reasoning",
     "ai.reasoning.default": "Default",
@@ -920,6 +925,7 @@ const aiAgentModelOptions = computed(() => {
 });
 const aiModelOptions = computed(() => uniqueStrings([settings.ai.completionModel, ...aiAgentModelOptions.value, defaultAiSettings.completionModel, ...aiAvailableModels.value]));
 const aiContextLength = computed(() => formatRecentAiMessages({ includePendingUserMessage: true }).length);
+const canResetAiConversation = computed(() => Boolean(aiPrompt.value.trim() || aiMessages.length || getAiTouchedFiles().length));
 const tree = computed(() => {
   dirtyRevision.value;
   return mergePendingFilesIntoTree(diskTree.value, Array.from(openFiles.values()).filter((file) => file.isNew || file.deleted));
@@ -2499,6 +2505,20 @@ async function sendAiPrompt() {
 
 function stopAiTask() {
   aiAbortController.value?.abort();
+}
+
+function resetAiConversation() {
+  if (aiBusy.value || !canResetAiConversation.value) return;
+  aiPrompt.value = "";
+  aiMessages.splice(0, aiMessages.length);
+  let changed = false;
+  openFiles.forEach((file) => {
+    if (!file.aiTouched) return;
+    file.aiTouched = false;
+    changed = true;
+  });
+  if (changed) dirtyRevision.value += 1;
+  setStatus(tr("ai.conversationReset"), "");
 }
 
 async function compressAiContext() {
