@@ -329,12 +329,12 @@
         <aside v-if="previewPaneVisible" class="preview-pane" :aria-label="tr('preview.aria')">
           <header class="preview-header">
             <span>{{ tr(previewMode === 'markdown' ? 'preview.markdown' : 'preview.html') }}</span>
-            <button type="button" class="icon-button" :title="tr('action.close')" :aria-label="tr('action.close')" @click="previewVisible = false">
+            <button type="button" class="icon-button" :title="tr('action.close')" :aria-label="tr('action.close')" @click="closePreview">
               <span class="codicon codicon-close" aria-hidden="true"></span>
             </button>
           </header>
           <div v-if="previewMode === 'markdown'" class="preview-content markdown-preview" v-html="previewContent"></div>
-          <iframe v-else class="preview-frame" sandbox="allow-forms allow-modals allow-popups allow-scripts" :srcdoc="previewContent"></iframe>
+          <iframe v-else :key="previewFrameKey" class="preview-frame" sandbox="allow-forms allow-modals allow-popups allow-scripts" :srcdoc="previewContent"></iframe>
         </aside>
       </section>
 
@@ -882,6 +882,7 @@ const activePath = ref("");
 const activeDiffPath = ref("");
 const previewVisible = ref(false);
 const previewContent = ref("");
+const previewFrameKey = ref(0);
 const dirtyRevision = ref(0);
 const activeView = ref("explorer");
 const sidePanelVisible = ref(true);
@@ -969,7 +970,7 @@ watch(() => aiMessages.length, () => { nextTick(scrollAiMessagesToBottom); });
 watch(searchMatchCase, () => { if (searchSearched.value && searchQuery.value.trim()) runGlobalSearch(); });
 watch(() => dirtyFiles.value.map((file) => file.path).join("\0"), pruneSelectedChangePaths);
 watch(previewPaneVisible, () => { nextTick(layoutVisibleEditors); });
-watch(() => `${previewPaneVisible.value}\0${activePath.value}\0${dirtyRevision.value}\0${settings.locale}`, updatePreviewContent);
+watch([previewPaneVisible, activePath, dirtyRevision, () => settings.locale], () => { void updatePreviewContent(); });
 watch(settings, persistSettings, { deep: true });
 
 onMounted(async () => {
@@ -1049,7 +1050,24 @@ function getPreviewMode(file) {
 
 function togglePreview() {
   if (!canPreviewActiveFile.value) return;
-  previewVisible.value = !previewVisible.value;
+  if (previewVisible.value) {
+    closePreview();
+  } else {
+    openPreview();
+  }
+}
+
+function openPreview() {
+  if (!canPreviewActiveFile.value) return;
+  previewVisible.value = true;
+  void nextTick(() => updatePreviewContent({ remountFrame: true }));
+}
+
+function closePreview() {
+  previewRenderSerial += 1;
+  previewVisible.value = false;
+  previewContent.value = "";
+  replacePreviewResourceUrls(new Map());
 }
 
 function layoutVisibleEditors() {
@@ -1060,14 +1078,11 @@ function layoutVisibleEditors() {
 let previewRenderSerial = 0;
 let previewResourceObjectUrls = new Map();
 
-async function updatePreviewContent() {
+async function updatePreviewContent({ remountFrame = false } = {}) {
   const serial = ++previewRenderSerial;
   const file = activeTextFile.value;
-  if (!previewPaneVisible.value || !file) {
-    previewContent.value = "";
-    replacePreviewResourceUrls(new Map());
-    return;
-  }
+  if (!previewVisible.value) return;
+  if (!previewPaneVisible.value || !file) return;
 
   const objectUrls = new Map();
   const raw = file.model.getValue();
@@ -1078,6 +1093,7 @@ async function updatePreviewContent() {
     return;
   }
   previewContent.value = resolved;
+  if (remountFrame && previewMode.value === "html") previewFrameKey.value += 1;
   replacePreviewResourceUrls(objectUrls);
 }
 
@@ -2989,9 +3005,12 @@ async function ensureAnyFileState(path, options = {}) {
   const normalized = normalizeWorkspacePath(path);
   const existing = openFiles.get(normalized);
   if (existing) {
-    existing.closed = options.closed ?? existing.closed;
-    openFiles.set(normalized, existing);
-    touchDirtyState();
+    const nextClosed = options.closed ?? existing.closed;
+    if (existing.closed !== nextClosed) {
+      existing.closed = nextClosed;
+      openFiles.set(normalized, existing);
+      touchDirtyState();
+    }
     return existing;
   }
   const node = findNodeByPath(tree.value, normalized);
