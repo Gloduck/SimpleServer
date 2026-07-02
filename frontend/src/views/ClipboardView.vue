@@ -79,23 +79,6 @@
                                 </div>
                             </div>
 
-                            <!-- 右侧控制 -->
-                            <div class="lg:w-48">
-                                <label class="block text-sm font-medium text-gray-700 mb-2">格式选择</label>
-                                <select v-model="settings.format" @change="onFormatChange"
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                    <option value="text">纯文本</option>
-                                    <option value="application/json">JSON</option>
-                                    <option value="yaml">YAML</option>
-                                    <option value="javascript">JavaScript</option>
-                                    <option value="htmlmixed">HTML</option>
-                                    <option value="css">CSS</option>
-                                    <option value="python">Python</option>
-                                    <option value="text/x-java">Java</option>
-                                    <option value="php">PHP</option>
-                                    <option value="sql">SQL</option>
-                                </select>
-                            </div>
                         </div>
                     </section>
 
@@ -107,7 +90,9 @@
                         </div>
 
                         <div id="editor-container" class="rounded-lg overflow-hidden border border-gray-200">
-                            <textarea id="code-editor" style="display: none;"></textarea>
+                            <textarea id="clipboard-editor" v-model="editorContent" @input="handleEditorInput"
+                                class="clipboard-editor w-full h-[450px] p-4 text-[15px] leading-6 font-mono resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                autofocus spellcheck="false"></textarea>
                         </div>
                     </section>
 
@@ -208,7 +193,7 @@
 </template>
 
 <script>
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { CommonUtils } from '@/shared/common-utils.js';
 import { CommonComponents } from '@/shared/common-components.js';
@@ -229,7 +214,7 @@ export default {
                 const toastRef = ref(null);
 
                 // 编辑器相关
-                let editor = null;
+                const editorContent = ref('');
                 const editorStatusInfo = ref('就绪');
                 const editorExist = ref(false);
                 const lastUpdated = ref('');
@@ -238,8 +223,7 @@ export default {
                 const defaultSettings = {
                     autoCopy: false,
                     autoRefresh: false,
-                    autoSave: false,
-                    format: 'text'
+                    autoSave: false
                 };
 
                 // 设置 - 从localStorage加载或使用默认值
@@ -248,7 +232,6 @@ export default {
                 // 状态变量
                 let lastUserEditTime = 0;
                 let isUpdatingFromServer = false;
-                let isFirstUpdate = true;
                 let refreshInterval = null;
                 let autoSaveTimeout = null;
 
@@ -273,8 +256,11 @@ export default {
                     try {
                         const savedSettings = JSON.parse(localStorage.getItem('clipboardSettings'));
                         if (savedSettings) {
-                            // 合并保存的设置和默认设置，确保所有字段都存在
-                            settings.value = { ...defaultSettings, ...savedSettings };
+                            settings.value = {
+                                autoCopy: Boolean(savedSettings.autoCopy),
+                                autoRefresh: Boolean(savedSettings.autoRefresh),
+                                autoSave: Boolean(savedSettings.autoSave)
+                            };
                         }
                     } catch (e) {
                         console.warn('Failed to load settings:', e);
@@ -313,7 +299,7 @@ export default {
                     try {
                         isUpdatingFromServer = true;
                         editorStatusInfo.value = "正在获取内容...";
-                        const beforeValue = editor ? editor.getValue() : '';
+                        const beforeValue = editorContent.value;
 
                         const response = await fetch(`/api/clipboard/query?id=${clipboardId.value}`);
                         const data = await CommonUtils.checkJsonResponseStatus(response);
@@ -328,9 +314,9 @@ export default {
 
                             editorExist.value = true;
                             // 只有在内容不同时才更新编辑器
-                            const newValue = data.data.content;
+                            const newValue = data.data.content || '';
                             if (beforeValue !== newValue) {
-                                if (editor) editor.setValue(newValue);
+                                editorContent.value = newValue;
                                 editorStatusInfo.value = "内容已更新";
                             } else {
                                 editorStatusInfo.value = "内容已是最新";
@@ -356,11 +342,11 @@ export default {
 
                 // 保存剪贴板内容
                 const saveContent = async () => {
-                    if (!clipboardId.value || !editor) {
+                    if (!clipboardId.value) {
                         return;
                     }
 
-                    const content = editor.getValue();
+                    const content = editorContent.value;
                     const contentType = 'text';
 
                     try {
@@ -413,7 +399,7 @@ export default {
                         const data = await CommonUtils.checkJsonResponseStatus(response);
                         if (data.code === 200) {
                             showToast("剪贴板已成功删除", 'success');
-                            if (editor) editor.setValue("");
+                            editorContent.value = "";
                             editorStatusInfo.value = "已删除";
                             editorExist.value = false;
 
@@ -434,10 +420,7 @@ export default {
 
                 // 复制内容到剪贴板
                 const copyToClipboard = () => {
-                    if (!editor) {
-                        return;
-                    }
-                    CommonUtils.copyToClipboard(editor.getValue(), showToast);
+                    CommonUtils.copyToClipboard(editorContent.value, showToast);
                 };
 
                 // 自动刷新变化处理
@@ -472,7 +455,7 @@ export default {
 
                     if (settings.value.autoSave) {
                         autoSaveTimeout = setTimeout(async () => {
-                            if (!editorExist.value && !editor.getValue()) {
+                            if (!editorExist.value && !editorContent.value) {
                                 return;
                             }
                             const success = await saveContent();
@@ -483,46 +466,19 @@ export default {
                     }
                 };
 
-                const onFormatChange = () => {
-                    if (editor) {
-                        editor.setOption("mode", settings.value.format);
+                const handleEditorInput = () => {
+                    if (!isUpdatingFromServer) {
+                        lastUserEditTime = Date.now();
+                    }
+
+                    if (settings.value.autoSave) {
+                        debouncedAutoSave();
                     }
                 };
 
-                // 初始化CodeMirror编辑器
+                // 初始化编辑器内容
                 const initEditor = () => {
                     if (!clipboardId.value) return;
-
-                    const editorElement = document.getElementById('code-editor');
-                    if (!editorElement) return;
-
-                    editor = CodeMirror.fromTextArea(editorElement, {
-                        lineNumbers: true,
-                        mode: settings.value.format,
-                        theme: "eclipse",
-                        lineWrapping: true,
-                        indentUnit: 4,
-                        autofocus: true,
-                        readOnly: false
-                    });
-
-                    // 编辑器事件监听
-                    editor.on("change", () => {
-                        // 记录用户编辑时间
-                        if (!isUpdatingFromServer) {
-                            lastUserEditTime = Date.now();
-                        }
-
-                        if (isFirstUpdate) {
-                            isFirstUpdate = false;
-                            return;
-                        }
-
-                        // 如果启用了自动保存，则调用防抖保存函数
-                        if (settings.value.autoSave) {
-                            debouncedAutoSave();
-                        }
-                    });
 
                     // 初始加载内容
                     fetchClipboardContent();
@@ -530,13 +486,6 @@ export default {
                     // 设置自动刷新
                     if (settings.value.autoRefresh) {
                         startAutoRefresh();
-                    }
-                };
-
-                const destroyEditor = () => {
-                    if (editor) {
-                        editor.toTextArea();
-                        editor = null;
                     }
                 };
 
@@ -567,7 +516,7 @@ export default {
                 const handleKeyDown = (e) => {
                     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                         e.preventDefault();
-                        if (clipboardId.value && editor) {
+                        if (clipboardId.value) {
                             saveContent();
                         }
                     }
@@ -595,8 +544,8 @@ export default {
                     clipboardId.value = newId || null;
                     editorExist.value = false;
                     lastUpdated.value = '';
+                    editorContent.value = '';
                     editorStatusInfo.value = '就绪';
-                    isFirstUpdate = true;
 
                     if (refreshInterval) {
                         clearInterval(refreshInterval);
@@ -607,9 +556,6 @@ export default {
                         autoSaveTimeout = null;
                     }
 
-                    destroyEditor();
-                    await nextTick();
-
                     if (clipboardId.value) {
                         initEditor();
                     }
@@ -619,7 +565,6 @@ export default {
                     // 清理定时器
                     if (refreshInterval) clearInterval(refreshInterval);
                     if (autoSaveTimeout) clearTimeout(autoSaveTimeout);
-                    destroyEditor();
 
                     // 移除事件监听
                     document.removeEventListener('keydown', handleKeyDown);
@@ -630,6 +575,7 @@ export default {
                     clipboardId,
                     newClipboardId,
                     toastRef,
+                    editorContent,
                     editorExist,
                     editorStatusInfo,
                     lastUpdated,
@@ -643,7 +589,7 @@ export default {
                     deleteClipboard,
                     copyToClipboard,
                     onAutoRefreshChange,
-                    onFormatChange,
+                    handleEditorInput,
                     saveSettings,
                     router
                 };
@@ -652,14 +598,7 @@ export default {
 </script>
 
 <style>
-.CodeMirror {
-            height: 450px;
-            font-size: 15px;
+.clipboard-editor {
             border-radius: 8px;
-            border: 1px solid #e2e8f0;
-        }
-        .CodeMirror-disabled {
-            background: #f8fafc;
-            opacity: 0.8;
         }
 </style>
