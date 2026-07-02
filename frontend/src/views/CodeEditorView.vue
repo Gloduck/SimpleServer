@@ -339,6 +339,24 @@
       <div class="context-separator" aria-hidden="true"></div>
       <button type="button" role="menuitem" class="danger" @click="runChangesContextAction('revert')">{{ tr('action.revert') }}</button>
     </div>
+
+    <div v-if="dialogState.visible" class="editor-dialog-backdrop" role="presentation" @click.self="cancelDialog">
+      <form class="editor-dialog" role="dialog" aria-modal="true" aria-labelledby="editor-dialog-title" @submit.prevent="confirmDialog" @keydown.esc.prevent.stop="cancelDialog" @click.stop>
+        <div class="editor-dialog-header">
+          <span class="codicon" :class="dialogIconClass" aria-hidden="true"></span>
+          <h2 id="editor-dialog-title">{{ dialogState.title }}</h2>
+        </div>
+        <p class="editor-dialog-message">{{ dialogState.message }}</p>
+        <label v-if="dialogState.mode === 'prompt'" class="editor-dialog-input-row">
+          <span>{{ tr('dialog.inputLabel') }}</span>
+          <input ref="dialogInput" v-model="dialogState.value" type="text" :placeholder="dialogState.placeholder" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="editor-dialog-actions">
+          <button v-if="dialogState.mode !== 'alert'" type="button" @click="cancelDialog">{{ dialogState.cancelLabel }}</button>
+          <button ref="dialogPrimaryButton" type="submit" class="primary" :class="{ danger: dialogState.tone === 'danger' }">{{ dialogState.confirmLabel }}</button>
+        </div>
+      </form>
+    </div>
   </div>
 </template>
 
@@ -409,6 +427,13 @@ const messages = {
     "action.findReferences": "查找引用",
     "action.toggleSidebar": "切换侧边栏",
     "action.aiComplete": "AI 代码补全",
+    "dialog.alertTitle": "提示",
+    "dialog.confirmTitle": "请确认",
+    "dialog.promptTitle": "请输入",
+    "dialog.ok": "确定",
+    "dialog.cancel": "取消",
+    "dialog.close": "关闭",
+    "dialog.inputLabel": "内容",
     "settings.theme": "主题",
     "settings.locale": "界面语言",
     "settings.ai": "AI",
@@ -575,6 +600,13 @@ const messages = {
     "action.findReferences": "Find References",
     "action.toggleSidebar": "Toggle Sidebar",
     "action.aiComplete": "AI Code Completion",
+    "dialog.alertTitle": "Notice",
+    "dialog.confirmTitle": "Confirm",
+    "dialog.promptTitle": "Input",
+    "dialog.ok": "OK",
+    "dialog.cancel": "Cancel",
+    "dialog.close": "Close",
+    "dialog.inputLabel": "Value",
     "settings.theme": "Theme",
     "settings.locale": "Display Language",
     "settings.ai": "AI",
@@ -788,6 +820,9 @@ const workspaceModelPromises = new Map();
 const status = reactive({ left: "Ready", right: "Monaco Editor" });
 const contextMenu = reactive({ visible: false, x: 0, y: 0, node: null });
 const changesContextMenu = reactive({ visible: false, x: 0, y: 0, file: null });
+const dialogInput = ref(null);
+const dialogPrimaryButton = ref(null);
+const dialogState = reactive({ visible: false, mode: "alert", title: "", message: "", value: "", placeholder: "", confirmLabel: "", cancelLabel: "", tone: "default", selectOnFocus: false });
 const settings = reactive(loadSettings());
 const aiMessages = reactive([]);
 const aiPrompt = ref("");
@@ -833,6 +868,11 @@ const activeFile = computed(() => {
 const activeTextFile = computed(() => isTextFileState(activeFile.value) ? activeFile.value : null);
 const activeImageFile = computed(() => activeFile.value?.fileType === "image" ? activeFile.value : null);
 const activeLanguage = computed({ get: () => activeFile.value?.language || "plaintext", set: (value) => { if (activeFile.value) activeFile.value.language = value; } });
+const dialogIconClass = computed(() => ({
+  alert: dialogState.tone === "danger" ? "codicon-error" : "codicon-info",
+  confirm: dialogState.tone === "danger" ? "codicon-warning" : "codicon-question",
+  prompt: "codicon-edit",
+}[dialogState.mode] || "codicon-info"));
 
 watch(() => settings.locale, () => { document.documentElement.lang = settings.locale; });
 watch(() => settings.ai.agentModels, syncSelectedAgentModel);
@@ -907,6 +947,71 @@ function tr(key, params = {}) {
   return value;
 }
 
+const dialogQueue = [];
+let activeDialogResolve = null;
+
+function showAlert(message, options = {}) {
+  return showDialog({ mode: "alert", message, title: options.title || tr("dialog.alertTitle"), tone: options.tone, confirmLabel: options.confirmLabel || tr("dialog.ok") });
+}
+
+function showConfirm(message, options = {}) {
+  return showDialog({ mode: "confirm", message, title: options.title || tr("dialog.confirmTitle"), tone: options.tone, confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel") });
+}
+
+function showPrompt(message, defaultValue = "", options = {}) {
+  return showDialog({ mode: "prompt", message, value: defaultValue, title: options.title || tr("dialog.promptTitle"), placeholder: options.placeholder || "", confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), selectOnFocus: options.selectOnFocus });
+}
+
+function showDialog(options) {
+  return new Promise((resolve) => {
+    dialogQueue.push({ options, resolve });
+    if (!dialogState.visible) openNextDialog();
+  });
+}
+
+function openNextDialog() {
+  const nextDialog = dialogQueue.shift();
+  if (!nextDialog) return;
+  activeDialogResolve = nextDialog.resolve;
+  Object.assign(dialogState, {
+    visible: true,
+    mode: nextDialog.options.mode || "alert",
+    title: nextDialog.options.title || tr("dialog.alertTitle"),
+    message: nextDialog.options.message || "",
+    value: nextDialog.options.value || "",
+    placeholder: nextDialog.options.placeholder || "",
+    confirmLabel: nextDialog.options.confirmLabel || tr("dialog.ok"),
+    cancelLabel: nextDialog.options.cancelLabel || tr("dialog.cancel"),
+    tone: nextDialog.options.tone || "default",
+    selectOnFocus: Boolean(nextDialog.options.selectOnFocus),
+  });
+  nextTick(() => {
+    if (dialogState.mode === "prompt") {
+      dialogInput.value?.focus();
+      if (dialogState.selectOnFocus) dialogInput.value?.select();
+      return;
+    }
+    dialogPrimaryButton.value?.focus();
+  });
+}
+
+function confirmDialog() {
+  settleDialog(dialogState.mode === "prompt" ? dialogState.value : true);
+}
+
+function cancelDialog() {
+  settleDialog(dialogState.mode === "prompt" ? null : false);
+}
+
+function settleDialog(result) {
+  if (!activeDialogResolve) return;
+  const resolve = activeDialogResolve;
+  activeDialogResolve = null;
+  dialogState.visible = false;
+  resolve(result);
+  nextTick(openNextDialog);
+}
+
 function loadMonaco() {
   return CdnUtils.loadMonaco();
 }
@@ -918,8 +1023,8 @@ function showPanel(view) {
 
 async function openFolder() {
   if (!window.showDirectoryPicker) {
-    alert(tr("error.unsupportedBrowser"));
     setStatus(tr("error.unsupportedBrowser"), "");
+    await showAlert(tr("error.unsupportedBrowser"));
     return;
   }
   try {
@@ -975,6 +1080,7 @@ function collectFileNodes(nodes, maxItems = Number.POSITIVE_INFINITY) {
 }
 
 function handleGlobalCommandPaletteShortcut(event) {
+  if (dialogState.visible) return;
   if (event.isComposing) return;
   if (isShortcutEvent(settings.shortcuts.commandPalette, event)) {
     event.preventDefault();
@@ -1442,9 +1548,9 @@ async function runContextAction(action) {
   if (action === "new-file") await createFileFromContext(node);
   if (action === "new-folder") await createFolderFromContext(node);
   if (action === "new-file-pending") await createPendingFileFromContext(node);
-  if (action === "delete") deleteNode(node);
+  if (action === "delete") await deleteNode(node);
   if (action === "delete-pending") await markNodeDeleted(node);
-  if (action === "refresh") refreshTree();
+  if (action === "refresh") await refreshTree();
 }
 
 function getContextDirectoryPath(node) {
@@ -1457,7 +1563,7 @@ function joinWorkspacePath(basePath, name) {
 }
 
 async function createFileFromContext(node) {
-  const name = prompt(tr("prompt.newFile"));
+  const name = await showPrompt(tr("prompt.newFile"));
   if (!name) return;
   try {
     const path = joinWorkspacePath(getContextDirectoryPath(node), name);
@@ -1472,7 +1578,7 @@ async function createFileFromContext(node) {
 }
 
 async function createPendingFileFromContext(node) {
-  const name = prompt(tr("prompt.newFile"));
+  const name = await showPrompt(tr("prompt.newFile"));
   if (!name) return;
   try {
     const path = joinWorkspacePath(getContextDirectoryPath(node), name);
@@ -1486,7 +1592,7 @@ async function createPendingFileFromContext(node) {
 }
 
 async function createFolderFromContext(node) {
-  const name = prompt(tr("prompt.newFolder"));
+  const name = await showPrompt(tr("prompt.newFolder"));
   if (!name) return;
   try {
     const path = joinWorkspacePath(getContextDirectoryPath(node), name);
@@ -1524,18 +1630,18 @@ function hideChangesContextMenu() {
   changesContextMenu.visible = false;
 }
 
-function runChangesContextAction(action) {
+async function runChangesContextAction(action) {
   const file = changesContextMenu.file;
   hideChangesContextMenu();
   if (!file) return;
   if (action === "open-diff") activateDiff(file.path);
-  if (action === "revert") revertFile(file.path);
+  if (action === "revert") await revertFile(file.path);
 }
 
-function revertFile(path) {
+async function revertFile(path) {
   const file = openFiles.get(path);
   if (!file || !file.dirty) return;
-  if (!confirm(tr("confirm.revert", { path }))) return;
+  if (!await showConfirm(tr("confirm.revert", { path }), { title: tr("action.revert"), tone: "danger" })) return;
   if (file.isNew) {
     removeFileState(path);
     setStatus(tr("status.reverted", { path }), "");
@@ -1564,11 +1670,11 @@ async function deleteNode(node) {
     return;
   }
   const dirtyFiles = getOpenFilesUnderPath(node.path).filter((file) => file.dirty);
-  const confirmed = confirm(tr("confirm.delete", {
+  const confirmed = await showConfirm(tr("confirm.delete", {
     path: node.path,
     folderHint: node.kind === "directory" ? tr("confirm.deleteFolderHint") : "",
     dirtyHint: dirtyFiles.length ? tr("confirm.deleteDirtyHint", { count: dirtyFiles.length }) : "",
-  }));
+  }), { title: tr("action.delete"), tone: "danger" });
   if (!confirmed) return;
   try {
     const parentDirectory = await getDirectoryByParts(node.parentPath ? node.parentPath.split("/") : [], false);
@@ -1771,7 +1877,7 @@ async function fetchAiModels() {
     setStatus(tr("status.aiModelsLoaded", { count: models.length }), getAiBaseUrl());
   } catch (error) {
     setStatus("AI Models", error.message || String(error));
-    alert(`${tr("settings.aiFetchModels")}: ${error.message || error}`);
+    showAlert(`${tr("settings.aiFetchModels")}: ${error.message || error}`, { tone: "danger" });
   } finally {
     aiModelsLoading.value = false;
   }
@@ -2343,7 +2449,7 @@ function setStatus(left, right) {
 function reportError(messageKey, error) {
   console.error(tr(messageKey), error);
   setStatus(tr(messageKey), error.message || "");
-  alert(`${tr(messageKey)}: ${error.message || error}`);
+  showAlert(`${tr(messageKey)}: ${error.message || error}`, { tone: "danger" });
 }
 
 function beforeUnload(event) {
@@ -2360,7 +2466,7 @@ async function exportSettingsUrl() {
     await navigator.clipboard.writeText(value);
     setStatus(tr("settings.exportUrlCopied"), SETTINGS_URL_PARAM);
   } catch {
-    prompt(tr("settings.exportUrl"), value);
+    await showPrompt(tr("settings.exportUrl"), value, { title: tr("settings.exportUrl"), confirmLabel: tr("dialog.close"), selectOnFocus: true });
   }
 }
 
@@ -3076,6 +3182,23 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .status-right-group select:hover:not(:disabled),
 .code-editor-view .status-right-group select:focus { border-color: var(--accent-strong); background: var(--input); color: var(--text); outline: none; }
 .code-editor-view .status-right-group select:disabled { opacity: 0.5; }
+.code-editor-view .editor-dialog-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 18px; background: rgb(0 0 0 / 46%); backdrop-filter: blur(2px); }
+.code-editor-view .editor-dialog { display: grid; gap: 14px; width: min(460px, 100%); padding: 18px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); box-shadow: 0 20px 60px var(--shadow); }
+.code-editor-view .editor-dialog-header { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.code-editor-view .editor-dialog-header .codicon { flex: 0 0 auto; color: var(--accent-strong); font-size: 18px; }
+.code-editor-view .editor-dialog-header .codicon-warning,
+.code-editor-view .editor-dialog-header .codicon-error { color: #ffb3b3; }
+.code-editor-view .editor-dialog h2 { min-width: 0; margin: 0; overflow: hidden; font-size: 15px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.code-editor-view .editor-dialog-message { margin: 0; color: var(--text); font-size: 13px; line-height: 1.55; white-space: pre-line; }
+.code-editor-view .editor-dialog-input-row { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.code-editor-view .editor-dialog-input-row input { width: 100%; border: 1px solid var(--border); border-radius: 5px; background: var(--input); color: var(--text); padding: 8px 9px; }
+.code-editor-view .editor-dialog-input-row input:focus { border-color: var(--accent-strong); outline: none; box-shadow: 0 0 0 1px var(--accent-strong); }
+.code-editor-view .editor-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.code-editor-view .editor-dialog-actions button { min-width: 76px; padding: 7px 12px; }
+.code-editor-view .editor-dialog-actions .primary { border-color: var(--accent); background: var(--accent); color: #ffffff; }
+.code-editor-view .editor-dialog-actions .primary:hover:not(:disabled) { border-color: var(--accent-strong); background: var(--accent-strong); }
+.code-editor-view .editor-dialog-actions .primary.danger { border-color: #b8383d; background: #b8383d; }
+.code-editor-view .editor-dialog-actions .primary.danger:hover:not(:disabled) { border-color: #d95055; background: #d95055; }
 
 @media (max-width: 760px) {
   .code-editor-view.app-shell { grid-template-columns: 44px minmax(0, min(var(--side-panel-width, 260px), 55vw)) minmax(0, 1fr); }
@@ -3084,5 +3207,7 @@ function getTreeIconClass(node, collapsed = false) {
   .code-editor-view .panel-actions button:first-child { grid-column: auto; }
   .code-editor-view .shortcut-row { grid-template-columns: 1fr; }
   .code-editor-view .command-center-shortcut { display: none; }
+  .code-editor-view .editor-dialog-actions { flex-direction: column-reverse; }
+  .code-editor-view .editor-dialog-actions button { width: 100%; }
 }
 </style>
