@@ -2089,6 +2089,7 @@ function getAgentInstructions() {
     "All edit tools modify only in-memory editor models. The user must save files manually; new files created by write_file and files marked by delete_file are not written to disk until saved by the user.",
     "Resolve references like 'the file you created' from Recent chat and AI-touched files before using the current editor file. If multiple files match, ask a short clarification instead of editing or deleting the current file by default.",
     "When inspecting several known files, prefer one read_files call over many read_file calls.",
+    "Use refresh_tree when you need to rescan the workspace file tree before locating files.",
     "When applying several local edits, prefer one replace_in_files call over many replace_in_file calls.",
     "Prefer replace_in_file with exact old_text and minimal new_text for local edits, similar to patch hunks.",
     "Use write_file only for new files, tiny files, generated files, or when no stable exact local replacement is possible.",
@@ -2138,6 +2139,7 @@ function formatRecentAiMessages(options = {}) {
 function getAiToolDefinitions() {
   const tools = [
     { type: "function", name: "list_files", description: "List workspace files and directories. By default only lists the first level; set recursive to true to include descendants.", parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root." }, max_items: { type: "number", description: "Maximum items to return." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
+    { type: "function", name: "refresh_tree", description: "Refresh the workspace file tree from disk. Use this before locating newly created, deleted, or externally changed files.", parameters: { type: "object", properties: { collapse_all: { type: "boolean", description: "Whether to collapse all directories after refreshing. Defaults to false." } } } },
     { type: "function", name: "read_file", description: "Read a text file. Dirty in-memory content is returned when present.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "read_files", description: "Read multiple text files in one call. Dirty in-memory content is returned when present.", parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, max_chars_per_file: { type: "number" } }, required: ["paths"] } },
     { type: "function", name: "read_image", description: "Read an image file and attach it to the next model turn for visual analysis. Use this for screenshots, diagrams, mockups, and other workspace image files.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
@@ -2164,6 +2166,7 @@ async function runAiToolCall(call, args = {}) {
   try {
     switch (call.name) {
       case "list_files": return okTool(await aiToolListFiles(args));
+      case "refresh_tree": return okTool(await aiToolRefreshTree(args));
       case "read_file": return okTool(await aiToolReadFile(args.path));
       case "read_files": return okTool(await aiToolReadFiles(args));
       case "search_text": return okTool(await aiToolSearchText(args));
@@ -2491,6 +2494,13 @@ async function aiToolListFiles({ path = "", max_items: maxItems = 200, recursive
   const sourceNodes = path && nodes[0]?.kind === "directory" ? nodes[0].children || [] : nodes;
   const items = recursive ? flattenTree(nodes, limit) : listTreeLevel(sourceNodes, limit);
   return { summary: `${items.length} item(s)`, items };
+}
+
+async function aiToolRefreshTree({ collapse_all: collapseAll = false } = {}) {
+  if (!rootHandle.value) throw new Error("No workspace loaded");
+  await refreshTree({ collapseAll: Boolean(collapseAll) });
+  const count = countTreeNodes(diskTree.value);
+  return { summary: `Refreshed ${count} item(s)`, count };
 }
 
 async function aiToolReadFile(path) {
