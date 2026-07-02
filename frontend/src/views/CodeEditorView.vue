@@ -293,6 +293,9 @@
         <button type="button" class="command-icon-button" :title="tr('action.findReferences')" :aria-label="tr('action.findReferences')" :disabled="!activeFile" @click="triggerFindReferences">
           <span class="codicon codicon-references" aria-hidden="true"></span>
         </button>
+        <button type="button" class="command-icon-button" :class="{ active: previewVisible }" :title="tr('action.preview')" :aria-label="tr('action.preview')" :disabled="!canPreviewActiveFile" @click="togglePreview">
+          <span class="codicon codicon-open-preview" aria-hidden="true"></span>
+        </button>
       </div>
       <div class="tabs" role="tablist">
         <button v-for="file in openFileList" :key="file.path" class="tab" :class="{ active: file.path === activePath && !activeDiffPath }" :title="file.path" role="tab" :aria-selected="file.path === activePath && !activeDiffPath" @click="activateFile(file.path)">
@@ -302,7 +305,7 @@
         </button>
       </div>
 
-      <section class="editor-stage">
+      <section class="editor-stage" :class="{ 'preview-open': previewPaneVisible }">
         <div v-show="!activePath && !activeDiffPath" class="empty-state">
           <h2>{{ tr('empty.title') }}</h2>
           <p>{{ tr('empty.description') }}</p>
@@ -323,6 +326,16 @@
           <small>{{ activeDiffUnsupportedFile.path }} · {{ activeDiffUnsupportedFile.deleted ? tr('changes.deleted') : tr('status.unsaved') }}</small>
         </div>
         <div ref="diffHost" class="monaco-host diff-host" :class="{ visible: activeDiffPath && !activeDiffUnsupportedFile }" :aria-label="tr('diff.aria')"></div>
+        <aside v-if="previewPaneVisible" class="preview-pane" :aria-label="tr('preview.aria')">
+          <header class="preview-header">
+            <span>{{ tr(previewMode === 'markdown' ? 'preview.markdown' : 'preview.html') }}</span>
+            <button type="button" class="icon-button" :title="tr('action.close')" :aria-label="tr('action.close')" @click="previewVisible = false">
+              <span class="codicon codicon-close" aria-hidden="true"></span>
+            </button>
+          </header>
+          <div v-if="previewMode === 'markdown'" class="preview-content markdown-preview" v-html="previewContent"></div>
+          <iframe v-else class="preview-frame" sandbox="allow-forms allow-modals allow-popups allow-scripts" :srcdoc="previewContent"></iframe>
+        </aside>
       </section>
 
       <footer class="status-bar">
@@ -386,7 +399,7 @@ const STORAGE_KEY = "browser-code-editor-settings";
 const SETTINGS_URL_PARAM = "settings";
 const REQUEST_PROXY_PATH = "/api/requestProxy";
 CdnUtils.loadCodicons().catch((error) => console.error("Failed to load codicons:", error));
-const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Shift+Enter" };
+const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", preview: "Ctrl+Shift+V", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Shift+Enter" };
 const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
 const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
 const SIDEBAR_MIN_WIDTH = 180;
@@ -445,6 +458,7 @@ const messages = {
     "action.save": "保存",
     "action.format": "格式化文档",
     "action.findReferences": "查找引用",
+    "action.preview": "预览",
     "action.toggleSidebar": "切换侧边栏",
     "action.aiComplete": "AI 代码补全",
     "dialog.alertTitle": "提示",
@@ -584,6 +598,9 @@ const messages = {
     "unsupportedFile.type": "不支持预览",
     "diff.unsupportedTitle": "文件内容不支持对比预览",
     "diff.unsupportedDescription": "此文件有变更，但当前编辑器无法展示具体内容差异。保存后会应用文件级操作。",
+    "preview.aria": "文件预览",
+    "preview.html": "HTML 预览",
+    "preview.markdown": "Markdown 预览",
     "prompt.newFile": "输入新文件路径",
     "prompt.newFolder": "输入新文件夹路径",
     "error.unsupportedBrowser": "当前浏览器不支持 File System Access API。请使用 Chrome、Edge 或 Arc，并通过 localhost 或 HTTPS 打开页面。",
@@ -603,6 +620,7 @@ const messages = {
     "shortcut.commandPalette": "命令面板",
     "shortcut.search": "全局搜索",
     "shortcut.findReferences": "查找引用",
+    "shortcut.preview": "预览",
     "shortcut.toggleSidebar": "切换侧边栏",
     "shortcut.aiComplete": "AI 代码补全",
   },
@@ -632,6 +650,7 @@ const messages = {
     "action.save": "Save",
     "action.format": "Format Document",
     "action.findReferences": "Find References",
+    "action.preview": "Preview",
     "action.toggleSidebar": "Toggle Sidebar",
     "action.aiComplete": "AI Code Completion",
     "dialog.alertTitle": "Notice",
@@ -771,6 +790,9 @@ const messages = {
     "unsupportedFile.type": "Unsupported preview",
     "diff.unsupportedTitle": "File content diff is not supported",
     "diff.unsupportedDescription": "This file has changes, but the editor cannot display a content diff. Saving will apply the file-level operation.",
+    "preview.aria": "File Preview",
+    "preview.html": "HTML Preview",
+    "preview.markdown": "Markdown Preview",
     "prompt.newFile": "Enter new file path",
     "prompt.newFolder": "Enter new folder path",
     "error.unsupportedBrowser": "This browser does not support the File System Access API. Use Chrome, Edge, or Arc, and open the page from localhost or HTTPS.",
@@ -790,6 +812,7 @@ const messages = {
     "shortcut.commandPalette": "Command Palette",
     "shortcut.search": "Global Search",
     "shortcut.findReferences": "Find References",
+    "shortcut.preview": "Preview",
     "shortcut.toggleSidebar": "Toggle Sidebar",
     "shortcut.aiComplete": "AI Code Completion",
   },
@@ -808,6 +831,7 @@ const shortcutItems = [
   { key: "commandPalette", labelKey: "shortcut.commandPalette" },
   { key: "search", labelKey: "shortcut.search" },
   { key: "findReferences", labelKey: "shortcut.findReferences" },
+  { key: "preview", labelKey: "shortcut.preview" },
   { key: "toggleSidebar", labelKey: "shortcut.toggleSidebar" },
   { key: "aiComplete", labelKey: "shortcut.aiComplete" },
 ];
@@ -856,6 +880,7 @@ const openFiles = reactive(new Map());
 const selectedChangePaths = reactive(new Set());
 const activePath = ref("");
 const activeDiffPath = ref("");
+const previewVisible = ref(false);
 const dirtyRevision = ref(0);
 const activeView = ref("explorer");
 const sidePanelVisible = ref(true);
@@ -928,6 +953,17 @@ const activeDiffFile = computed(() => {
 });
 const activeDiffUnsupportedFile = computed(() => activeDiffFile.value && !isTextFileState(activeDiffFile.value) ? activeDiffFile.value : null);
 const activeLanguage = computed({ get: () => activeFile.value?.language || "plaintext", set: (value) => { if (activeFile.value) activeFile.value.language = value; } });
+const previewMode = computed(() => getPreviewMode(activeTextFile.value));
+const canPreviewActiveFile = computed(() => Boolean(previewMode.value));
+const previewPaneVisible = computed(() => Boolean(previewVisible.value && canPreviewActiveFile.value));
+const previewContent = computed(() => {
+  dirtyRevision.value;
+  const file = activeTextFile.value;
+  if (!file) return "";
+  const content = file.model.getValue();
+  if (previewMode.value === "markdown") return rewritePreviewResourceAttributes(renderMarkdown(content), file);
+  return buildHtmlPreviewDocument(content, file);
+});
 const dialogIconClass = computed(() => ({
   alert: dialogState.tone === "danger" ? "codicon-error" : "codicon-info",
   confirm: dialogState.tone === "danger" ? "codicon-warning" : "codicon-question",
@@ -939,6 +975,7 @@ watch(() => settings.ai.agentModels, syncSelectedAgentModel);
 watch(() => aiMessages.length, () => { nextTick(scrollAiMessagesToBottom); });
 watch(searchMatchCase, () => { if (searchSearched.value && searchQuery.value.trim()) runGlobalSearch(); });
 watch(() => dirtyFiles.value.map((file) => file.path).join("\0"), pruneSelectedChangePaths);
+watch(previewPaneVisible, () => { nextTick(layoutVisibleEditors); });
 watch(settings, persistSettings, { deep: true });
 
 onMounted(async () => {
@@ -1006,6 +1043,70 @@ function tr(key, params = {}) {
   let value = dictionary[key] || messages[defaultSettings.locale][key] || key;
   Object.entries(params).forEach(([name, replacement]) => { value = value.replaceAll(`{${name}}`, replacement); });
   return value;
+}
+
+function getPreviewMode(file) {
+  if (!isTextFileState(file)) return "";
+  if (["markdown", "mdx"].includes(file.language)) return "markdown";
+  if (file.language === "html") return "html";
+  return "";
+}
+
+function buildHtmlPreviewDocument(content, file) {
+  return rewritePreviewResourceAttributes(String(content || ""), file);
+}
+
+function togglePreview() {
+  if (!canPreviewActiveFile.value) return;
+  previewVisible.value = !previewVisible.value;
+}
+
+function layoutVisibleEditors() {
+  editor.value?.layout();
+  diffEditor.value?.layout();
+}
+
+function rewritePreviewResourceAttributes(html, file) {
+  return String(html || "").replace(/\b(src|href)\s*=\s*(["'])([^"']+)\2/gi, (match, attribute, quote, value) => {
+    const resolved = getPreviewResourceUrl(value, file);
+    return resolved === value ? match : `${attribute}=${quote}${resolved}${quote}`;
+  });
+}
+
+function getPreviewResourceUrl(value, file) {
+  const url = String(value || "").trim();
+  if (!url || url.startsWith("#") || url.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(url)) return value;
+  const [pathPart] = splitPreviewUrlSuffix(url);
+  let resourcePath;
+  try {
+    resourcePath = normalizeWorkspacePath(pathPart.startsWith("/") ? pathPart : joinWorkspacePath(getDirectoryPath(file.path), pathPart));
+  } catch {
+    return value;
+  }
+  const resource = openFiles.get(resourcePath);
+  if (!resource) return value;
+  if (isTextFileState(resource)) return getTextDataUrl(resource);
+  if (resource.fileType === "image" && resource.objectUrl) return resource.objectUrl;
+  return value;
+}
+
+function splitPreviewUrlSuffix(url) {
+  const hashIndex = url.indexOf("#");
+  const queryIndex = url.indexOf("?");
+  const indexes = [hashIndex, queryIndex].filter((index) => index >= 0);
+  if (!indexes.length) return [url, ""];
+  const splitIndex = Math.min(...indexes);
+  return [url.slice(0, splitIndex), url.slice(splitIndex)];
+}
+
+function getTextDataUrl(file) {
+  const mimeType = getPreviewMimeType(file);
+  return `data:${mimeType};charset=utf-8,${encodeURIComponent(file.model.getValue())}`;
+}
+
+function getPreviewMimeType(file) {
+  const byLanguage = { css: "text/css", javascript: "text/javascript", typescript: "text/typescript", html: "text/html", markdown: "text/markdown", json: "application/json", svg: "image/svg+xml", xml: "application/xml" };
+  return byLanguage[file.language] || "text/plain";
 }
 
 const dialogQueue = [];
@@ -1151,6 +1252,11 @@ function handleGlobalCommandPaletteShortcut(event) {
   if (isShortcutEvent(settings.shortcuts.commandPalette, event)) {
     event.preventDefault();
     openCommandPalette();
+    return;
+  }
+  if (canPreviewActiveFile.value && isShortcutEvent(settings.shortcuts.preview, event)) {
+    event.preventDefault();
+    togglePreview();
     return;
   }
   if (isShortcutEvent(settings.shortcuts.search, event)) {
@@ -1775,6 +1881,12 @@ function joinWorkspacePath(basePath, name) {
   return normalizeWorkspacePath(basePath ? `${basePath}/${name}` : name);
 }
 
+function getDirectoryPath(path) {
+  const normalized = normalizeWorkspacePath(path);
+  const index = normalized.lastIndexOf("/");
+  return index === -1 ? "" : normalized.slice(0, index);
+}
+
 async function createFileFromContext(node) {
   const name = await showPrompt(tr("prompt.newFile"));
   if (!name) return;
@@ -1945,6 +2057,7 @@ function registerKeybindings() {
     { id: "browser-editor-command-palette", label: tr("commandCenter.title"), shortcut: settings.shortcuts.commandPalette, run: openCommandPalette },
     { id: "browser-editor-search", label: tr("panel.search"), shortcut: settings.shortcuts.search, run: () => showPanel("search") },
     { id: "browser-editor-find-references", label: tr("action.findReferences"), shortcut: settings.shortcuts.findReferences, run: triggerFindReferences },
+    { id: "browser-editor-preview", label: tr("action.preview"), shortcut: settings.shortcuts.preview, run: togglePreview },
     { id: "browser-editor-toggle-sidebar", label: tr("action.toggleSidebar"), shortcut: settings.shortcuts.toggleSidebar, run: toggleSidePanel },
     { id: "browser-editor-ai-complete", label: tr("action.aiComplete"), shortcut: settings.shortcuts.aiComplete, run: triggerAiCompletion },
   ];
@@ -3549,6 +3662,7 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .command-icon-button { display: inline-grid; width: 29px; height: 29px; place-items: center; padding: 0; border-color: var(--border); background: var(--input); color: var(--muted); }
 .code-editor-view .command-icon-button:hover:not(:disabled),
 .code-editor-view .command-icon-button:focus-visible { border-color: var(--accent-strong); background: var(--input); color: var(--text); outline: none; }
+.code-editor-view .command-icon-button.active { border-color: var(--accent-strong); background: var(--context-hover); color: var(--text); }
 .code-editor-view .tabs { display: flex; min-width: 0; overflow-x: auto; overflow-y: hidden; background: var(--panel); border-bottom: 1px solid var(--border); }
 .code-editor-view .tab { display: flex; align-items: center; gap: 8px; min-width: 120px; max-width: 240px; height: 35px; padding: 0 8px 0 12px; border: 0; border-right: 1px solid var(--border); border-radius: 0; background: var(--tab); color: var(--muted); }
 .code-editor-view .tab.active { background: var(--tab-active); color: var(--text); }
@@ -3559,6 +3673,13 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .editor-stage { position: relative; min-width: 0; min-height: 0; }
 .code-editor-view .monaco-host { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
 .code-editor-view .monaco-host.visible { opacity: 1; pointer-events: auto; }
+.code-editor-view .editor-stage.preview-open .monaco-host.visible,
+.code-editor-view .editor-stage.preview-open .unsupported-preview { right: min(480px, 42vw); }
+.code-editor-view .preview-pane { position: absolute; inset: 0 0 0 auto; z-index: 4; display: grid; grid-template-rows: 34px minmax(0, 1fr); width: min(480px, 42vw); border-left: 1px solid var(--border); background: var(--editor); color: var(--text); box-shadow: -12px 0 24px rgb(0 0 0 / 14%); }
+.code-editor-view .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 12px; font-weight: 600; }
+.code-editor-view .preview-content { min-height: 0; overflow: auto; padding: 18px; background: var(--editor); color: var(--text); }
+.code-editor-view .markdown-preview { font-size: 14px; line-height: 1.55; }
+.code-editor-view .preview-frame { width: 100%; height: 100%; border: 0; background: #ffffff; color-scheme: light; }
 .code-editor-view .image-preview { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; align-items: center; justify-items: center; gap: 18px; padding: 24px; overflow: auto; background: var(--editor); }
 .code-editor-view .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 12px 32px var(--shadow); }
 .code-editor-view .image-preview-meta { display: grid; justify-items: center; gap: 4px; max-width: min(680px, 100%); color: var(--muted); font-size: 12px; text-align: center; }
@@ -3609,6 +3730,9 @@ function getTreeIconClass(node, collapsed = false) {
   .code-editor-view .panel-actions button:first-child { grid-column: auto; }
   .code-editor-view .shortcut-row { grid-template-columns: 1fr; }
   .code-editor-view .command-center-shortcut { display: none; }
+  .code-editor-view .editor-stage.preview-open .monaco-host.visible,
+  .code-editor-view .editor-stage.preview-open .unsupported-preview { right: 0; bottom: 45%; }
+  .code-editor-view .preview-pane { inset: auto 0 0 0; width: auto; height: 45%; border-top: 1px solid var(--border); border-left: 0; box-shadow: 0 -12px 24px rgb(0 0 0 / 14%); }
   .code-editor-view .editor-dialog-actions { flex-direction: column-reverse; }
   .code-editor-view .editor-dialog-actions button { width: 100%; }
 }

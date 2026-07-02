@@ -112,6 +112,9 @@ function renderMarkdownContent(content) {
         }
         if (paragraphLines.length) {
             html.push(`<p>${paragraphLines.map(renderInlineMarkdown).join('<br>')}</p>`);
+        } else {
+            html.push(`<p>${renderInlineMarkdown(line.trim())}</p>`);
+            index++;
         }
     }
 
@@ -129,14 +132,14 @@ function isMarkdownBlockStart(lines, index) {
 }
 
 function parseMarkdownList(lines, startIndex) {
-    const first = lines[startIndex].match(/^\s{0,3}((?:[-*+])|\d+[.)])\s+(.+)$/);
+    const first = lines[startIndex].match(/^\s{0,3}((?:[-*+])|\d+[.)])\s+(.*)$/);
     if (!first) return null;
 
     const listType = /\d/.test(first[1]) ? 'ol' : 'ul';
     const items = [];
     let index = startIndex;
     while (index < lines.length) {
-        const item = lines[index].match(/^\s{0,3}((?:[-*+])|\d+[.)])\s+(.+)$/);
+        const item = lines[index].match(/^\s{0,3}((?:[-*+])|\d+[.)])\s+(.*)$/);
         if (!item || (/\d/.test(item[1]) ? 'ol' : 'ul') !== listType) break;
         const task = item[2].match(/^\[([ xX])\]\s+(.+)$/);
         if (task && listType === 'ul') {
