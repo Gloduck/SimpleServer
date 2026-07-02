@@ -381,6 +381,10 @@ const AI_COMPLETION_MANUAL_PREFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_SUFFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_MAX_OUTPUT_TOKENS = 512;
 const AI_IMAGE_MAX_FILE_SIZE = 20 * 1024 * 1024;
+const AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS = 2000;
+const AI_JAVASCRIPT_MAX_TIMEOUT_MS = 5000;
+const AI_JAVASCRIPT_MAX_CODE_CHARS = 20000;
+const AI_JAVASCRIPT_MAX_LOGS = 100;
 const WORKSPACE_MODEL_MAX_FILE_SIZE = 5 * 1024 * 1024;
 const WORKSPACE_FILE_ACTION_LIMIT = 1000;
 const WORKSPACE_REFERENCE_FILE_LIMIT = 2000;
@@ -2200,6 +2204,7 @@ function getAgentInstructions() {
     "Prefer replace_in_file with exact old_text and minimal new_text for local edits, similar to patch hunks.",
     "Use write_file only for new files, tiny files, generated files, or when no stable exact local replacement is possible.",
     "Use read_image when the user asks you to inspect an image file; the tool attaches the image to the next model turn as visual input.",
+    "Use run_javascript for deterministic calculations, parsing, or data transformations. It runs in an isolated browser Web Worker with no DOM, editor, or workspace file access; pass needed data as input.",
     "Prefer small, targeted edits. Explain changed files briefly after tool work is complete; do not paste whole modified files in chat.",
   ];
   if (isBackendEnabled()) {
@@ -2250,6 +2255,7 @@ function getAiToolDefinitions() {
     { type: "function", name: "read_files", description: "Read multiple text files in one call. Dirty in-memory content is returned when present.", parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, max_chars_per_file: { type: "number" } }, required: ["paths"] } },
     { type: "function", name: "read_image", description: "Read an image file and attach it to the next model turn for visual analysis. Use this for screenshots, diagrams, mockups, and other workspace image files.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "search_text", description: "Search text across workspace files.", parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string" }, max_results: { type: "number" } }, required: ["query"] } },
+    { type: "function", name: "run_javascript", description: "Execute a JavaScript snippet in an isolated browser Web Worker for calculations, parsing, or transforming provided input data. The code is the body of an async function with an input variable available; use return to produce a result. No DOM/editor/workspace access.", parameters: { type: "object", properties: { code: { type: "string", description: "JavaScript async function body. Example: return input.items.map(x => x * 2);" }, input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." }, timeout_ms: { type: "number", description: "Optional timeout in milliseconds. Defaults to 2000, max 5000." } }, required: ["code"] } },
     { type: "function", name: "get_current_file", description: "Get current editor file, cursor and selected text.", parameters: { type: "object", properties: {} } },
     { type: "function", name: "replace_in_file", description: "Replace the first exact text occurrence in a file in memory. Use this for minimal local edits; do not pass whole-file old_text/new_text unless the file is tiny and no smaller exact edit is possible.", parameters: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } },
     { type: "function", name: "replace_in_files", description: "Apply multiple exact local replacements in one call. Prefer this after batch-reading files and planning several patch hunks.", parameters: { type: "object", properties: { edits: { type: "array", items: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } } }, required: ["edits"] } },
@@ -2276,6 +2282,7 @@ async function runAiToolCall(call, args = {}) {
       case "read_file": return okTool(await aiToolReadFile(args.path));
       case "read_files": return okTool(await aiToolReadFiles(args));
       case "search_text": return okTool(await aiToolSearchText(args));
+      case "run_javascript": return await aiToolRunJavaScript(args);
       case "request_proxy": return okTool(await aiToolRequestProxy(args));
       case "get_current_file": return okTool(aiToolGetCurrentFile());
       case "replace_in_file": return okTool(await aiToolReplaceInFile(args));
@@ -2672,6 +2679,140 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
     }
   }
   return { summary: `${results.length} match(es)`, results };
+}
+
+async function aiToolRunJavaScript({ code, input = {}, timeout_ms: timeoutMs } = {}) {
+  const script = String(code || "");
+  if (!script.trim()) return { ok: false, summary: "JavaScript code is required" };
+  if (script.length > AI_JAVASCRIPT_MAX_CODE_CHARS) return { ok: false, summary: `JavaScript code is too large: ${script.length} chars` };
+  if (!window.Worker || !window.Blob || !window.URL) return { ok: false, summary: "Web Worker is not available in this browser" };
+
+  const timeout = Math.max(100, Math.min(Number(timeoutMs) || AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS, AI_JAVASCRIPT_MAX_TIMEOUT_MS));
+  const logs = [];
+  const startedAt = performance.now();
+
+  return new Promise((resolve) => {
+    let worker = null;
+    let objectUrl = "";
+    let timer = 0;
+    let settled = false;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      worker?.terminate();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      resolve({ elapsed_ms: Math.round(performance.now() - startedAt), logs, ...result });
+    };
+
+    try {
+      objectUrl = URL.createObjectURL(new Blob([createAiJavaScriptWorkerSource()], { type: "application/javascript" }));
+      worker = new Worker(objectUrl);
+      worker.onmessage = (event) => {
+        const data = event.data || {};
+        if (data.type === "log") {
+          logs.push(data.log);
+          if (logs.length > AI_JAVASCRIPT_MAX_LOGS) logs.shift();
+          return;
+        }
+        if (data.type !== "done") return;
+        if (data.ok) {
+          finish({ ok: true, summary: `JavaScript completed in ${data.elapsed_ms}ms`, result: data.result });
+          return;
+        }
+        finish({ ok: false, summary: `JavaScript failed: ${data.error?.message || "Unknown error"}`, error: data.error });
+      };
+      worker.onerror = (event) => {
+        event.preventDefault?.();
+        finish({ ok: false, summary: `JavaScript worker error: ${event.message || "Unknown error"}`, error: { message: event.message, filename: event.filename, lineno: event.lineno, colno: event.colno } });
+      };
+      timer = window.setTimeout(() => {
+        finish({ ok: false, summary: `JavaScript timed out after ${timeout}ms`, error: { message: `Timed out after ${timeout}ms` } });
+      }, timeout);
+      worker.postMessage({ code: script, input });
+    } catch (error) {
+      finish({ ok: false, summary: error.message || String(error), error: { message: error.message || String(error) } });
+    }
+  });
+}
+
+function createAiJavaScriptWorkerSource() {
+  return String.raw`
+const MAX_LOGS = ${AI_JAVASCRIPT_MAX_LOGS};
+const MAX_STRING_LENGTH = 8000;
+const MAX_COLLECTION_ITEMS = 100;
+const MAX_DEPTH = 5;
+const nativePostMessage = self.postMessage.bind(self);
+
+Object.defineProperty(self, "postMessage", {
+  value() { throw new Error("postMessage is disabled in run_javascript"); },
+  configurable: false,
+});
+
+function clipString(value) {
+  const text = String(value);
+  return text.length > MAX_STRING_LENGTH ? text.slice(0, MAX_STRING_LENGTH) + "... [truncated]" : text;
+}
+
+function safeValue(value, depth = 0, seen = []) {
+  if (value == null || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return clipString(value);
+  if (typeof value === "bigint") return value.toString() + "n";
+  if (typeof value === "symbol") return String(value);
+  if (typeof value === "function") return "[Function" + (value.name ? " " + value.name : "") + "]";
+  if (value instanceof Error) return { name: value.name, message: value.message, stack: clipString(value.stack || "") };
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? "Invalid Date" : value.toISOString();
+  if (depth >= MAX_DEPTH) return "[MaxDepth]";
+  if (seen.includes(value)) return "[Circular]";
+
+  const nextSeen = seen.concat(value);
+  if (Array.isArray(value)) {
+    const output = value.slice(0, MAX_COLLECTION_ITEMS).map((item) => safeValue(item, depth + 1, nextSeen));
+    if (value.length > MAX_COLLECTION_ITEMS) output.push("[" + (value.length - MAX_COLLECTION_ITEMS) + " more items]");
+    return output;
+  }
+  if (value instanceof Map) {
+    const entries = Array.from(value.entries()).slice(0, MAX_COLLECTION_ITEMS).map(([key, item]) => [safeValue(key, depth + 1, nextSeen), safeValue(item, depth + 1, nextSeen)]);
+    return { type: "Map", size: value.size, entries };
+  }
+  if (value instanceof Set) {
+    const values = Array.from(value.values()).slice(0, MAX_COLLECTION_ITEMS).map((item) => safeValue(item, depth + 1, nextSeen));
+    return { type: "Set", size: value.size, values };
+  }
+
+  const output = {};
+  const entries = Object.entries(value);
+  entries.slice(0, MAX_COLLECTION_ITEMS).forEach(([key, item]) => { output[key] = safeValue(item, depth + 1, nextSeen); });
+  if (entries.length > MAX_COLLECTION_ITEMS) output.__truncated_keys = entries.length - MAX_COLLECTION_ITEMS;
+  return output;
+}
+
+const logs = [];
+function emitLog(level, args) {
+  const log = { level, args: args.map((arg) => safeValue(arg)) };
+  logs.push(log);
+  if (logs.length > MAX_LOGS) logs.shift();
+  nativePostMessage({ type: "log", log });
+}
+
+["debug", "log", "info", "warn", "error"].forEach((level) => {
+  console[level] = (...args) => emitLog(level, args);
+});
+
+self.onmessage = async (event) => {
+  const startedAt = performance.now();
+  try {
+    const payload = event.data || {};
+    const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
+    const run = new AsyncFunction("input", "\"use strict\";\n" + String(payload.code || ""));
+    const result = await run(payload.input);
+    nativePostMessage({ type: "done", ok: true, result: safeValue(result), elapsed_ms: Math.round(performance.now() - startedAt) });
+  } catch (error) {
+    nativePostMessage({ type: "done", ok: false, error: safeValue(error), elapsed_ms: Math.round(performance.now() - startedAt) });
+  }
+};
+`;
 }
 
 async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, follow_redirect: followRedirect = true, enable_cors: enableCors = true, max_chars: maxChars = 20000 } = {}) {
