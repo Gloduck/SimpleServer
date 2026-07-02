@@ -92,15 +92,25 @@
           </div>
           <span class="change-count">{{ dirtyFiles.length }}</span>
         </header>
+        <div class="changes-toolbar">
+          <label class="change-select-all">
+            <input type="checkbox" :checked="allChangesSelected" :disabled="dirtyFiles.length === 0" @change="toggleAllChangesSelection($event.target.checked)" />
+            <span>{{ tr('changes.selectAll') }}</span>
+          </label>
+          <span>{{ tr('changes.selectedCount', { count: selectedChangeFiles.length }) }}</span>
+          <button type="button" :disabled="selectedChangeFiles.length === 0" @click="saveSelectedChanges">{{ tr('changes.saveSelected') }}</button>
+          <button type="button" :disabled="selectedChangeFiles.length === 0" @click="revertSelectedChanges">{{ tr('changes.revertSelected') }}</button>
+        </div>
         <div class="changes-list">
           <div v-if="dirtyFiles.length === 0" class="workspace-card">{{ tr('changes.none') }}</div>
-          <button v-for="file in dirtyFiles" :key="file.path" class="change-row" :class="{ active: file.path === activeDiffPath }" :title="tr('changes.openDiff')" @click="activateDiff(file.path)" @contextmenu.prevent="showChangesContextMenu($event, file)">
+          <div v-for="file in dirtyFiles" :key="file.path" class="change-row" :class="{ active: file.path === activeDiffPath }" :title="tr('changes.openDiff')" role="button" tabindex="0" @click="activateDiff(file.path)" @keydown.enter.prevent="activateDiff(file.path)" @keydown.space.prevent="activateDiff(file.path)" @contextmenu.prevent="showChangesContextMenu($event, file)">
+            <input type="checkbox" :checked="selectedChangePaths.has(file.path)" :aria-label="tr('changes.selectChange')" @click.stop @change="toggleChangeSelection(file.path, $event.target.checked)" />
             <span class="codicon" :class="file.deleted ? 'codicon-trash' : 'codicon-diff-modified'" aria-hidden="true"></span>
             <span class="change-main">
               <strong>{{ file.name }}</strong>
               <small>{{ file.deleted ? `${tr('changes.deleted')} · ${file.path}` : file.path }}</small>
             </span>
-          </button>
+          </div>
         </div>
       </section>
 
@@ -477,6 +487,13 @@ const messages = {
     "changes.none": "没有未保存的变更",
     "changes.openDiff": "打开对比",
     "changes.deleted": "待删除",
+    "changes.selectChange": "选择变更",
+    "changes.selectAll": "全选",
+    "changes.selectedCount": "已选 {count}",
+    "changes.saveSelected": "保存所选",
+    "changes.revertSelected": "回滚所选",
+    "changes.batchSaved": "已保存 {count} 个变更",
+    "changes.batchReverted": "已回滚 {count} 个变更",
     "search.placeholder": "搜索",
     "search.replacePlaceholder": "替换",
     "search.submit": "搜索",
@@ -558,6 +575,7 @@ const messages = {
     "confirm.deleteFolderHint": "\n\n该文件夹会被递归删除。",
     "confirm.deleteDirtyHint": "\n\n包含 {count} 个未保存标签，删除后这些修改会丢失。",
     "confirm.revert": "确定回滚“{path}”的未保存修改吗？",
+    "confirm.revertSelected": "确定回滚所选 {count} 个未保存变更吗？",
     "imagePreview.aria": "图片预览",
     "imagePreview.type": "图片",
     "unsupportedFile.aria": "不支持文件预览",
@@ -656,6 +674,13 @@ const messages = {
     "changes.none": "No unsaved changes",
     "changes.openDiff": "Open Diff",
     "changes.deleted": "Pending delete",
+    "changes.selectChange": "Select change",
+    "changes.selectAll": "Select all",
+    "changes.selectedCount": "Selected {count}",
+    "changes.saveSelected": "Save Selected",
+    "changes.revertSelected": "Revert Selected",
+    "changes.batchSaved": "Saved {count} change(s)",
+    "changes.batchReverted": "Reverted {count} change(s)",
     "search.placeholder": "Search",
     "search.replacePlaceholder": "Replace",
     "search.submit": "Search",
@@ -737,6 +762,7 @@ const messages = {
     "confirm.deleteFolderHint": "\n\nThis folder will be deleted recursively.",
     "confirm.deleteDirtyHint": "\n\nIt contains {count} unsaved tab(s). Those changes will be lost.",
     "confirm.revert": "Revert unsaved changes in “{path}”?",
+    "confirm.revertSelected": "Revert {count} selected unsaved change(s)?",
     "imagePreview.aria": "Image Preview",
     "imagePreview.type": "Image",
     "unsupportedFile.aria": "Unsupported File Preview",
@@ -827,6 +853,7 @@ const rootName = ref("");
 const diskTree = shallowRef([]);
 const collapsedPaths = reactive(new Set());
 const openFiles = reactive(new Map());
+const selectedChangePaths = reactive(new Set());
 const activePath = ref("");
 const activeDiffPath = ref("");
 const dirtyRevision = ref(0);
@@ -879,6 +906,11 @@ const dirtyFiles = computed(() => {
   dirtyRevision.value;
   return Array.from(openFiles.values()).filter((file) => file.dirty);
 });
+const selectedChangeFiles = computed(() => {
+  dirtyRevision.value;
+  return dirtyFiles.value.filter((file) => selectedChangePaths.has(file.path));
+});
+const allChangesSelected = computed(() => dirtyFiles.value.length > 0 && dirtyFiles.value.every((file) => selectedChangePaths.has(file.path)));
 const dirtyPathSet = computed(() => {
   dirtyRevision.value;
   return new Set(dirtyFiles.value.map((file) => file.path));
@@ -906,6 +938,7 @@ watch(() => settings.locale, () => { document.documentElement.lang = settings.lo
 watch(() => settings.ai.agentModels, syncSelectedAgentModel);
 watch(() => aiMessages.length, () => { nextTick(scrollAiMessagesToBottom); });
 watch(searchMatchCase, () => { if (searchSearched.value && searchQuery.value.trim()) runGlobalSearch(); });
+watch(() => dirtyFiles.value.map((file) => file.path).join("\0"), pruneSelectedChangePaths);
 watch(settings, persistSettings, { deep: true });
 
 onMounted(async () => {
@@ -1579,6 +1612,7 @@ function removeFileState(path) {
   if (!file) return;
   disposeFileModels(file, { force: true });
   openFiles.delete(path);
+  selectedChangePaths.delete(path);
   if (activePath.value === path) activateLastOpenFile(path);
 }
 
@@ -1586,38 +1620,46 @@ async function saveActiveFile() {
   const file = activeFile.value;
   if (!file) return;
   try {
-    if (file.deleted) {
-      const path = file.path;
-      await removeFileFromDisk(path);
-      removeFileState(path);
-      touchDirtyState();
-      await refreshTree();
-      setStatus(tr("status.deleted", { path }), new Date().toLocaleTimeString(settings.locale));
-      return;
-    }
-    if (!isTextFileState(file)) {
-      setStatus(tr("error.unsupportedFile"), file.path);
-      return;
-    }
-    if (!file.handle) file.handle = markRaw(await getFileHandleForPath(file.path, true));
-    const writable = await file.handle.createWritable();
-    await writable.write(file.model.getValue());
-    await writable.close();
-    file.savedValue = file.model.getValue();
-    file.originalModel?.setValue(file.savedValue);
-    file.isNew = false;
-    file.dirty = false;
-    await refreshTree();
-    if (file.closed) {
-      removeFileState(file.path);
-    } else {
-      openFiles.set(file.path, file);
-    }
-    touchDirtyState();
-    setStatus(tr("status.savedFile", { name: file.name }), new Date().toLocaleTimeString(settings.locale));
+    await saveFile(file);
   } catch (error) {
     reportError("error.saveFile", error);
   }
+}
+
+async function saveFile(file, options = {}) {
+  const refresh = options.refresh ?? true;
+  const updateStatus = options.status ?? true;
+  if (file.deleted) {
+    const path = file.path;
+    await removeFileFromDisk(path);
+    removeFileState(path);
+    touchDirtyState();
+    if (refresh) await refreshTree();
+    if (updateStatus) setStatus(tr("status.deleted", { path }), new Date().toLocaleTimeString(settings.locale));
+    return true;
+  }
+  if (!isTextFileState(file)) {
+    if (updateStatus) setStatus(tr("error.unsupportedFile"), file.path);
+    return false;
+  }
+  if (!file.handle) file.handle = markRaw(await getFileHandleForPath(file.path, true));
+  const writable = await file.handle.createWritable();
+  await writable.write(file.model.getValue());
+  await writable.close();
+  file.savedValue = file.model.getValue();
+  file.originalModel?.setValue(file.savedValue);
+  file.isNew = false;
+  file.dirty = false;
+  if (refresh) await refreshTree();
+  if (file.closed) {
+    removeFileState(file.path);
+  } else {
+    openFiles.set(file.path, file);
+  }
+  selectedChangePaths.delete(file.path);
+  touchDirtyState();
+  if (updateStatus) setStatus(tr("status.savedFile", { name: file.name }), new Date().toLocaleTimeString(settings.locale));
+  return true;
 }
 
 function changeActiveLanguage() {
@@ -1636,6 +1678,56 @@ function updateDirtyState(file) {
 
 function touchDirtyState() {
   dirtyRevision.value += 1;
+}
+
+function toggleChangeSelection(path, selected) {
+  selected ? selectedChangePaths.add(path) : selectedChangePaths.delete(path);
+}
+
+function toggleAllChangesSelection(selected) {
+  selectedChangePaths.clear();
+  if (selected) dirtyFiles.value.forEach((file) => selectedChangePaths.add(file.path));
+}
+
+function pruneSelectedChangePaths() {
+  const dirtyPaths = new Set(dirtyFiles.value.map((file) => file.path));
+  Array.from(selectedChangePaths).forEach((path) => {
+    if (!dirtyPaths.has(path)) selectedChangePaths.delete(path);
+  });
+}
+
+async function saveSelectedChanges() {
+  const files = selectedChangeFiles.value.slice();
+  if (!files.length) return;
+  let savedCount = 0;
+  try {
+    for (const file of files) {
+      const saved = await saveFile(file, { refresh: false, status: false });
+      if (saved) {
+        savedCount += 1;
+        selectedChangePaths.delete(file.path);
+      }
+    }
+    await refreshTree();
+    touchDirtyState();
+    setStatus(tr("changes.batchSaved", { count: savedCount }), new Date().toLocaleTimeString(settings.locale));
+  } catch (error) {
+    reportError("error.saveFile", error);
+  }
+}
+
+async function revertSelectedChanges() {
+  const files = selectedChangeFiles.value.slice();
+  if (!files.length) return;
+  const confirmed = await showConfirm(tr("confirm.revertSelected", { count: files.length }), { title: tr("action.revert"), tone: "danger" });
+  if (!confirmed) return;
+  let revertedCount = 0;
+  for (const file of files) {
+    await revertFile(file.path, { confirm: false, status: false });
+    selectedChangePaths.delete(file.path);
+    revertedCount += 1;
+  }
+  setStatus(tr("changes.batchReverted", { count: revertedCount }), new Date().toLocaleTimeString(settings.locale));
 }
 
 function toggleDirectory(path) {
@@ -1759,13 +1851,13 @@ async function runChangesContextAction(action) {
   if (action === "revert") await revertFile(file.path);
 }
 
-async function revertFile(path) {
+async function revertFile(path, options = {}) {
   const file = openFiles.get(path);
   if (!file || !file.dirty) return;
-  if (!await showConfirm(tr("confirm.revert", { path }), { title: tr("action.revert"), tone: "danger" })) return;
+  if (options.confirm !== false && !await showConfirm(tr("confirm.revert", { path }), { title: tr("action.revert"), tone: "danger" })) return;
   if (file.isNew) {
     removeFileState(path);
-    setStatus(tr("status.reverted", { path }), "");
+    if (options.status !== false) setStatus(tr("status.reverted", { path }), "");
     return;
   }
   file.deleted = false;
@@ -1783,7 +1875,8 @@ async function revertFile(path) {
   }
   touchDirtyState();
   if (!file.closed && activeDiffPath.value === path) activateFile(path);
-  setStatus(tr("status.reverted", { path }), getLanguageLabel(file.language));
+  selectedChangePaths.delete(path);
+  if (options.status !== false) setStatus(tr("status.reverted", { path }), getLanguageLabel(file.language));
 }
 
 async function deleteNode(node) {
@@ -3396,10 +3489,17 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .search-result-line { overflow: hidden; font-family: Consolas, 'Courier New', monospace; font-size: 12px; text-overflow: ellipsis; white-space: pre; }
 .code-editor-view .search-result-line mark { border-radius: 2px; background: #f6d365; color: #1f1f1f; }
 .code-editor-view .change-count { min-width: 24px; padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); text-align: center; }
+.code-editor-view .changes-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 12px 10px; color: var(--muted); font-size: 12px; }
+.code-editor-view .changes-toolbar button { padding: 5px 8px; font-size: 12px; }
+.code-editor-view .changes-toolbar > span { margin-left: auto; }
+.code-editor-view .change-select-all { display: flex; align-items: center; min-width: 0; gap: 6px; color: var(--text); }
+.code-editor-view .change-select-all input,
+.code-editor-view .change-row input[type="checkbox"] { flex: 0 0 auto; width: 14px; height: 14px; accent-color: var(--accent); }
 .code-editor-view .changes-list { display: grid; align-content: start; gap: 2px; min-height: 0; overflow: auto; padding: 0 0 16px; }
-.code-editor-view .change-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 6px 12px; border: 0; border-radius: 0; background: transparent; color: var(--text); text-align: left; }
+.code-editor-view .change-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 6px 12px; border: 0; border-radius: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; }
 .code-editor-view .change-row:hover,
 .code-editor-view .change-row.active { background: var(--button-hover); }
+.code-editor-view .change-row:focus-visible { outline: 1px solid var(--accent-strong); outline-offset: -1px; }
 .code-editor-view .change-row .codicon { color: var(--accent-strong); }
 .code-editor-view .change-main { display: grid; min-width: 0; gap: 2px; }
 .code-editor-view .change-main strong,
