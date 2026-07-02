@@ -830,7 +830,7 @@ const activeFile = computed(() => {
   dirtyRevision.value;
   return openFiles.get(activePath.value);
 });
-const activeTextFile = computed(() => activeFile.value?.fileType === "text" ? activeFile.value : null);
+const activeTextFile = computed(() => isTextFileState(activeFile.value) ? activeFile.value : null);
 const activeImageFile = computed(() => activeFile.value?.fileType === "image" ? activeFile.value : null);
 const activeLanguage = computed({ get: () => activeFile.value?.language || "plaintext", set: (value) => { if (activeFile.value) activeFile.value.language = value; } });
 
@@ -1167,7 +1167,7 @@ function createOriginalModel(content, monacoLanguage, path) {
 async function ensureWorkspaceModelForNode(node, token) {
   if (token?.isCancellationRequested || !node || node.kind !== "file") return null;
   const openFileState = openFiles.get(node.path);
-  if (openFileState && !openFileState.deleted) return openFileState.fileType === "text" ? openFileState.model : null;
+  if (openFileState && !openFileState.deleted) return isTextFileState(openFileState) ? openFileState.model : null;
   if (FileUtils.isImageFileName(node.name)) return null;
   if (!node.handle) return null;
   const existing = monaco.editor.getModel(getWorkspaceModelUri(node.path));
@@ -2445,11 +2445,16 @@ function listTreeLevel(nodes, maxItems = 200) {
   return nodes.slice(0, maxItems).map((node) => ({ path: node.path, kind: node.kind }));
 }
 
+function isTextFileState(file) {
+  return Boolean(file?.model && file.fileType !== "image");
+}
+
 async function ensureFileState(path, options = {}) {
   const normalized = normalizeWorkspacePath(path);
   const existing = openFiles.get(normalized);
   if (existing) {
-    if (existing.fileType !== "text") throw new Error(`File is not readable text: ${normalized}`);
+    if (!isTextFileState(existing)) throw new Error(`File is not readable text: ${normalized}`);
+    existing.fileType = "text";
     return existing;
   }
   const node = findNodeByPath(tree.value, normalized);
@@ -2465,7 +2470,7 @@ async function ensureFileState(path, options = {}) {
   const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
   workspaceModelPaths.delete(node.path);
   const originalModel = createOriginalModel(content, monacoLanguage, node.path);
-  const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), model, originalModel, savedValue: content, dirty: false, closed: options.closed ?? true, language, monacoLanguage, isNew: false, deleted: false };
+  const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "text", model, originalModel, savedValue: content, dirty: false, closed: options.closed ?? true, language, monacoLanguage, isNew: false, deleted: false };
   fileState.modelContentDisposable = model.onDidChangeContent(() => updateDirtyState(fileState));
   openFiles.set(node.path, fileState);
   touchDirtyState();
@@ -2480,7 +2485,7 @@ function createVirtualFileState(path, options = {}) {
   const model = getOrCreateWorkspaceModel(content, monacoLanguage, path, true);
   workspaceModelPaths.delete(path);
   const originalModel = createOriginalModel("", monacoLanguage, path);
-  const fileState = { name, path, handle: null, model, originalModel, savedValue: "", dirty: true, closed: options.closed ?? true, language, monacoLanguage, isNew: true, deleted: false };
+  const fileState = { name, path, handle: null, fileType: "text", model, originalModel, savedValue: "", dirty: true, closed: options.closed ?? true, language, monacoLanguage, isNew: true, deleted: false };
   fileState.modelContentDisposable = model.onDidChangeContent(() => updateDirtyState(fileState));
   openFiles.set(path, fileState);
   touchDirtyState();
