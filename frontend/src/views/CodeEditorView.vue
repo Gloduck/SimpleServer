@@ -338,16 +338,13 @@
 <script setup>
 import { computed, defineComponent, h, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
 import "@vscode/codicons/dist/codicon.css";
+import { CdnUtils } from "@/shared/cdn-utils.js";
 import { MarkdownUtils } from "@/shared/markdown-utils.js";
 
 const STORAGE_KEY = "browser-code-editor-settings";
 const SETTINGS_URL_PARAM = "settings";
 const REQUEST_PROXY_PATH = "/api/requestProxy";
-const NPM_MIRROR_BASE = "https://registry.npmmirror.com";
-const MONACO_VERSION = "0.55.1";
-const MONACO_BASE = `${NPM_MIRROR_BASE}/monaco-editor/${MONACO_VERSION}/files/min/vs`;
-const PRETTIER_VERSION = "3.9.4";
-const PRETTIER_BASE = `${NPM_MIRROR_BASE}/prettier/${PRETTIER_VERSION}/files`;
+const MONACO_BASE = CdnUtils.monaco.base;
 const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Shift+Enter" };
 const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
 const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
@@ -367,11 +364,11 @@ const WORKSPACE_SEARCH_RESULT_LIMIT = 500;
 let monaco = null;
 let prettierStandalonePromise = null;
 const prettierPluginPromises = new Map();
-const scriptLoadPromises = new Map();
 let aiCompletionRequestSerial = 0;
 let aiCompletionInFlight = false;
 let aiCompletionManualUntil = 0;
 let aiCompletionAbortController = null;
+let monacoLanguageIndex = null;
 
 window.process ||= { env: {} };
 
@@ -911,11 +908,8 @@ function loadMonaco() {
       return;
     }
 
-    const script = document.createElement("script");
-    script.src = `${MONACO_BASE}/loader.js`;
-    script.onload = configureAndLoad;
-    script.onerror = () => reject(new Error("Failed to load Monaco loader"));
-    document.head.append(script);
+    CdnUtils.loadScript(CdnUtils.monaco.loader, () => window.require, "Monaco loader")
+      .then(configureAndLoad, reject);
   });
 }
 
@@ -2225,7 +2219,7 @@ function getPrettierConfig(language) {
 
 async function loadPrettierBundle(pluginNames) {
   if (!prettierStandalonePromise) {
-    prettierStandalonePromise = loadScript(`${PRETTIER_BASE}/standalone.js`, () => window.prettier, "Prettier standalone");
+    prettierStandalonePromise = CdnUtils.loadScript(CdnUtils.prettier.standalone, () => window.prettier, "Prettier standalone");
   }
   const [prettier, plugins] = await Promise.all([
     prettierStandalonePromise,
@@ -2236,27 +2230,9 @@ async function loadPrettierBundle(pluginNames) {
 
 function loadPrettierPlugin(name) {
   if (!prettierPluginPromises.has(name)) {
-    prettierPluginPromises.set(name, loadScript(`${PRETTIER_BASE}/plugins/${name}.js`, () => window.prettierPlugins?.[name], `Prettier plugin ${name}`));
+    prettierPluginPromises.set(name, CdnUtils.loadScript(CdnUtils.prettier.plugin(name), () => window.prettierPlugins?.[name], `Prettier plugin ${name}`));
   }
   return prettierPluginPromises.get(name);
-}
-
-function loadScript(src, getGlobal, label) {
-  const existing = getGlobal?.();
-  if (existing) return Promise.resolve(existing);
-  if (!scriptLoadPromises.has(src)) {
-    scriptLoadPromises.set(src, new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = src;
-      script.onload = () => {
-        const value = getGlobal?.();
-        value ? resolve(value) : reject(new Error(`${label} did not expose expected global`));
-      };
-      script.onerror = () => reject(new Error(`Failed to load ${label}`));
-      document.head.append(script);
-    }));
-  }
-  return scriptLoadPromises.get(src);
 }
 
 function toggleSidePanel() {
@@ -2707,11 +2683,10 @@ function countTreeNodes(nodes) {
 }
 
 function getLanguageId(fileName) {
-  const extension = fileName.toLowerCase().split(".").pop();
-  const lowerName = fileName.toLowerCase();
-  if (lowerName === "dockerfile") return "dockerfile";
-  const byExtension = { astro: "html", bat: "bat", c: "c", cc: "cpp", cpp: "cpp", cs: "csharp", css: "css", dart: "dart", fs: "fsharp", go: "go", gql: "graphql", graphql: "graphql", h: "c", handlebars: "handlebars", hbs: "handlebars", hpp: "cpp", html: "html", ini: "ini", java: "java", js: "javascript", json: "json", json5: "json5", jsonc: "jsonc", jsx: "javascript", kt: "kotlin", less: "less", lua: "lua", md: "markdown", mdx: "mdx", mjs: "javascript", php: "php", ps1: "powershell", py: "python", r: "r", rb: "ruby", rs: "rust", scss: "scss", sh: "shell", sql: "sql", swift: "swift", ts: "typescript", tsx: "typescript", txt: "plaintext", vue: "vue", xml: "xml", yaml: "yaml", yml: "yaml" };
-  return byExtension[extension] || "plaintext";
+  const name = String(fileName || "").split(/[\\/]/).pop().toLowerCase();
+  const extension = name.includes(".") ? name.split(".").pop() : "";
+  const index = getMonacoLanguageIndex();
+  return index.byFileName.get(name) || index.byExtension.get(extension) || "plaintext";
 }
 
 function getLanguageLabel(languageId) {
@@ -2719,16 +2694,23 @@ function getLanguageLabel(languageId) {
 }
 
 function getMonacoLanguageId(languageId) {
-  const languageMap = {
-    angular: "html",
-    flow: "javascript",
-    handlebars: "html",
-    json5: "json",
-    jsonc: "json",
-    mdx: "markdown",
-    vue: "html",
-  };
-  return languageMap[languageId] || languageId;
+  if (getMonacoLanguageIndex().ids.has(languageId)) return languageId;
+  return "plaintext";
+}
+
+function getMonacoLanguageIndex() {
+  if (monacoLanguageIndex) return monacoLanguageIndex;
+  if (!monaco?.languages?.getLanguages) return { byExtension: new Map(), byFileName: new Map(), ids: new Set() };
+  const byExtension = new Map();
+  const byFileName = new Map();
+  const ids = new Set();
+  monaco?.languages?.getLanguages?.().forEach((language) => {
+    ids.add(language.id);
+    (language.extensions || []).forEach((extension) => byExtension.set(extension.replace(/^\./, "").toLowerCase(), language.id));
+    (language.filenames || []).forEach((fileName) => byFileName.set(fileName.toLowerCase(), language.id));
+  });
+  monacoLanguageIndex = { byExtension, byFileName, ids };
+  return monacoLanguageIndex;
 }
 
 function getTreeIconClass(node, collapsed = false) {
