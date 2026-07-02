@@ -4,6 +4,9 @@
       <button class="activity-button" :class="{ active: activeView === 'explorer' }" :title="tr('activity.explorer')" :aria-label="tr('activity.explorer')" @click="showPanel('explorer')">
         <span class="codicon codicon-files" aria-hidden="true"></span>
       </button>
+      <button class="activity-button" :class="{ active: activeView === 'search' }" :title="tr('activity.search')" :aria-label="tr('activity.search')" @click="showPanel('search')">
+        <span class="codicon codicon-search" aria-hidden="true"></span>
+      </button>
       <button class="activity-button" :class="{ active: activeView === 'changes' }" :title="tr('activity.changes')" :aria-label="tr('activity.changes')" @click="showPanel('changes')">
         <span class="codicon codicon-source-control" aria-hidden="true"></span>
       </button>
@@ -34,6 +37,51 @@
           <div v-if="!rootHandle" class="workspace-card">{{ tr('workspace.treeEmpty') }}</div>
           <TreeList v-else :nodes="tree" :depth="0" :active-path="activePath" :collapsed-paths="collapsedPaths" :dirty-paths="dirtyPathSet" @open-file="openFile" @toggle-dir="toggleDirectory" @context-node="showContextMenu" />
         </nav>
+      </section>
+
+      <section v-show="activeView === 'search'" class="panel-view active">
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">Search</p>
+            <h1>{{ tr('panel.search') }}</h1>
+          </div>
+          <button class="icon-button" :title="tr('search.clear')" :aria-label="tr('search.clear')" :disabled="!searchQuery && searchResults.length === 0" @click="clearSearchResults">
+            <span class="codicon codicon-clear-all" aria-hidden="true"></span>
+          </button>
+        </header>
+        <form class="search-form" @submit.prevent="runGlobalSearch">
+          <div class="search-row">
+            <input v-model="searchQuery" type="search" :placeholder="tr('search.placeholder')" :disabled="!rootHandle || searchBusy" autocomplete="off" spellcheck="false" />
+            <button type="button" class="search-option" :class="{ active: searchMatchCase }" :title="tr('search.matchCase')" :aria-label="tr('search.matchCase')" @click="searchMatchCase = !searchMatchCase">Aa</button>
+            <button type="submit" :disabled="!rootHandle || searchBusy || !searchQuery.trim()">{{ searchBusy ? tr('search.running') : tr('search.submit') }}</button>
+          </div>
+          <div class="search-row replace-row">
+            <input v-model="searchReplaceText" type="text" :placeholder="tr('search.replacePlaceholder')" :disabled="!rootHandle || searchBusy" autocomplete="off" spellcheck="false" />
+            <button type="button" :disabled="!rootHandle || searchBusy || searchResults.length === 0" @click="replaceAllSearchResults">{{ tr('search.replaceAll') }}</button>
+          </div>
+        </form>
+        <div class="search-results">
+          <div v-if="!rootHandle" class="workspace-card">{{ tr('workspace.treeEmpty') }}</div>
+          <div v-else-if="searchBusy" class="workspace-card">{{ tr('search.running') }}</div>
+          <div v-else-if="searchSearched && searchResults.length === 0" class="workspace-card">{{ tr('search.noResults') }}</div>
+          <div v-else-if="!searchSearched" class="workspace-card">{{ tr('search.empty') }}</div>
+          <section v-for="result in searchResults" v-else :key="result.path" class="search-result-file">
+            <button type="button" class="search-result-file-header" :title="result.path" @click="openFileByPath(result.path)">
+              <span class="codicon" :class="getTreeIconClass({ name: result.name, kind: 'file' })" aria-hidden="true"></span>
+              <span>{{ result.path }}</span>
+              <small>{{ result.matches.length }}</small>
+            </button>
+            <button v-for="match in result.matches" :key="`${result.path}:${match.lineNumber}:${match.column}`" type="button" class="search-result-match" :title="match.lineText" @click="openSearchResult(result, match)">
+              <small>{{ match.lineNumber }}</small>
+              <span class="search-result-line">
+                <template v-for="(segment, segmentIndex) in getSearchMatchSegments(match)" :key="segmentIndex">
+                  <mark v-if="segment.match">{{ segment.text }}</mark>
+                  <span v-else>{{ segment.text }}</span>
+                </template>
+              </span>
+            </button>
+          </section>
+        </div>
       </section>
 
       <section v-show="activeView === 'changes'" class="panel-view active">
@@ -226,6 +274,16 @@
     </aside>
 
     <main class="editor-shell">
+      <div class="command-bar">
+        <button type="button" class="command-center" :title="tr('commandCenter.title')" :aria-label="tr('commandCenter.title')" @click="openCommandPalette">
+          <span class="codicon codicon-search" aria-hidden="true"></span>
+          <span class="command-center-label">{{ tr('commandCenter.placeholder') }}</span>
+          <span class="command-center-shortcut">{{ settings.shortcuts.commandPalette }}</span>
+        </button>
+        <button type="button" class="command-icon-button" :title="tr('action.findReferences')" :aria-label="tr('action.findReferences')" :disabled="!activeFile" @click="triggerFindReferences">
+          <span class="codicon codicon-references" aria-hidden="true"></span>
+        </button>
+      </div>
       <div class="tabs" role="tablist">
         <button v-for="file in openFileList" :key="file.path" class="tab" :class="{ active: file.path === activePath && !activeDiffPath }" :title="file.path" role="tab" :aria-selected="file.path === activePath && !activeDiffPath" @click="activateFile(file.path)">
           <span class="tab-name">{{ file.name }}</span>
@@ -290,7 +348,7 @@ const MONACO_VERSION = "0.55.1";
 const MONACO_BASE = `${NPM_MIRROR_BASE}/monaco-editor/${MONACO_VERSION}/files/min/vs`;
 const PRETTIER_VERSION = "3.9.4";
 const PRETTIER_BASE = `${NPM_MIRROR_BASE}/prettier/${PRETTIER_VERSION}/files`;
-const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Shift+Enter" };
+const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Shift+Enter" };
 const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
 const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
 const SIDEBAR_MIN_WIDTH = 180;
@@ -300,6 +358,12 @@ const AI_COMPLETION_MANUAL_TRIGGER_WINDOW_MS = 2000;
 const AI_COMPLETION_MANUAL_PREFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_SUFFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_MAX_OUTPUT_TOKENS = 512;
+const WORKSPACE_MODEL_MAX_FILE_SIZE = 5 * 1024 * 1024;
+const WORKSPACE_FILE_ACTION_LIMIT = 1000;
+const WORKSPACE_REFERENCE_FILE_LIMIT = 2000;
+const WORKSPACE_REFERENCE_RESULT_LIMIT = 1000;
+const WORKSPACE_SEARCH_FILE_LIMIT = 3000;
+const WORKSPACE_SEARCH_RESULT_LIMIT = 500;
 let monaco = null;
 let prettierStandalonePromise = null;
 const prettierPluginPromises = new Map();
@@ -315,13 +379,17 @@ const messages = {
   "zh-CN": {
     "nav.main": "主导航",
     "activity.explorer": "资源管理器",
+    "activity.search": "搜索",
     "activity.changes": "变更",
     "activity.ai": "AI 助手",
     "activity.settings": "设置",
     "panel.files": "文件",
+    "panel.search": "搜索",
     "panel.changes": "变更",
     "panel.ai": "AI 助手",
     "panel.settings": "设置",
+    "commandCenter.placeholder": "搜索命令或文件...",
+    "commandCenter.title": "打开命令面板",
     "action.openFolder": "打开文件夹",
     "action.newFile": "新建文件",
     "action.newFolder": "新建文件夹",
@@ -333,6 +401,7 @@ const messages = {
     "action.close": "关闭",
     "action.save": "保存",
     "action.format": "格式化文档",
+    "action.findReferences": "查找引用",
     "action.toggleSidebar": "切换侧边栏",
     "action.aiComplete": "AI 代码补全",
     "settings.theme": "主题",
@@ -368,6 +437,17 @@ const messages = {
     "changes.none": "没有未保存的变更",
     "changes.openDiff": "打开对比",
     "changes.deleted": "待删除",
+    "search.placeholder": "搜索",
+    "search.replacePlaceholder": "替换",
+    "search.submit": "搜索",
+    "search.replaceAll": "全部替换",
+    "search.matchCase": "区分大小写",
+    "search.running": "正在搜索...",
+    "search.empty": "输入内容后在工作区中搜索。",
+    "search.noResults": "没有结果",
+    "search.clear": "清空搜索结果",
+    "search.results": "{count} 个结果",
+    "search.replaced": "已替换 {count} 处",
     "empty.title": "打开一个目录，然后选择文件",
     "empty.description": "此编辑器使用 Monaco Editor 和浏览器 File System Access API 直接读写本地文件。",
     "editor.aria": "代码编辑器",
@@ -453,19 +533,26 @@ const messages = {
     "error.invalidName": "名称不合法",
     "shortcut.save": "保存",
     "shortcut.format": "格式化文档",
+    "shortcut.commandPalette": "命令面板",
+    "shortcut.search": "全局搜索",
+    "shortcut.findReferences": "查找引用",
     "shortcut.toggleSidebar": "切换侧边栏",
     "shortcut.aiComplete": "AI 代码补全",
   },
   "en-US": {
     "nav.main": "Main Navigation",
     "activity.explorer": "Explorer",
+    "activity.search": "Search",
     "activity.changes": "Changes",
     "activity.ai": "AI Assistant",
     "activity.settings": "Settings",
     "panel.files": "Files",
+    "panel.search": "Search",
     "panel.changes": "Changes",
     "panel.ai": "AI Assistant",
     "panel.settings": "Settings",
+    "commandCenter.placeholder": "Search commands or files...",
+    "commandCenter.title": "Open Command Palette",
     "action.openFolder": "Open Folder",
     "action.newFile": "New File",
     "action.newFolder": "New Folder",
@@ -477,6 +564,7 @@ const messages = {
     "action.close": "Close",
     "action.save": "Save",
     "action.format": "Format Document",
+    "action.findReferences": "Find References",
     "action.toggleSidebar": "Toggle Sidebar",
     "action.aiComplete": "AI Code Completion",
     "settings.theme": "Theme",
@@ -512,6 +600,17 @@ const messages = {
     "changes.none": "No unsaved changes",
     "changes.openDiff": "Open Diff",
     "changes.deleted": "Pending delete",
+    "search.placeholder": "Search",
+    "search.replacePlaceholder": "Replace",
+    "search.submit": "Search",
+    "search.replaceAll": "Replace All",
+    "search.matchCase": "Match Case",
+    "search.running": "Searching...",
+    "search.empty": "Enter text to search in the workspace.",
+    "search.noResults": "No results",
+    "search.clear": "Clear Search Results",
+    "search.results": "{count} results",
+    "search.replaced": "Replaced {count} occurrence(s)",
     "empty.title": "Open a folder, then choose a file",
     "empty.description": "This editor uses Monaco Editor and the browser File System Access API to read and write local files.",
     "editor.aria": "Code editor",
@@ -597,6 +696,9 @@ const messages = {
     "error.invalidName": "Invalid name",
     "shortcut.save": "Save",
     "shortcut.format": "Format Document",
+    "shortcut.commandPalette": "Command Palette",
+    "shortcut.search": "Global Search",
+    "shortcut.findReferences": "Find References",
     "shortcut.toggleSidebar": "Toggle Sidebar",
     "shortcut.aiComplete": "AI Code Completion",
   },
@@ -612,6 +714,9 @@ const renderMarkdown = MarkdownUtils.renderMarkdown;
 const shortcutItems = [
   { key: "save", labelKey: "shortcut.save" },
   { key: "format", labelKey: "shortcut.format" },
+  { key: "commandPalette", labelKey: "shortcut.commandPalette" },
+  { key: "search", labelKey: "shortcut.search" },
+  { key: "findReferences", labelKey: "shortcut.findReferences" },
   { key: "toggleSidebar", labelKey: "shortcut.toggleSidebar" },
   { key: "aiComplete", labelKey: "shortcut.aiComplete" },
 ];
@@ -665,6 +770,10 @@ const sidePanelVisible = ref(true);
 const sidebarResizing = ref(false);
 const keybindingDisposables = [];
 const inlineCompletionDisposables = [];
+const referenceProviderDisposables = [];
+const workspaceFileActionDisposables = [];
+const workspaceModelPaths = new Set();
+const workspaceModelPromises = new Map();
 const status = reactive({ left: "Ready", right: "Monaco Editor" });
 const contextMenu = reactive({ visible: false, x: 0, y: 0, node: null });
 const changesContextMenu = reactive({ visible: false, x: 0, y: 0, file: null });
@@ -676,6 +785,13 @@ const aiAbortController = shallowRef(null);
 const aiAvailableModels = ref([]);
 const aiModelsLoading = ref(false);
 const agentModelToAdd = ref("");
+const searchQuery = ref("");
+const searchReplaceText = ref("");
+const searchMatchCase = ref(false);
+const searchResults = ref([]);
+const searchBusy = ref(false);
+const searchSearched = ref(false);
+let searchSerial = 0;
 const aiAgentModelOptions = computed(() => {
   const configured = parseCommaList(settings.ai.agentModels);
   return uniqueStrings([...(configured.length ? configured : [settings.ai.agentModel, defaultAiSettings.agentModel]), ...aiAvailableModels.value]);
@@ -708,6 +824,7 @@ const activeLanguage = computed({ get: () => activeFile.value?.language || "plai
 watch(() => settings.locale, () => { document.documentElement.lang = settings.locale; });
 watch(() => settings.ai.agentModels, syncSelectedAgentModel);
 watch(() => aiMessages.length, () => { nextTick(scrollAiMessagesToBottom); });
+watch(searchMatchCase, () => { if (searchSearched.value && searchQuery.value.trim()) runGlobalSearch(); });
 watch(settings, persistSettings, { deep: true });
 
 onMounted(async () => {
@@ -743,23 +860,29 @@ onMounted(async () => {
   }));
   registerKeybindings();
   registerInlineCompletions();
+  registerReferenceProviders();
   registerCompletionInvalidation();
   setStatus(tr("status.ready"), tr("status.loaded"));
   document.addEventListener("click", hideAllContextMenus);
+  document.addEventListener("keydown", handleGlobalCommandPaletteShortcut);
   window.addEventListener("resize", hideAllContextMenus);
   window.addEventListener("beforeunload", beforeUnload);
 });
 
 onBeforeUnmount(() => {
   formatterDisposables.splice(0).forEach((disposable) => disposable.dispose());
+  workspaceFileActionDisposables.splice(0).forEach((disposable) => disposable.dispose());
+  referenceProviderDisposables.splice(0).forEach((disposable) => disposable.dispose());
   keybindingDisposables.splice(0).forEach((disposable) => disposable.dispose());
   inlineCompletionDisposables.splice(0).forEach((disposable) => disposable.dispose());
   abortAiCompletionRequest();
   aiAbortController.value?.abort();
-  openFiles.forEach((file) => disposeFileModels(file));
+  openFiles.forEach((file) => disposeFileModels(file, { force: true }));
+  disposeWorkspaceModels({ force: true });
   editor.value?.dispose();
   diffEditor.value?.dispose();
   document.removeEventListener("click", hideAllContextMenus);
+  document.removeEventListener("keydown", handleGlobalCommandPaletteShortcut);
   window.removeEventListener("resize", hideAllContextMenus);
   window.removeEventListener("beforeunload", beforeUnload);
 });
@@ -811,8 +934,10 @@ async function openFolder() {
     const handle = markRaw(await window.showDirectoryPicker({ mode: "readwrite" }));
     rootHandle.value = handle;
     rootName.value = handle.name;
-    openFiles.forEach((file) => disposeFileModels(file));
+    openFiles.forEach((file) => disposeFileModels(file, { force: true }));
     openFiles.clear();
+    disposeWorkspaceModels({ force: true });
+    registerWorkspaceFileActions();
     activePath.value = "";
     activeDiffPath.value = "";
     collapsedPaths.clear();
@@ -827,6 +952,8 @@ async function refreshTree(options = {}) {
   if (!rootHandle.value) return;
   try {
     diskTree.value = await readDirectory(rootHandle.value, "");
+    pruneWorkspaceModels(diskTree.value);
+    registerWorkspaceFileActions();
     if (options.collapseAll) {
       collapsedPaths.clear();
       collectDirectoryPaths(diskTree.value).forEach((path) => collapsedPaths.add(path));
@@ -839,6 +966,253 @@ async function refreshTree(options = {}) {
 
 function collectDirectoryPaths(nodes) {
   return nodes.flatMap((node) => node.kind === "directory" ? [node.path, ...collectDirectoryPaths(node.children || [])] : []);
+}
+
+function collectFileNodes(nodes, maxItems = Number.POSITIVE_INFINITY) {
+  const files = [];
+  const visit = (node) => {
+    if (files.length >= maxItems) return;
+    if (node.kind === "file") {
+      if (!node.deleted) files.push(node);
+      return;
+    }
+    (node.children || []).forEach(visit);
+  };
+  nodes.forEach(visit);
+  return files;
+}
+
+function handleGlobalCommandPaletteShortcut(event) {
+  if (event.isComposing) return;
+  if (isShortcutEvent(settings.shortcuts.commandPalette, event)) {
+    event.preventDefault();
+    openCommandPalette();
+    return;
+  }
+  if (isShortcutEvent(settings.shortcuts.search, event)) {
+    event.preventDefault();
+    showPanel("search");
+  }
+}
+
+function isShortcutEvent(value, event) {
+  const parts = String(value || "").split("+").map((part) => part.trim()).filter(Boolean);
+  if (!parts.length) return false;
+  const key = parts.pop();
+  const modifiers = new Set(parts.map((part) => part.toLowerCase()));
+  const wantsCtrlCmd = modifiers.has("ctrl") || modifiers.has("cmd") || modifiers.has("meta") || modifiers.has("ctrlcmd");
+  const wantsShift = modifiers.has("shift");
+  const wantsAlt = modifiers.has("alt") || modifiers.has("option");
+  const hasCtrlCmd = event.ctrlKey || event.metaKey;
+  return hasCtrlCmd === wantsCtrlCmd
+    && event.shiftKey === wantsShift
+    && event.altKey === wantsAlt
+    && normalizeShortcutKey(event.key) === normalizeShortcutKey(key);
+}
+
+function normalizeShortcutKey(key) {
+  const value = String(key || "").trim();
+  const aliases = { Esc: "Escape", Del: "Delete", Up: "ArrowUp", Down: "ArrowDown", Left: "ArrowLeft", Right: "ArrowRight", Space: " " };
+  const normalized = aliases[value] || value;
+  return normalized.length === 1 ? normalized.toLowerCase() : normalized.toLowerCase().replace(/^arrow/, "");
+}
+
+function openCommandPalette() {
+  const targetEditor = activeDiffPath.value ? diffEditor.value?.getModifiedEditor?.() : editor.value;
+  const action = targetEditor?.getAction("editor.action.quickCommand") || editor.value?.getAction("editor.action.quickCommand");
+  targetEditor?.focus?.();
+  action?.run();
+}
+
+async function runGlobalSearch() {
+  const query = searchQuery.value.trim();
+  if (!query || searchBusy.value || !rootHandle.value) return;
+  const requestId = ++searchSerial;
+  searchBusy.value = true;
+  searchSearched.value = true;
+  searchResults.value = [];
+  try {
+    const fileNodes = collectFileNodes(tree.value, WORKSPACE_SEARCH_FILE_LIMIT);
+    const groupedResults = [];
+    let totalMatches = 0;
+    for (const node of fileNodes) {
+      if (requestId !== searchSerial || totalMatches >= WORKSPACE_SEARCH_RESULT_LIMIT) break;
+      const model = await ensureWorkspaceModelForNode(node);
+      if (!model) continue;
+      const remaining = WORKSPACE_SEARCH_RESULT_LIMIT - totalMatches;
+      const matches = model.findMatches(query, false, false, searchMatchCase.value, null, false, remaining).map((match) => ({
+        lineNumber: match.range.startLineNumber,
+        column: match.range.startColumn,
+        range: match.range,
+        startIndex: match.range.startColumn - 1,
+        endIndex: match.range.endColumn - 1,
+        lineText: model.getLineContent(match.range.startLineNumber),
+      }));
+      if (!matches.length) continue;
+      totalMatches += matches.length;
+      groupedResults.push({ path: node.path, name: node.name, matches });
+      searchResults.value = groupedResults.slice();
+    }
+    if (requestId === searchSerial) setStatus(tr("search.results", { count: totalMatches }), query);
+  } finally {
+    if (requestId === searchSerial) searchBusy.value = false;
+  }
+}
+
+function clearSearchResults() {
+  searchSerial += 1;
+  searchQuery.value = "";
+  searchResults.value = [];
+  searchBusy.value = false;
+  searchSearched.value = false;
+}
+
+function getSearchMatchSegments(match) {
+  const line = match?.lineText || "";
+  const start = Math.max(0, Math.min(match?.startIndex ?? 0, line.length));
+  const end = Math.max(start, Math.min(match?.endIndex ?? start, line.length));
+  if (start === end) return [{ text: line.trim() || line, match: false }];
+  return [
+    { text: line.slice(0, start), match: false },
+    { text: line.slice(start, end), match: true },
+    { text: line.slice(end), match: false },
+  ].filter((segment) => segment.text);
+}
+
+async function replaceAllSearchResults() {
+  if (searchBusy.value || !searchResults.value.length) return;
+  const results = searchResults.value.map((result) => ({ ...result, matches: result.matches.slice() }));
+  const replacement = searchReplaceText.value;
+  let replacedCount = 0;
+  for (const result of results) {
+    const file = await ensureFileState(result.path, { closed: true });
+    if (!file || file.deleted) continue;
+    const edits = result.matches
+      .slice()
+      .sort((a, b) => b.range.startLineNumber - a.range.startLineNumber || b.range.startColumn - a.range.startColumn)
+      .map((match) => ({ range: match.range, text: replacement }));
+    if (!edits.length) continue;
+    file.model.pushEditOperations([], edits, () => null);
+    updateDirtyState(file);
+    replacedCount += edits.length;
+  }
+  setStatus(tr("search.replaced", { count: replacedCount }), searchQuery.value.trim());
+  await runGlobalSearch();
+}
+
+async function openSearchResult(result, match) {
+  const file = await openFileByPath(result.path);
+  if (!file || !match?.range) return;
+  await nextTick();
+  editor.value?.setSelection(match.range);
+  editor.value?.revealRangeInCenter(match.range);
+  editor.value?.focus();
+}
+
+function registerWorkspaceFileActions() {
+  workspaceFileActionDisposables.splice(0).forEach((disposable) => disposable.dispose());
+  if (!editor.value) return;
+  const targetEditors = [editor.value, diffEditor.value?.getOriginalEditor(), diffEditor.value?.getModifiedEditor()].filter(Boolean);
+  const fileNodes = collectFileNodes(tree.value, WORKSPACE_FILE_ACTION_LIMIT);
+  fileNodes.forEach((node, nodeIndex) => {
+    targetEditors.forEach((targetEditor, editorIndex) => {
+      workspaceFileActionDisposables.push(targetEditor.addAction({
+        id: `browser-editor-open-file-${editorIndex}-${nodeIndex}-${hashWorkspacePath(node.path)}`,
+        label: `Open File: ${node.path}`,
+        run: () => openFileByPath(node.path),
+      }));
+    });
+  });
+}
+
+function hashWorkspacePath(path) {
+  let hash = 0;
+  for (let index = 0; index < path.length; index += 1) hash = ((hash << 5) - hash + path.charCodeAt(index)) | 0;
+  return Math.abs(hash).toString(36);
+}
+
+async function openFileByPath(path) {
+  const normalized = normalizeWorkspacePath(path);
+  const existing = openFiles.get(normalized);
+  if (existing) {
+    existing.closed = false;
+    activateFile(existing.path);
+    return existing;
+  }
+  const node = findNodeByPath(tree.value, normalized);
+  if (node?.kind === "file") return openFile(node);
+  return null;
+}
+
+function getWorkspaceModelUri(path) {
+  return monaco.Uri.parse(`file:///${encodeURI(path)}`);
+}
+
+function getOriginalModelUri(path) {
+  return monaco.Uri.parse(`inmemory://original/${encodeURIComponent(path)}`);
+}
+
+function getWorkspacePathFromModel(model) {
+  if (model?.uri?.scheme !== "file") return "";
+  return decodeURI(model.uri.path.replace(/^\/+/, ""));
+}
+
+function getOrCreateWorkspaceModel(content, monacoLanguage, path, syncContent = false) {
+  const uri = getWorkspaceModelUri(path);
+  const existing = monaco.editor.getModel(uri);
+  if (existing) {
+    if (existing.getLanguageId() !== monacoLanguage) monaco.editor.setModelLanguage(existing, monacoLanguage);
+    if (syncContent && existing.getValue() !== content) existing.setValue(content);
+    return markRaw(existing);
+  }
+  return markRaw(monaco.editor.createModel(content, monacoLanguage, uri));
+}
+
+function createOriginalModel(content, monacoLanguage, path) {
+  return markRaw(monaco.editor.createModel(content, monacoLanguage, getOriginalModelUri(path)));
+}
+
+async function ensureWorkspaceModelForNode(node, token) {
+  if (token?.isCancellationRequested || !node || node.kind !== "file") return null;
+  const openFileState = openFiles.get(node.path);
+  if (openFileState && !openFileState.deleted) return openFileState.model;
+  if (!node.handle) return null;
+  const existing = monaco.editor.getModel(getWorkspaceModelUri(node.path));
+  if (existing) {
+    workspaceModelPaths.add(node.path);
+    return existing;
+  }
+  if (workspaceModelPromises.has(node.path)) return workspaceModelPromises.get(node.path);
+  const promise = (async () => {
+    const file = await node.handle.getFile();
+    if (token?.isCancellationRequested || !isReadableTextFile(file)) return null;
+    const content = await file.text();
+    const monacoLanguage = getMonacoLanguageId(getLanguageId(node.name));
+    const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
+    workspaceModelPaths.add(node.path);
+    return model;
+  })().catch(() => null).finally(() => workspaceModelPromises.delete(node.path));
+  workspaceModelPromises.set(node.path, promise);
+  return promise;
+}
+
+function pruneWorkspaceModels(nodes) {
+  const existingPaths = new Set(collectFileNodes(nodes, Number.POSITIVE_INFINITY).map((node) => node.path));
+  Array.from(workspaceModelPaths).forEach((path) => {
+    if (existingPaths.has(path) || openFiles.has(path)) return;
+    monaco.editor.getModel(getWorkspaceModelUri(path))?.dispose();
+    workspaceModelPaths.delete(path);
+    workspaceModelPromises.delete(path);
+  });
+}
+
+function disposeWorkspaceModels({ force = false } = {}) {
+  Array.from(workspaceModelPaths).forEach((path) => {
+    if (!force && openFiles.has(path)) return;
+    monaco.editor.getModel(getWorkspaceModelUri(path))?.dispose();
+    workspaceModelPaths.delete(path);
+    workspaceModelPromises.delete(path);
+  });
 }
 
 function mergePendingFilesIntoTree(nodes, pendingFiles) {
@@ -893,24 +1267,27 @@ async function openFile(node) {
       openFiles.get(node.path).closed = false;
       touchDirtyState();
       activateFile(node.path);
-      return;
+      return openFiles.get(node.path);
     }
     const file = await node.handle.getFile();
     if (!isReadableTextFile(file) && !confirm(tr("confirm.binary", { name: node.name }))) return;
     const content = await file.text();
     const language = getLanguageId(node.name);
     const monacoLanguage = getMonacoLanguageId(language);
-    const model = markRaw(monaco.editor.createModel(content, monacoLanguage, monaco.Uri.parse(`file:///${encodeURI(node.path)}`)));
-    const originalModel = markRaw(monaco.editor.createModel(content, monacoLanguage, monaco.Uri.parse(`inmemory://original/${encodeURIComponent(node.path)}`)));
+    const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
+    workspaceModelPaths.delete(node.path);
+    const originalModel = createOriginalModel(content, monacoLanguage, node.path);
     const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), model, originalModel, savedValue: content, dirty: false, closed: false, language, monacoLanguage };
-    model.onDidChangeContent(() => {
+    fileState.modelContentDisposable = model.onDidChangeContent(() => {
       updateDirtyState(fileState);
     });
     openFiles.set(node.path, fileState);
     activateFile(node.path);
     setStatus(tr("status.openedFile", { name: node.name }), getLanguageLabel(language));
+    return fileState;
   } catch (error) {
     reportError("error.openFile", error);
+    return null;
   }
 }
 
@@ -969,7 +1346,7 @@ function activateLastOpenFile(excludedPath = "") {
 function removeFileState(path) {
   const file = openFiles.get(path);
   if (!file) return;
-  disposeFileModels(file);
+  disposeFileModels(file, { force: true });
   openFiles.delete(path);
   if (activePath.value === path) activateLastOpenFile(path);
 }
@@ -1233,6 +1610,9 @@ function registerKeybindings() {
   const actions = [
     { id: "browser-editor-save", label: tr("action.save"), shortcut: settings.shortcuts.save, run: saveActiveFile },
     { id: "browser-editor-format", label: tr("action.format"), shortcut: settings.shortcuts.format, run: formatActiveFile },
+    { id: "browser-editor-command-palette", label: tr("commandCenter.title"), shortcut: settings.shortcuts.commandPalette, run: openCommandPalette },
+    { id: "browser-editor-search", label: tr("panel.search"), shortcut: settings.shortcuts.search, run: () => showPanel("search") },
+    { id: "browser-editor-find-references", label: tr("action.findReferences"), shortcut: settings.shortcuts.findReferences, run: triggerFindReferences },
     { id: "browser-editor-toggle-sidebar", label: tr("action.toggleSidebar"), shortcut: settings.shortcuts.toggleSidebar, run: toggleSidePanel },
     { id: "browser-editor-ai-complete", label: tr("action.aiComplete"), shortcut: settings.shortcuts.aiComplete, run: triggerAiCompletion },
   ];
@@ -1470,6 +1850,47 @@ function registerInlineCompletions() {
       freeInlineCompletions() {},
     }));
   });
+}
+
+function registerReferenceProviders() {
+  referenceProviderDisposables.splice(0).forEach((disposable) => disposable.dispose());
+  const languages = Array.from(new Set(languageOptions.map((item) => getMonacoLanguageId(item.id))));
+  languages.forEach((language) => {
+    referenceProviderDisposables.push(monaco.languages.registerReferenceProvider(language, {
+      provideReferences(model, position, context, token) {
+        return provideWorkspaceReferences(model, position, token);
+      },
+    }));
+  });
+}
+
+async function provideWorkspaceReferences(model, position, token) {
+  const word = model.getWordAtPosition(position);
+  if (!word?.word) return [];
+  const fileNodes = collectFileNodes(tree.value, WORKSPACE_REFERENCE_FILE_LIMIT);
+  for (const node of fileNodes) {
+    if (token?.isCancellationRequested) return [];
+    await ensureWorkspaceModelForNode(node, token);
+  }
+  const references = [];
+  const workspaceModels = new Map();
+  monaco.editor.getModels().forEach((workspaceModel) => {
+    const path = getWorkspacePathFromModel(workspaceModel);
+    if (path) workspaceModels.set(path, workspaceModel);
+  });
+  for (const workspaceModel of workspaceModels.values()) {
+    if (token?.isCancellationRequested || references.length >= WORKSPACE_REFERENCE_RESULT_LIMIT) break;
+    const matches = workspaceModel.findMatches(word.word, false, false, true, null, false, WORKSPACE_REFERENCE_RESULT_LIMIT - references.length);
+    matches.forEach((match) => {
+      if (isExactWordMatch(workspaceModel, match.range, word.word)) references.push({ uri: workspaceModel.uri, range: match.range });
+    });
+  }
+  return references;
+}
+
+function isExactWordMatch(model, range, word) {
+  const matchWord = model.getWordAtPosition({ lineNumber: range.startLineNumber, column: range.startColumn });
+  return matchWord?.word === word && matchWord.startColumn === range.startColumn && matchWord.endColumn === range.endColumn;
 }
 
 function registerCompletionInvalidation() {
@@ -1879,6 +2300,13 @@ async function triggerAiCompletion() {
   await editor.value?.getAction("editor.action.inlineSuggest.trigger")?.run();
 }
 
+async function triggerFindReferences() {
+  if (!activeFile.value) return;
+  const targetEditor = activeDiffPath.value ? diffEditor.value?.getModifiedEditor?.() : editor.value;
+  targetEditor?.focus?.();
+  await targetEditor?.getAction("editor.action.referenceSearch.trigger")?.run();
+}
+
 function setStatus(left, right) {
   status.left = left;
   status.right = right || "";
@@ -1956,7 +2384,7 @@ function shouldHideName(name) {
 }
 
 function isReadableTextFile(file) {
-  return file.size <= 5 * 1024 * 1024 && (!file.type || file.type.startsWith("text/") || Boolean(getLanguageId(file.name)));
+  return file.size <= WORKSPACE_MODEL_MAX_FILE_SIZE && (!file.type || file.type.startsWith("text/") || Boolean(getLanguageId(file.name)));
 }
 
 function normalizeWorkspacePath(path) {
@@ -2003,10 +2431,11 @@ async function ensureFileState(path, options = {}) {
   const content = await file.text();
   const language = getLanguageId(node.name);
   const monacoLanguage = getMonacoLanguageId(language);
-  const model = markRaw(monaco.editor.createModel(content, monacoLanguage, monaco.Uri.parse(`file:///${encodeURI(node.path)}`)));
-  const originalModel = markRaw(monaco.editor.createModel(content, monacoLanguage, monaco.Uri.parse(`inmemory://original/${encodeURIComponent(node.path)}`)));
+  const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
+  workspaceModelPaths.delete(node.path);
+  const originalModel = createOriginalModel(content, monacoLanguage, node.path);
   const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), model, originalModel, savedValue: content, dirty: false, closed: options.closed ?? true, language, monacoLanguage, isNew: false, deleted: false };
-  model.onDidChangeContent(() => updateDirtyState(fileState));
+  fileState.modelContentDisposable = model.onDidChangeContent(() => updateDirtyState(fileState));
   openFiles.set(node.path, fileState);
   touchDirtyState();
   return fileState;
@@ -2017,10 +2446,11 @@ function createVirtualFileState(path, options = {}) {
   const content = String(options.content ?? "");
   const language = getLanguageId(name);
   const monacoLanguage = getMonacoLanguageId(language);
-  const model = markRaw(monaco.editor.createModel(content, monacoLanguage, monaco.Uri.parse(`file:///${encodeURI(path)}`)));
-  const originalModel = markRaw(monaco.editor.createModel("", monacoLanguage, monaco.Uri.parse(`inmemory://original/${encodeURIComponent(path)}`)));
+  const model = getOrCreateWorkspaceModel(content, monacoLanguage, path, true);
+  workspaceModelPaths.delete(path);
+  const originalModel = createOriginalModel("", monacoLanguage, path);
   const fileState = { name, path, handle: null, model, originalModel, savedValue: "", dirty: true, closed: options.closed ?? true, language, monacoLanguage, isNew: true, deleted: false };
-  model.onDidChangeContent(() => updateDirtyState(fileState));
+  fileState.modelContentDisposable = model.onDidChangeContent(() => updateDirtyState(fileState));
   openFiles.set(path, fileState);
   touchDirtyState();
   return fileState;
@@ -2254,7 +2684,7 @@ function getOpenFilesUnderPath(path) {
 
 function closeOpenFilesUnderPath(path) {
   getOpenFilesUnderPath(path).forEach((file) => {
-    disposeFileModels(file);
+    disposeFileModels(file, { force: true });
     openFiles.delete(file.path);
   });
   if (activePath.value === path || activePath.value.startsWith(`${path}/`)) {
@@ -2262,8 +2692,13 @@ function closeOpenFilesUnderPath(path) {
   }
 }
 
-function disposeFileModels(file) {
-  file.model?.dispose();
+function disposeFileModels(file, { force = false } = {}) {
+  file.modelContentDisposable?.dispose();
+  if (force || !workspaceModelPaths.has(file.path)) {
+    file.model?.dispose();
+    workspaceModelPaths.delete(file.path);
+    workspaceModelPromises.delete(file.path);
+  }
   file.originalModel?.dispose();
 }
 
@@ -2465,6 +2900,25 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .context-menu button.danger { color: #ffb3b3; }
 .code-editor-view .context-separator { height: 1px; margin: 4px 6px; background: var(--border); }
 .code-editor-view .settings-list { display: grid; gap: 12px; padding: 0 14px 18px; overflow: auto; }
+.code-editor-view .search-form { display: grid; gap: 6px; padding: 0 12px 12px; }
+.code-editor-view .search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
+.code-editor-view .replace-row { grid-template-columns: minmax(0, 1fr) auto; }
+.code-editor-view .search-form input { min-width: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--input); color: var(--text); padding: 7px 8px; }
+.code-editor-view .search-form input:focus { border-color: var(--accent-strong); outline: none; }
+.code-editor-view .search-form button { padding: 7px 10px; }
+.code-editor-view .search-form .search-option { min-width: 34px; padding: 7px 8px; color: var(--muted); font-weight: 700; }
+.code-editor-view .search-form .search-option.active { border-color: var(--accent-strong); background: var(--context-hover); color: var(--text); }
+.code-editor-view .search-results { min-height: 0; overflow: auto; padding: 0 0 16px; }
+.code-editor-view .search-result-file { display: grid; gap: 1px; }
+.code-editor-view .search-result-file-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 7px; width: 100%; min-height: 30px; padding: 5px 12px; border: 0; border-radius: 0; background: transparent; color: var(--text); text-align: left; }
+.code-editor-view .search-result-file-header:hover { background: var(--button-hover); }
+.code-editor-view .search-result-file-header span:not(.codicon) { overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.code-editor-view .search-result-file-header small { color: var(--muted); font-size: 11px; }
+.code-editor-view .search-result-match { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; width: 100%; min-height: 26px; padding: 4px 12px 4px 34px; border: 0; border-radius: 0; background: transparent; color: var(--text); text-align: left; }
+.code-editor-view .search-result-match:hover { background: var(--button-hover); }
+.code-editor-view .search-result-match small { color: var(--muted); font-size: 11px; text-align: right; }
+.code-editor-view .search-result-line { overflow: hidden; font-family: Consolas, 'Courier New', monospace; font-size: 12px; text-overflow: ellipsis; white-space: pre; }
+.code-editor-view .search-result-line mark { border-radius: 2px; background: #f6d365; color: #1f1f1f; }
 .code-editor-view .change-count { min-width: 24px; padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); text-align: center; }
 .code-editor-view .changes-list { display: grid; align-content: start; gap: 2px; min-height: 0; overflow: auto; padding: 0 0 16px; }
 .code-editor-view .change-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 6px 12px; border: 0; border-radius: 0; background: transparent; color: var(--text); text-align: left; }
@@ -2508,7 +2962,17 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .setting-hint { color: var(--muted); line-height: 1.45; }
 .code-editor-view .checkbox-row { display: flex; align-items: center; gap: 8px; }
 .code-editor-view .checkbox-row input { width: auto; }
-.code-editor-view .editor-shell { display: grid; grid-template-rows: 36px minmax(0, 1fr) 26px; min-width: 0; min-height: 0; background: var(--editor); }
+.code-editor-view .editor-shell { display: grid; grid-template-rows: 40px 36px minmax(0, 1fr) 26px; min-width: 0; min-height: 0; background: var(--editor); }
+.code-editor-view .command-bar { display: flex; align-items: center; justify-content: center; min-width: 0; gap: 8px; padding: 5px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.code-editor-view .command-center { display: grid; grid-template-columns: auto minmax(120px, 420px) auto; align-items: center; width: min(520px, 100%); height: 29px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--input); color: var(--muted); text-align: left; box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%); }
+.code-editor-view .command-center:hover,
+.code-editor-view .command-center:focus-visible { border-color: var(--accent-strong); background: var(--input); outline: none; box-shadow: 0 0 0 1px var(--accent-strong); }
+.code-editor-view .command-center > .codicon { padding: 0 8px; font-size: 14px; }
+.code-editor-view .command-center-label { min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.code-editor-view .command-center-shortcut { margin-right: 6px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font-size: 10px; line-height: 16px; }
+.code-editor-view .command-icon-button { display: inline-grid; width: 29px; height: 29px; place-items: center; padding: 0; border-color: var(--border); background: var(--input); color: var(--muted); }
+.code-editor-view .command-icon-button:hover:not(:disabled),
+.code-editor-view .command-icon-button:focus-visible { border-color: var(--accent-strong); background: var(--input); color: var(--text); outline: none; }
 .code-editor-view .tabs { display: flex; min-width: 0; overflow-x: auto; overflow-y: hidden; background: var(--panel); border-bottom: 1px solid var(--border); }
 .code-editor-view .tab { display: flex; align-items: center; gap: 8px; min-width: 120px; max-width: 240px; height: 35px; padding: 0 8px 0 12px; border: 0; border-right: 1px solid var(--border); border-radius: 0; background: var(--tab); color: var(--muted); }
 .code-editor-view .tab.active { background: var(--tab-active); color: var(--text); }
@@ -2542,5 +3006,6 @@ function getTreeIconClass(node, collapsed = false) {
   .code-editor-view .panel-actions { grid-template-columns: 1fr; }
   .code-editor-view .panel-actions button:first-child { grid-column: auto; }
   .code-editor-view .shortcut-row { grid-template-columns: 1fr; }
+  .code-editor-view .command-center-shortcut { display: none; }
 }
 </style>
