@@ -6,7 +6,6 @@ import cn.gloduck.api.utils.HttpClientUtils;
 import cn.gloduck.api.utils.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -18,6 +17,8 @@ import java.util.logging.Logger;
 public abstract class AbstractTorrentHandler implements TorrentHandler {
     protected final static Logger LOGGER = Logger.getLogger(AbstractTorrentHandler.class.getName());
 
+    private static final String AVAILABLE_CHECK_KEYWORD = "1080p";
+
     protected final HttpClient httpClient;
 
     protected final String baseUrl;
@@ -28,9 +29,6 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
 
     private final int requestTimeout;
 
-    private final int validStatusTimeout;
-
-
     @Override
     public String url() {
         return baseUrl;
@@ -38,24 +36,16 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
 
     @Override
     public boolean checkAvailable() {
-        return isWebsiteReachable(baseUrl);
+        try {
+            search(AVAILABLE_CHECK_KEYWORD, 1L, null, null);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     protected boolean sortReverse(String order) {
         return "desc".equalsIgnoreCase(order);
-    }
-
-
-    public boolean isWebsiteReachable(String websiteUrl) {
-        HttpRequest request = requestBuilder(websiteUrl, validStatusTimeout)
-                .GET()
-                .build();
-        try {
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            return response.statusCode() == 200;
-        } catch (IOException | InterruptedException e) {
-            return false;
-        }
     }
 
     public JsonNode sendJsonRequest(HttpRequest request) {
@@ -140,7 +130,6 @@ public abstract class AbstractTorrentHandler implements TorrentHandler {
     public AbstractTorrentHandler(TorrentConfig torrentConfig, TorrentConfig.WebConfig config) {
         this.baseUrl = config.url;
         this.requestTimeout = Optional.ofNullable(config.requestTimeout).orElse(5);
-        this.validStatusTimeout = Optional.ofNullable(config.validStatusTimeout).orElse(1);
         String bypassCfApi = null;
         String bypassCfApiProxy = null;
         boolean bypassCf = Boolean.TRUE.equals(config.bypassCf);
