@@ -1286,8 +1286,14 @@ function loadMonaco() {
 }
 
 function showPanel(view) {
+  if (activeView.value === view && sidePanelVisible.value) {
+    sidePanelVisible.value = false;
+    nextTick(layoutVisibleEditors);
+    return;
+  }
   activeView.value = view;
-  if (!sidePanelVisible.value) sidePanelVisible.value = true;
+  sidePanelVisible.value = true;
+  nextTick(layoutVisibleEditors);
 }
 
 async function openFolder() {
@@ -4002,13 +4008,12 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .editor-dialog-actions .primary.danger:hover:not(:disabled) { border-color: #d95055; background: #d95055; }
 
 @media (max-width: 760px) {
-  .code-editor-view.app-shell { grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: minmax(0, 55dvh) minmax(220px, 45dvh); height: 100dvh; }
+  .code-editor-view.app-shell { grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100dvh; }
   .code-editor-view.app-shell.side-panel-hidden { grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .code-editor-view .activity-bar { grid-row: 1 / -1; }
   .code-editor-view .editor-shell { grid-column: 2; grid-row: 1; }
-  .code-editor-view .side-panel { grid-column: 2; grid-row: 2; border-top: 1px solid var(--border); border-right: 0; }
+  .code-editor-view .side-panel { z-index: 2; grid-column: 2; grid-row: 1; border-top: 0; border-right: 0; }
   .code-editor-view.side-panel-hidden .side-panel { display: none; }
-  .code-editor-view.side-panel-hidden .editor-shell { grid-row: 1 / -1; }
   .code-editor-view .side-panel-resizer { display: none; }
   .code-editor-view .activity-button { width: 44px; height: 44px; }
   .code-editor-view .panel-actions { grid-template-columns: 1fr; }
