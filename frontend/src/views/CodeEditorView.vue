@@ -3900,16 +3900,17 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .ai-session-select { display: grid; min-width: 0; gap: 5px; color: var(--muted); font-size: 12px; }
 .code-editor-view .ai-session-select select { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--input); color: var(--text); padding: 6px 7px; }
 .code-editor-view .ai-chat { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; flex: 1; }
-.code-editor-view .ai-chat-messages { display: grid; align-content: start; gap: 10px; min-height: 0; overflow: auto; padding: 0 12px 12px; }
+.code-editor-view .ai-chat-messages { display: grid; align-content: start; gap: 10px; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 0 12px 12px; }
 .code-editor-view .ai-message { display: grid; min-width: 0; gap: 5px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-soft); }
 .code-editor-view .ai-message strong { color: var(--accent-strong); font-size: 12px; }
 .code-editor-view .ai-message-user strong { color: var(--text); }
 .code-editor-view .ai-message-tool { opacity: 0.88; }
 .code-editor-view .ai-tool-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 0; border: 0; background: transparent; color: var(--accent-strong); text-align: left; font-size: 12px; font-weight: 700; }
 .code-editor-view .ai-tool-toggle:hover:not(:disabled) { background: transparent; border-color: transparent; }
-.code-editor-view .ai-tool-details { display: grid; gap: 8px; }
+.code-editor-view .ai-tool-details { display: grid; min-width: 0; max-width: 100%; gap: 8px; }
+.code-editor-view .ai-tool-details > div { min-width: 0; max-width: 100%; }
 .code-editor-view .ai-tool-details strong { display: block; margin-bottom: 4px; }
-.code-editor-view .ai-tool-details pre { max-height: 240px; margin: 0; overflow: auto; padding: 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--editor); color: var(--text); font-family: Consolas, 'Courier New', monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
+.code-editor-view .ai-tool-details pre { max-width: 100%; max-height: 240px; margin: 0; overflow-x: hidden; overflow-y: auto; overflow-wrap: anywhere; padding: 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--editor); color: var(--text); font-family: Consolas, 'Courier New', monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
 .code-editor-view .ai-message-content { min-width: 0; max-width: 100%; overflow-wrap: anywhere; color: var(--text); font-size: 12px; word-break: break-word; }
 .code-editor-view .ai-message-content * { max-width: 100%; }
 .code-editor-view .ai-message-content pre { overflow-x: auto; white-space: pre-wrap; }
