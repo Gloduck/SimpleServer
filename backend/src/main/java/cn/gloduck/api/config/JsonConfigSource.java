@@ -82,17 +82,20 @@ public class JsonConfigSource implements ConfigSource {
             values.putIfAbsent("quarkus.log.level", logConfig.level);
         }
         if (logConfig.file != null && !logConfig.file.isBlank()) {
-            applyLogFileConfig(values, logConfig.file);
+            applyLogFileConfig(values, logConfig);
         }
     }
 
-    private void applyLogFileConfig(Map<String, String> values, String logFile) {
-        if (logFile == null || logFile.isBlank()) {
+    private void applyLogFileConfig(Map<String, String> values, LogConfig logConfig) {
+        if (logConfig.file == null || logConfig.file.isBlank()) {
             return;
         }
 
         values.putIfAbsent("quarkus.log.file.enable", "true");
-        values.putIfAbsent("quarkus.log.file.path", logFile);
+        values.putIfAbsent("quarkus.log.file.path", logConfig.file);
+        if (logConfig.maxFileSize != null && !logConfig.maxFileSize.isBlank()) {
+            values.putIfAbsent("quarkus.log.file.rotation.max-file-size", logConfig.maxFileSize);
+        }
     }
 
 }

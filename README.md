@@ -60,13 +60,15 @@ backend/target/SimpleServer-1.0-runner
 {
   "log": {
     "level": "INFO",
-    "file": "logs/app.log"
+    "file": "logs/app.log",
+    "maxFileSize": "10M"
   }
 }
 ```
 
 - `log.level`：日志级别
 - `log.file`：日志文件路径；当前由 Quarkus file logging 输出，不支持日期模板
+- `log.maxFileSize`：单个日志文件最大大小，例如 `10M`、`100M`
 
 ## 构建脚本
 

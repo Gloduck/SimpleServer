@@ -2,7 +2,8 @@
   "port": 2226,
   "log": {
     "level": "INFO",
-    "file": "logs/app.log"
+    "file": "logs/app.log",
+    "maxFileSize": "10M"
   },
   "jrebel": {
     "companyName": "Gloduck",
