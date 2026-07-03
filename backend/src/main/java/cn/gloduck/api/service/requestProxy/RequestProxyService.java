@@ -28,9 +28,9 @@ import java.util.Set;
 
 @ApplicationScoped
 public class RequestProxyService {
-    private static final String PROXY_HOST_KEY = "Proxy-Host";
-    private static final String PROXY_CORS_KEY = "Proxy-Cors";
-    private static final String PROXY_FOLLOW_REDIRECT_KEY = "Proxy-Follow-Redirect";
+    private static final String PROXY_HOST_KEY = "X-Proxy-Host";
+    private static final String PROXY_CORS_KEY = "X-Proxy-Cors";
+    private static final String PROXY_FOLLOW_REDIRECT_KEY = "X-Proxy-Follow-Redirect";
     private static final Set<String> IGNORE_REQUEST_PARAMETERS = new LinkedHashSet<>(Arrays.asList(
             PROXY_HOST_KEY,
             PROXY_CORS_KEY,
@@ -71,7 +71,7 @@ public class RequestProxyService {
         MultivaluedMap<String, String> query = uriInfo.getQueryParameters();
         String proxyHost = getProxyHost(headers, query);
         if (isBlank(proxyHost)) {
-            return Response.status(Response.Status.BAD_REQUEST).entity("Missing parameter or header: Proxy-Host").build();
+            return Response.status(Response.Status.BAD_REQUEST).entity("Missing parameter or header: X-Proxy-Host").build();
         }
 
         boolean enableCors = isCorsEnabled(headers, query);

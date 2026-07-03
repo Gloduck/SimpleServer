@@ -3478,9 +3478,9 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, fol
 function buildRequestProxyUrl(target, enableCors, followRedirect) {
   const separator = target.search ? "&" : "?";
   const proxyParams = new URLSearchParams({
-    "Proxy-Host": target.origin,
-    "Proxy-Cors": enableCors ? "true" : "false",
-    "Proxy-Follow-Redirect": followRedirect ? "true" : "false",
+    "X-Proxy-Host": target.origin,
+    "X-Proxy-Cors": enableCors ? "true" : "false",
+    "X-Proxy-Follow-Redirect": followRedirect ? "true" : "false",
   });
   return `${getBackendBaseUrl()}${REQUEST_PROXY_PATH}${target.pathname || "/"}${target.search}${separator}${proxyParams.toString()}`;
 }

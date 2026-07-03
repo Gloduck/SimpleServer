@@ -291,7 +291,7 @@ export default {
                     urlError.value = '';
 
                     const targetUrl = new URL(url);
-                    const proxyUrl = `/api/requestProxy${targetUrl.pathname}${targetUrl.search}${targetUrl.search ? '&' : '?'}Proxy-Host=${encodeURIComponent(`${targetUrl.protocol}//${targetUrl.host}`)}&Proxy-Cors=true&Proxy-Follow-Redirect=true`;
+                    const proxyUrl = `/api/requestProxy${targetUrl.pathname}${targetUrl.search}${targetUrl.search ? '&' : '?'}X-Proxy-Host=${encodeURIComponent(`${targetUrl.protocol}//${targetUrl.host}`)}&X-Proxy-Cors=true&X-Proxy-Follow-Redirect=true`;
 
                     // 显示下载状态面板
                     isDownloading.value = true;
