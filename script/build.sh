@@ -139,9 +139,14 @@ assemble_artifacts() {
   esac
   cp "${CONFIG_FILE}" "${OUTPUT_CONFIG_FILE}"
   cp -R "${INCLUDE_DIR}/." "${ROOT_TARGET_DIR}/"
+  mapfile -t INCLUDE_ARTIFACTS < <(find "${INCLUDE_DIR}" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
   (
     cd "${ROOT_TARGET_DIR}"
-    tar -czf "${ARCHIVE_FILE}" *
+    archive_items=("${PACKAGE_ARTIFACT}" "$(basename "${OUTPUT_CONFIG_FILE}")")
+    for include_artifact in "${INCLUDE_ARTIFACTS[@]}"; do
+      archive_items+=("${include_artifact}")
+    done
+    tar -czf "${ARCHIVE_FILE}" "${archive_items[@]}"
   )
 }
 
