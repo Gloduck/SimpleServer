@@ -4,12 +4,16 @@ const PRETTIER_VERSION = '3.9.4';
 const VDITOR_VERSION = '3.11.2';
 const CODICONS_VERSION = '0.0.45';
 const CROPPER_VERSION = '1.6.2';
+const XTERM_VERSION = '5.5.0';
+const XTERM_FIT_ADDON_VERSION = '0.10.0';
 
 const MONACO_BASE = `${NPM_MIRROR_BASE}/monaco-editor/${MONACO_VERSION}/files/min/vs`;
 const PRETTIER_BASE = `${NPM_MIRROR_BASE}/prettier/${PRETTIER_VERSION}/files`;
 const VDITOR_BASE = `${NPM_MIRROR_BASE}/vditor/${VDITOR_VERSION}/files`;
 const CODICONS_BASE = `${NPM_MIRROR_BASE}/@vscode/codicons/${CODICONS_VERSION}/files`;
 const CROPPER_BASE = `${NPM_MIRROR_BASE}/cropperjs/${CROPPER_VERSION}/files`;
+const XTERM_BASE = `${NPM_MIRROR_BASE}/@xterm/xterm/${XTERM_VERSION}/files`;
+const XTERM_FIT_ADDON_BASE = `${NPM_MIRROR_BASE}/@xterm/addon-fit/${XTERM_FIT_ADDON_VERSION}/files`;
 const resourceLoadPromises = new Map();
 
 const CdnUtils = {
@@ -46,6 +50,38 @@ const CdnUtils = {
         base: CROPPER_BASE,
         script: `${CROPPER_BASE}/dist/cropper.min.js`,
         style: `${CROPPER_BASE}/dist/cropper.css`
+    },
+
+    xterm: {
+        version: XTERM_VERSION,
+        base: XTERM_BASE,
+        script: `${XTERM_BASE}/lib/xterm.js`,
+        style: `${XTERM_BASE}/css/xterm.css`,
+        fitAddonScript: `${XTERM_FIT_ADDON_BASE}/lib/addon-fit.js`
+    },
+
+    loadScriptWithoutAmd(src, getGlobal, label = 'script') {
+        const existing = getGlobal?.();
+        if (existing) return Promise.resolve(existing);
+        if (!resourceLoadPromises.has(src)) {
+            resourceLoadPromises.set(src, new Promise((resolve, reject) => {
+                const previousDefine = window.define;
+                const script = document.createElement('script');
+                script.src = src;
+                script.onload = () => {
+                    window.define = previousDefine;
+                    const value = getGlobal?.();
+                    value ? resolve(value) : reject(new Error(`${label} did not expose expected global`));
+                };
+                script.onerror = () => {
+                    window.define = previousDefine;
+                    reject(new Error(`Failed to load ${label}`));
+                };
+                window.define = undefined;
+                document.head.append(script);
+            }));
+        }
+        return resourceLoadPromises.get(src);
     },
 
     loadScript(src, getGlobal, label = 'script') {
@@ -129,6 +165,17 @@ const CdnUtils = {
             this.loadStyle(this.vditor.style, 'Vditor stylesheet'),
             this.loadScript(this.vditor.script, () => window.Vditor, 'Vditor')
         ]).then(([, Vditor]) => Vditor);
+    },
+
+    loadXterm() {
+        return Promise.all([
+            this.loadStyle(this.xterm.style, 'xterm stylesheet'),
+            this.loadScriptWithoutAmd(this.xterm.script, () => window.Terminal || window.Xterm?.Terminal, 'xterm')
+        ]).then(([, Terminal]) => Terminal);
+    },
+
+    loadXtermFitAddon() {
+        return this.loadScriptWithoutAmd(this.xterm.fitAddonScript, () => window.FitAddon?.FitAddon || window.FitAddon, 'xterm fit addon');
     }
 };
 

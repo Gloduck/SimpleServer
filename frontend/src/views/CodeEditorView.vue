@@ -13,6 +13,9 @@
       <button class="activity-button" :class="{ active: activeView === 'ai' }" :title="tr('activity.ai')" :aria-label="tr('activity.ai')" @click="showPanel('ai')">
         <span class="codicon codicon-sparkle" aria-hidden="true"></span>
       </button>
+      <button class="activity-button" :class="{ active: activeView === 'ssh' }" :title="tr('activity.ssh')" :aria-label="tr('activity.ssh')" @click="showPanel('ssh')">
+        <span class="codicon codicon-terminal" aria-hidden="true"></span>
+      </button>
       <button class="activity-button" :class="{ active: activeView === 'settings' }" :title="tr('activity.settings')" :aria-label="tr('activity.settings')" @click="showPanel('settings')">
         <span class="codicon codicon-settings-gear" aria-hidden="true"></span>
       </button>
@@ -187,6 +190,44 @@
         </div>
       </section>
 
+      <section v-show="activeView === 'ssh'" class="panel-view active">
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">SSH</p>
+            <h1>{{ tr('panel.ssh') }}</h1>
+          </div>
+          <button class="icon-button" :title="tr('ssh.add')" :aria-label="tr('ssh.add')" :disabled="!sshFeatureEnabled" @click="openCreateSshDialog">
+            <span class="codicon codicon-add" aria-hidden="true"></span>
+          </button>
+        </header>
+        <div v-if="!sshFeatureEnabled" class="workspace-card ssh-disabled-card">
+          <strong>{{ tr('ssh.disabledTitle') }}</strong>
+          <small>{{ tr('ssh.disabledDescription') }}</small>
+        </div>
+        <div class="ssh-list">
+          <div v-if="settings.ssh.connections.length === 0" class="workspace-card">{{ tr('ssh.empty') }}</div>
+          <article v-for="connection in settings.ssh.connections" :key="connection.id" class="ssh-card" :class="{ active: isSshConnected(connection.id) }">
+            <div class="ssh-card-main">
+              <span class="codicon" :class="isSshConnected(connection.id) ? 'codicon-debug-console' : 'codicon-terminal'" aria-hidden="true"></span>
+              <div>
+                <strong>{{ connection.name || connection.host }}</strong>
+                <small>{{ connection.username }}@{{ connection.host }}:{{ connection.port || 22 }}</small>
+              </div>
+            </div>
+            <div class="ssh-card-meta">
+              <span>{{ tr(isSshConnected(connection.id) ? 'ssh.connected' : 'ssh.disconnected') }}</span>
+              <span>{{ tr(connection.exposeToAi ? 'ssh.aiExposed' : 'ssh.aiHidden') }}</span>
+            </div>
+            <div class="ssh-card-actions">
+              <button type="button" :disabled="!sshFeatureEnabled || isSshConnected(connection.id)" @click="connectSshConfig(connection)">{{ tr('ssh.connect') }}</button>
+              <button type="button" :disabled="!isSshConnected(connection.id)" @click="disconnectSshConfig(connection.id)">{{ tr('ssh.disconnect') }}</button>
+              <button type="button" :disabled="!sshFeatureEnabled" @click="openEditSshDialog(connection)">{{ tr('ssh.edit') }}</button>
+              <button type="button" class="danger" :disabled="isSshConnected(connection.id)" @click="deleteSshConfig(connection.id)">{{ tr('ssh.delete') }}</button>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section v-show="activeView === 'settings'" class="panel-view active">
         <header class="panel-header">
           <div>
@@ -258,6 +299,21 @@
               <input v-model="settings.backend.baseUrl" spellcheck="false" :placeholder="defaultBackendSettings.baseUrl" @change="normalizeBackendBaseUrl" />
             </label>
             <small class="setting-hint">{{ tr('settings.backendHint') }}</small>
+            <label class="setting-row">
+              <span>{{ tr('settings.sshSecurityKey') }}</span>
+              <input v-model="settings.ssh.securityKey" type="password" autocomplete="off" spellcheck="false" :placeholder="tr('settings.sshSecurityKeyPlaceholder')" />
+            </label>
+            <label class="setting-row">
+              <span>{{ tr('settings.sshTerminalTheme') }}</span>
+              <select v-model="settings.ssh.terminalTheme" @change="applySshTerminalTheme">
+                <option v-for="theme in sshTerminalThemeOptions" :key="theme.value" :value="theme.value">{{ theme.label }}</option>
+              </select>
+            </label>
+            <label class="setting-row">
+              <span>{{ tr('settings.sshWhitelistTemplate') }}</span>
+              <textarea v-model="settings.ssh.whitelistTemplate" rows="5" spellcheck="false" :placeholder="DEFAULT_SSH_WHITELIST_TEMPLATE"></textarea>
+            </label>
+            <button type="button" class="setting-action-button" @click="resetSshWhitelistTemplate">{{ tr('settings.resetSshWhitelistTemplate') }}</button>
           </section>
           <section class="setting-row keybinding-card">
             <div class="setting-title-row">
@@ -309,41 +365,55 @@
         </button>
       </div>
       <div class="tabs" role="tablist">
-        <button v-for="file in openFileList" :key="file.path" class="tab" :class="{ active: file.path === activePath && !activeDiffPath }" :title="file.path" role="tab" :aria-selected="file.path === activePath && !activeDiffPath" @click="activateFile(file.path)">
+        <button v-for="file in openFileList" :key="file.path" class="tab" :class="{ active: file.path === activePath && !activeDiffPath && !activeSshTerminal }" :title="file.path" role="tab" :aria-selected="file.path === activePath && !activeDiffPath && !activeSshTerminal" @click="activateFile(file.path)">
           <span class="tab-name">{{ file.name }}</span>
           <span class="dirty-dot">{{ file.dirty ? '•' : '' }}</span>
           <span class="tab-close" :title="tr('action.close')" @click.stop="closeFile(file.path)">×</span>
         </button>
+        <button v-for="terminal in sshTerminalTabs" :key="`ssh:${terminal.configId}`" class="tab ssh-tab" :class="{ active: terminal.configId === activeSshTerminalId }" :title="terminal.title" role="tab" :aria-selected="terminal.configId === activeSshTerminalId" @click="activateSshTerminal(terminal.configId)">
+          <span class="codicon codicon-terminal" aria-hidden="true"></span>
+          <span class="tab-name">{{ terminal.title }}</span>
+          <span class="dirty-dot">{{ terminal.connected ? '●' : '' }}</span>
+          <span class="tab-close" :title="tr('action.close')" @click.stop="closeSshTerminalTab(terminal.configId)">×</span>
+        </button>
       </div>
 
       <section class="editor-stage" :class="{ 'preview-open': previewPaneVisible }">
-        <div v-show="!activePath && !activeDiffPath" class="empty-state">
+        <div v-show="!activePath && !activeDiffPath && !activeSshTerminal" class="empty-state">
           <h2>{{ tr('empty.title') }}</h2>
           <p>{{ tr('empty.description') }}</p>
           <button @click="openFolder">{{ tr('action.openFolder') }}</button>
         </div>
-        <div ref="editorHost" class="monaco-host" :class="{ visible: activeTextFile && !activeDiffPath }" :aria-label="tr('editor.aria')"></div>
-        <div v-if="activeImageFile && !activeDiffPath" class="image-preview" :aria-label="tr('imagePreview.aria')" @click="focusActivePreviewEditor">
+        <div ref="editorHost" class="monaco-host" :class="{ visible: activeTextFile && !activeDiffPath && !activeSshTerminal }" :aria-label="tr('editor.aria')"></div>
+        <div v-if="activeImageFile && !activeDiffPath && !activeSshTerminal" class="image-preview" :aria-label="tr('imagePreview.aria')" @click="focusActivePreviewEditor">
           <img :src="activeImageFile.objectUrl" :alt="activeImageFile.name" />
           <div class="image-preview-meta">
             <strong>{{ activeImageFile.name }}</strong>
             <span>{{ FileUtils.formatFileSize(activeImageFile.size) }} · {{ activeImageFile.mimeType || tr('imagePreview.type') }}</span>
           </div>
         </div>
-        <div v-if="activeUnsupportedFile && !activeDiffPath" class="unsupported-preview" :aria-label="tr('unsupportedFile.aria')" @click="focusActivePreviewEditor">
+        <div v-if="activeUnsupportedFile && !activeDiffPath && !activeSshTerminal" class="unsupported-preview" :aria-label="tr('unsupportedFile.aria')" @click="focusActivePreviewEditor">
           <span class="codicon codicon-warning" aria-hidden="true"></span>
           <h2>{{ tr('unsupportedFile.title') }}</h2>
           <p>{{ tr('unsupportedFile.description') }}</p>
           <small>{{ activeUnsupportedFile.path }} · {{ FileUtils.formatFileSize(activeUnsupportedFile.size) }}{{ activeUnsupportedFile.mimeType ? ` · ${activeUnsupportedFile.mimeType}` : '' }}</small>
         </div>
-        <div v-if="activeDiffUnsupportedFile" class="unsupported-preview diff-placeholder" :aria-label="tr('diff.aria')" @click="focusActivePreviewEditor">
+        <div v-if="activeDiffUnsupportedFile && !activeSshTerminal" class="unsupported-preview diff-placeholder" :aria-label="tr('diff.aria')" @click="focusActivePreviewEditor">
           <span class="codicon codicon-diff-modified" aria-hidden="true"></span>
           <h2>{{ tr('diff.unsupportedTitle') }}</h2>
           <p>{{ tr('diff.unsupportedDescription') }}</p>
           <small>{{ activeDiffUnsupportedFile.path }} · {{ activeDiffUnsupportedFile.deleted ? tr('changes.deleted') : tr('status.unsaved') }}</small>
         </div>
-        <div ref="diffHost" class="monaco-host diff-host" :class="{ visible: activeDiffPath && !activeDiffUnsupportedFile }" :aria-label="tr('diff.aria')"></div>
-        <aside v-if="previewPaneVisible" class="preview-pane" :aria-label="tr('preview.aria')">
+        <div ref="diffHost" class="monaco-host diff-host" :class="{ visible: activeDiffPath && !activeDiffUnsupportedFile && !activeSshTerminal }" :aria-label="tr('diff.aria')"></div>
+        <section v-if="activeSshTerminal" class="ssh-terminal" :aria-label="tr('ssh.terminal')">
+          <header class="ssh-terminal-header">
+            <span>{{ activeSshTerminal.title }}</span>
+            <small>{{ tr(activeSshTerminal.connected ? 'ssh.connected' : 'ssh.disconnected') }}</small>
+          </header>
+          <div v-show="activeSshTerminal.terminal" ref="sshTerminalHost" class="ssh-terminal-host"></div>
+          <pre v-if="!activeSshTerminal.terminal" class="ssh-terminal-fallback">{{ activeSshTerminal.output || tr('ssh.noOutput') }}</pre>
+        </section>
+        <aside v-if="previewPaneVisible && !activeSshTerminal" class="preview-pane" :aria-label="tr('preview.aria')">
           <header class="preview-header">
             <span>{{ tr(previewMode === 'markdown' ? 'preview.markdown' : 'preview.html') }}</span>
             <button type="button" class="icon-button" :title="tr('action.close')" :aria-label="tr('action.close')" @click="closePreview">
@@ -358,11 +428,11 @@
       <footer class="status-bar">
         <div class="status-left-group">
           <span id="status-left">{{ status.left }}</span>
-          <button id="save-file" :disabled="!activeFile?.dirty" @click="saveActiveFile">{{ tr('status.saveButton', { shortcut: settings.shortcuts.save }) }}</button>
+          <button id="save-file" :disabled="!activeFile?.dirty || activeSshTerminal" @click="saveActiveFile">{{ tr('status.saveButton', { shortcut: settings.shortcuts.save }) }}</button>
         </div>
         <div class="status-right-group">
           <span id="status-right">{{ status.right }}</span>
-          <select v-model="activeLanguage" :disabled="!activeTextFile || activeFile.deleted" :aria-label="tr('status.language')" @change="changeActiveLanguage">
+          <select v-model="activeLanguage" :disabled="!activeTextFile || activeFile.deleted || activeSshTerminal" :aria-label="tr('status.language')" @change="changeActiveLanguage">
             <option v-for="language in languageOptions" :key="language.id" :value="language.id">{{ language.label }}</option>
           </select>
         </div>
@@ -403,11 +473,78 @@
         </div>
       </form>
     </div>
+
+    <div v-if="sshDialog.visible" class="editor-dialog-backdrop" role="presentation" @click.self="closeSshDialog">
+      <form class="editor-dialog ssh-dialog" role="dialog" aria-modal="true" aria-labelledby="ssh-dialog-title" @submit.prevent="saveSshDialog" @keydown.esc.prevent.stop="closeSshDialog" @click.stop>
+        <div class="editor-dialog-header">
+          <span class="codicon codicon-terminal" aria-hidden="true"></span>
+          <h2 id="ssh-dialog-title">{{ sshDialog.mode === 'edit' ? tr('ssh.editTitle') : tr('ssh.addTitle') }}</h2>
+        </div>
+        <label class="setting-row">
+          <span>{{ tr('ssh.name') }}</span>
+          <input v-model="sshDialog.draft.name" required autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="ssh-dialog-grid">
+          <label class="setting-row">
+            <span>{{ tr('ssh.host') }}</span>
+            <input v-model="sshDialog.draft.host" required autocomplete="off" spellcheck="false" />
+          </label>
+          <label class="setting-row">
+            <span>{{ tr('ssh.port') }}</span>
+            <input v-model.number="sshDialog.draft.port" type="number" min="1" max="65535" required />
+          </label>
+        </div>
+        <label class="setting-row">
+          <span>{{ tr('ssh.username') }}</span>
+          <input v-model="sshDialog.draft.username" required autocomplete="off" spellcheck="false" />
+        </label>
+        <label class="setting-row">
+          <span>{{ tr('ssh.authType') }}</span>
+          <select v-model="sshDialog.draft.authType">
+            <option value="password">{{ tr('ssh.authPassword') }}</option>
+            <option value="privateKey">{{ tr('ssh.authPrivateKey') }}</option>
+          </select>
+        </label>
+        <label v-if="sshDialog.draft.authType === 'password'" class="setting-row">
+          <span>{{ tr('ssh.password') }}</span>
+          <input v-model="sshDialog.draft.password" type="password" autocomplete="off" />
+        </label>
+        <template v-else>
+          <label class="setting-row">
+            <span>{{ tr('ssh.privateKey') }}</span>
+            <textarea v-model="sshDialog.draft.privateKey" rows="5" spellcheck="false"></textarea>
+          </label>
+          <label class="setting-row">
+            <span>{{ tr('ssh.passphrase') }}</span>
+            <input v-model="sshDialog.draft.passphrase" type="password" autocomplete="off" />
+          </label>
+        </template>
+        <label class="setting-row checkbox-row">
+          <input v-model="sshDialog.draft.exposeToAi" type="checkbox" />
+          <span>{{ tr('ssh.exposeToAi') }}</span>
+        </label>
+        <label class="setting-row">
+          <span class="setting-title-row">
+            <span>{{ tr('ssh.whitelist') }}</span>
+            <button type="button" @click="applySshWhitelistTemplateToDialog">{{ tr('ssh.applyWhitelistTemplate') }}</button>
+          </span>
+          <textarea v-model="sshDialog.draft.whitelistText" rows="3" spellcheck="false" :placeholder="tr('ssh.whitelistPlaceholder')"></textarea>
+        </label>
+        <small class="setting-hint">{{ tr('ssh.aiHint') }}</small>
+        <div class="editor-dialog-actions">
+          <button type="button" @click="closeSshDialog">{{ tr('dialog.cancel') }}</button>
+          <button type="submit" class="primary">{{ tr('dialog.ok') }}</button>
+        </div>
+      </form>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, defineComponent, h, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from "vue";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 import { CdnUtils } from "@/shared/cdn-utils.js";
 import { FileUtils } from "@/shared/file-utils.js";
 import { MarkdownUtils } from "@/shared/markdown-utils.js";
@@ -415,13 +552,25 @@ import { MarkdownUtils } from "@/shared/markdown-utils.js";
 const STORAGE_KEY = "browser-code-editor-settings";
 const SETTINGS_URL_PARAM = "settings";
 const REQUEST_PROXY_PATH = "/api/requestProxy";
+const SSH_WEBSOCKET_PATH = "/api/ssh/ws";
 CdnUtils.loadCodicons().catch((error) => console.error("Failed to load codicons:", error));
 const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", preview: "Ctrl+Shift+V", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Shift+Enter" };
 const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
 const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
+const DEFAULT_SSH_WHITELIST_TEMPLATE = [
+  "pwd", "ls", "cat", "less", "more", "head", "tail", "grep", "egrep", "fgrep", "awk", "sed", "sort", "uniq", "wc", "cut", "tr", "tee", "xargs", "find", "stat", "file", "readlink", "realpath", "basename", "dirname", "tree",
+  "env", "printenv", "set", "locale", "which", "whereis", "type", "command", "history", "alias",
+  "whoami", "id", "groups", "who", "w", "last", "lastlog", "date", "uptime", "hostname", "uname", "arch", "lscpu", "lsmem", "lsblk", "lspci", "lsusb", "dmidecode", "dmesg",
+  "ps", "pstree", "pgrep", "top", "htop", "free", "vmstat", "iostat", "mpstat", "sar", "pidstat", "pmap", "lsof", "strace",
+  "df", "du", "mount", "findmnt", "blkid", "lsattr", "getfacl",
+  "ip", "ss", "netstat", "ping", "traceroute", "tracepath", "dig", "nslookup", "host", "curl", "wget", "nc", "telnet", "arp", "route",
+  "systemctl", "service", "journalctl", "loginctl", "timedatectl", "resolvectl", "crontab",
+  "apt-cache",
+].join("\n");
+const defaultSshSettings = { securityKey: "", terminalTheme: "dark", whitelistTemplate: DEFAULT_SSH_WHITELIST_TEMPLATE, connections: [] };
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 640;
-const defaultSettings = { theme: "vs-dark", locale: "zh-CN", fontSize: 14, wordWrap: false, minimap: true, sidebarWidth: 300, shortcuts: { ...vscodeShortcuts }, ai: { ...defaultAiSettings }, backend: { ...defaultBackendSettings } };
+const defaultSettings = { theme: "vs-dark", locale: "zh-CN", fontSize: 14, wordWrap: false, minimap: true, sidebarWidth: 300, shortcuts: { ...vscodeShortcuts }, ai: { ...defaultAiSettings }, backend: { ...defaultBackendSettings }, ssh: { ...defaultSshSettings } };
 const AI_COMPLETION_MANUAL_TRIGGER_WINDOW_MS = 2000;
 const AI_COMPLETION_MANUAL_PREFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_SUFFIX_CHARS = 500;
@@ -431,6 +580,10 @@ const AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS = 2000;
 const AI_JAVASCRIPT_MAX_TIMEOUT_MS = 5000;
 const AI_JAVASCRIPT_MAX_CODE_CHARS = 20000;
 const AI_JAVASCRIPT_MAX_LOGS = 100;
+const AI_AGENT_MAX_TOOL_CALL_ROUNDS = 25;
+const SSH_OUTPUT_MAX_CHARS = 120000;
+const SSH_COMMAND_OUTPUT_WAIT_MS = 700;
+const SSH_CONNECT_TIMEOUT_MS = 15000;
 const WORKSPACE_MODEL_MAX_FILE_SIZE = 5 * 1024 * 1024;
 const WORKSPACE_FILE_ACTION_LIMIT = 1000;
 const WORKSPACE_REFERENCE_FILE_LIMIT = 2000;
@@ -455,11 +608,13 @@ const messages = {
     "activity.search": "搜索",
     "activity.changes": "变更",
     "activity.ai": "AI 助手",
+    "activity.ssh": "SSH",
     "activity.settings": "设置",
     "panel.files": "文件",
     "panel.search": "搜索",
     "panel.changes": "变更",
     "panel.ai": "AI 助手",
+    "panel.ssh": "SSH 连接",
     "panel.settings": "设置",
     "commandCenter.placeholder": "搜索命令或文件...",
     "commandCenter.title": "打开命令面板",
@@ -502,7 +657,12 @@ const messages = {
     "settings.backend": "后端服务器",
     "settings.backendEnabled": "启用后端服务器",
     "settings.backendBaseUrl": "后端地址",
-    "settings.backendHint": "用于 request_proxy 等需要后端转发的工具。默认地址是当前页面同源后端；未启用时 request_proxy 不会提供给 AI。",
+    "settings.backendHint": "用于 request_proxy、SSH 等需要后端转发或连接的工具。默认地址是当前页面同源后端；未启用时相关功能不可用。",
+    "settings.sshSecurityKey": "SSH 安全密钥",
+    "settings.sshSecurityKeyPlaceholder": "如果后端配置了 ssh.securityKey，则需要填写",
+    "settings.sshTerminalTheme": "SSH 终端配色",
+    "settings.sshWhitelistTemplate": "SSH 白名单模板",
+    "settings.resetSshWhitelistTemplate": "恢复默认白名单模板",
     "settings.keybindings": "快捷键映射",
     "settings.resetKeybindings": "恢复默认",
     "settings.shortcutHint": "默认采用 VS Code 快捷键。可输入 Ctrl/Cmd/Shift/Alt 加按键，例如 Ctrl+S、Shift+Alt+F。",
@@ -599,6 +759,55 @@ const messages = {
     "ai.error.noWorkspace": "请先打开工作区。",
     "ai.error.backendDisabled": "后端服务器未启用，请先在设置中启用后端服务器。",
     "ai.error.invalidBackendBaseUrl": "后端地址不合法。",
+    "ssh.add": "添加 SSH",
+    "ssh.addTitle": "添加 SSH 设置",
+    "ssh.editTitle": "修改 SSH 设置",
+    "ssh.empty": "还没有 SSH 设置。",
+    "ssh.disabledTitle": "SSH 功能未启用",
+    "ssh.disabledDescription": "请先在设置中启用后端服务器并配置后端地址。",
+    "ssh.name": "名称",
+    "ssh.host": "地址",
+    "ssh.port": "端口",
+    "ssh.username": "用户名",
+    "ssh.authType": "登录方式",
+    "ssh.authPassword": "账号密码登录",
+    "ssh.authPrivateKey": "SSH 私钥登录",
+    "ssh.password": "密码",
+    "ssh.privateKey": "私钥",
+    "ssh.passphrase": "私钥密码短语",
+    "ssh.exposeToAi": "允许 AI 使用此连接",
+    "ssh.whitelist": "AI 白名单主命令",
+    "ssh.whitelistPlaceholder": "每行一个主命令，例如：ls\npwd\ngit",
+    "ssh.applyWhitelistTemplate": "填入模板",
+    "ssh.aiHint": "AI 只能看到已暴露的 SSH 配置。AI 执行命令时必须提供主命令列表；列表里有白名单外主命令就需要授权。高风险命令即使在白名单内也会要求授权。",
+    "ssh.aiExposed": "AI 可使用",
+    "ssh.aiHidden": "仅手动使用",
+    "ssh.connected": "已连接",
+    "ssh.disconnected": "未连接",
+    "ssh.connect": "连接",
+    "ssh.disconnect": "断开",
+    "ssh.edit": "修改",
+    "ssh.delete": "删除",
+    "ssh.terminal": "SSH 终端",
+    "ssh.noOutput": "暂无 SSH 输出。",
+    "ssh.commandPlaceholder": "输入命令后回车执行",
+    "ssh.run": "执行",
+    "ssh.connecting": "正在连接 {name}",
+    "ssh.connectedStatus": "SSH 已连接 {name}",
+    "ssh.closedStatus": "SSH 已断开 {name}",
+    "ssh.connectFailedStatus": "SSH 连接失败",
+    "ssh.connectFailed": "SSH 连接失败",
+    "ssh.deletedStatus": "已删除 SSH 设置 {name}",
+    "ssh.confirmDelete": "确定删除 SSH 设置“{name}”吗？",
+    "ssh.confirmUnauthorizedCommand": "AI 请求执行白名单外 SSH 命令，需要授权。\n\n连接：{name}\n主命令：{commands}\n说明：{reason}\n命令：{command}",
+    "ssh.confirmHighRiskCommand": "AI 请求执行高风险 SSH 命令，即使它在白名单内也需要授权。\n\n连接：{name}\n主命令：{commands}\n说明：{reason}\n命令：{command}",
+    "ssh.toolExecutedCommand": "已执行 SSH 命令：{command}\n用途：{reason}",
+    "ssh.error.required": "请填写 SSH 名称、地址和用户名。",
+    "ssh.error.backendDisabled": "后端服务器未启用，SSH 功能不可用。",
+    "ssh.error.notExposed": "该 SSH 设置未允许 AI 使用。",
+    "ssh.error.commandReasonRequired": "AI 执行 SSH 命令时必须说明用途。",
+    "ssh.error.commandListRequired": "AI 执行 SSH 命令时必须提供主命令列表。",
+    "ssh.error.commandRejected": "SSH 命令授权已拒绝。",
     "menu.fileTree": "文件树菜单",
     "menu.changes": "变更菜单",
     "menu.editor": "编辑器菜单",
@@ -616,6 +825,7 @@ const messages = {
     "confirm.revert": "确定回滚“{path}”的未保存修改吗？",
     "confirm.revertSelected": "确定回滚所选 {count} 个未保存变更吗？",
     "confirm.deleteAiSession": "确定删除当前 AI 会话吗？此操作不会回滚文件修改。",
+    "confirm.leaveWithSsh": "当前存在未保存内容或活跃 SSH 连接，离开后 SSH 连接会被断开。确定离开吗？",
     "imagePreview.aria": "图片预览",
     "imagePreview.type": "图片",
     "unsupportedFile.aria": "不支持文件预览",
@@ -656,11 +866,13 @@ const messages = {
     "activity.search": "Search",
     "activity.changes": "Changes",
     "activity.ai": "AI Assistant",
+    "activity.ssh": "SSH",
     "activity.settings": "Settings",
     "panel.files": "Files",
     "panel.search": "Search",
     "panel.changes": "Changes",
     "panel.ai": "AI Assistant",
+    "panel.ssh": "SSH Connections",
     "panel.settings": "Settings",
     "commandCenter.placeholder": "Search commands or files...",
     "commandCenter.title": "Open Command Palette",
@@ -703,7 +915,12 @@ const messages = {
     "settings.backend": "Backend Server",
     "settings.backendEnabled": "Enable Backend Server",
     "settings.backendBaseUrl": "Backend URL",
-    "settings.backendHint": "Used by tools that need backend forwarding, such as request_proxy. The default URL is the current same-origin backend; request_proxy is unavailable while disabled.",
+    "settings.backendHint": "Used by tools that need backend forwarding or connections, such as request_proxy and SSH. The default URL is the current same-origin backend; related features are unavailable while disabled.",
+    "settings.sshSecurityKey": "SSH Security Key",
+    "settings.sshSecurityKeyPlaceholder": "Required if backend ssh.securityKey is configured",
+    "settings.sshTerminalTheme": "SSH Terminal Theme",
+    "settings.sshWhitelistTemplate": "SSH Whitelist Template",
+    "settings.resetSshWhitelistTemplate": "Reset Whitelist Template",
     "settings.keybindings": "Keyboard Shortcuts",
     "settings.resetKeybindings": "Reset",
     "settings.shortcutHint": "VS Code shortcuts are used by default. Use Ctrl/Cmd/Shift/Alt plus a key, for example Ctrl+S or Shift+Alt+F.",
@@ -800,6 +1017,55 @@ const messages = {
     "ai.error.noWorkspace": "Open a workspace first.",
     "ai.error.backendDisabled": "Backend server is disabled. Enable it in Settings first.",
     "ai.error.invalidBackendBaseUrl": "Invalid backend URL.",
+    "ssh.add": "Add SSH",
+    "ssh.addTitle": "Add SSH Setting",
+    "ssh.editTitle": "Edit SSH Setting",
+    "ssh.empty": "No SSH settings yet.",
+    "ssh.disabledTitle": "SSH is disabled",
+    "ssh.disabledDescription": "Enable the backend server and configure its URL in Settings first.",
+    "ssh.name": "Name",
+    "ssh.host": "Host",
+    "ssh.port": "Port",
+    "ssh.username": "Username",
+    "ssh.authType": "Login Method",
+    "ssh.authPassword": "Password login",
+    "ssh.authPrivateKey": "SSH key login",
+    "ssh.password": "Password",
+    "ssh.privateKey": "Private Key",
+    "ssh.passphrase": "Passphrase",
+    "ssh.exposeToAi": "Allow AI to use this connection",
+    "ssh.whitelist": "AI Main Command Whitelist",
+    "ssh.whitelistPlaceholder": "One main command per line, for example:\nls\npwd\ngit",
+    "ssh.applyWhitelistTemplate": "Use Template",
+    "ssh.aiHint": "AI can only see exposed SSH settings. AI must provide a main-command list when executing commands; any main command outside the whitelist requires approval. High-risk commands require approval even when whitelisted.",
+    "ssh.aiExposed": "AI allowed",
+    "ssh.aiHidden": "Manual only",
+    "ssh.connected": "Connected",
+    "ssh.disconnected": "Disconnected",
+    "ssh.connect": "Connect",
+    "ssh.disconnect": "Disconnect",
+    "ssh.edit": "Edit",
+    "ssh.delete": "Delete",
+    "ssh.terminal": "SSH Terminal",
+    "ssh.noOutput": "No SSH output yet.",
+    "ssh.commandPlaceholder": "Enter a command and press Enter",
+    "ssh.run": "Run",
+    "ssh.connecting": "Connecting {name}",
+    "ssh.connectedStatus": "SSH connected {name}",
+    "ssh.closedStatus": "SSH disconnected {name}",
+    "ssh.connectFailedStatus": "SSH connection failed",
+    "ssh.connectFailed": "SSH connection failed",
+    "ssh.deletedStatus": "Deleted SSH setting {name}",
+    "ssh.confirmDelete": "Delete SSH setting “{name}”?",
+    "ssh.confirmUnauthorizedCommand": "AI requests to run an SSH command outside the whitelist. Approval is required.\n\nConnection: {name}\nMain commands: {commands}\nReason: {reason}\nCommand: {command}",
+    "ssh.confirmHighRiskCommand": "AI requests to run a high-risk SSH command. Approval is required even if it is whitelisted.\n\nConnection: {name}\nMain commands: {commands}\nReason: {reason}\nCommand: {command}",
+    "ssh.toolExecutedCommand": "Executed SSH command: {command}\nPurpose: {reason}",
+    "ssh.error.required": "Fill in SSH name, host, and username.",
+    "ssh.error.backendDisabled": "Backend server is disabled, so SSH is unavailable.",
+    "ssh.error.notExposed": "This SSH setting is not exposed to AI.",
+    "ssh.error.commandReasonRequired": "AI must explain the purpose before running SSH commands.",
+    "ssh.error.commandListRequired": "AI must provide a main-command list before running SSH commands.",
+    "ssh.error.commandRejected": "SSH command approval was rejected.",
     "menu.fileTree": "File tree menu",
     "menu.changes": "Changes menu",
     "menu.editor": "Editor menu",
@@ -817,6 +1083,7 @@ const messages = {
     "confirm.revert": "Revert unsaved changes in “{path}”?",
     "confirm.revertSelected": "Revert {count} selected unsaved change(s)?",
     "confirm.deleteAiSession": "Delete the current AI session? This will not revert file changes.",
+    "confirm.leaveWithSsh": "There are unsaved changes or active SSH connections. SSH connections will be disconnected if you leave. Leave this page?",
     "imagePreview.aria": "Image Preview",
     "imagePreview.type": "Image",
     "unsupportedFile.aria": "Unsupported File Preview",
@@ -859,6 +1126,20 @@ const languageOptions = [
 
 const aiReasoningEfforts = ["default", "low", "medium", "high", "xhigh"];
 const renderMarkdown = MarkdownUtils.renderMarkdown;
+
+const sshTerminalThemes = {
+  dark: { background: "#1e1e1e", foreground: "#cccccc", cursor: "#ffffff", selectionBackground: "#264f78" },
+  light: { background: "#ffffff", foreground: "#1f1f1f", cursor: "#1f1f1f", selectionBackground: "#add6ff" },
+  solarizedDark: { background: "#002b36", foreground: "#839496", cursor: "#93a1a1", selectionBackground: "#073642" },
+  monokai: { background: "#272822", foreground: "#f8f8f2", cursor: "#f8f8f0", selectionBackground: "#49483e" },
+};
+
+const sshTerminalThemeOptions = [
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" },
+  { value: "solarizedDark", label: "Solarized Dark" },
+  { value: "monokai", label: "Monokai" },
+];
 
 const shortcutItems = [
   { key: "save", labelKey: "shortcut.save" },
@@ -905,6 +1186,7 @@ function isDirtyTreeNode(node, dirtyPaths) {
 const editorHost = ref(null);
 const diffHost = ref(null);
 const aiMessagesEl = ref(null);
+const sshTerminalHost = ref(null);
 const editor = shallowRef(null);
 const diffEditor = shallowRef(null);
 const rootHandle = shallowRef(null);
@@ -935,6 +1217,10 @@ const dialogInput = ref(null);
 const dialogPrimaryButton = ref(null);
 const dialogState = reactive({ visible: false, mode: "alert", title: "", message: "", value: "", placeholder: "", confirmLabel: "", cancelLabel: "", tone: "default", selectOnFocus: false });
 const settings = reactive(loadSettings());
+const sshSessions = reactive(new Map());
+const activeSshTerminalId = ref("");
+const sshRevision = ref(0);
+const sshDialog = reactive({ visible: false, mode: "create", draft: createSshDraft() });
 let aiSessionSerial = 0;
 const aiSessions = reactive([createAiSession()]);
 const activeAiSessionId = ref(aiSessions[0].id);
@@ -1000,7 +1286,16 @@ const activeDiffUnsupportedFile = computed(() => activeDiffFile.value && !isText
 const activeLanguage = computed({ get: () => activeFile.value?.language || "plaintext", set: (value) => { if (activeFile.value) activeFile.value.language = value; } });
 const previewMode = computed(() => getPreviewMode(activeTextFile.value));
 const canPreviewActiveFile = computed(() => Boolean(previewMode.value));
-const previewPaneVisible = computed(() => Boolean(previewVisible.value && canPreviewActiveFile.value));
+const previewPaneVisible = computed(() => Boolean(previewVisible.value && canPreviewActiveFile.value && !activeSshTerminal.value));
+const sshFeatureEnabled = computed(() => isBackendEnabled());
+const sshTerminalTabs = computed(() => {
+  sshRevision.value;
+  return Array.from(sshSessions.values()).filter((session) => session.tabOpen);
+});
+const activeSshTerminal = computed(() => {
+  sshRevision.value;
+  return activeSshTerminalId.value ? sshSessions.get(activeSshTerminalId.value) || null : null;
+});
 const dialogIconClass = computed(() => ({
   alert: dialogState.tone === "danger" ? "codicon-error" : "codicon-info",
   confirm: dialogState.tone === "danger" ? "codicon-warning" : "codicon-question",
@@ -1010,6 +1305,7 @@ const dialogIconClass = computed(() => ({
 watch(() => settings.locale, () => { document.documentElement.lang = settings.locale; });
 watch(() => settings.ai.agentModels, syncSelectedAgentModel);
 watch(() => aiMessages.value.length, () => { nextTick(scrollAiMessagesToBottom); });
+watch(activeSshTerminalId, () => { nextTick(attachActiveSshTerminal); });
 watch(activeAiSessionId, () => { nextTick(scrollAiMessagesToBottom); });
 watch(searchMatchCase, () => { if (searchSearched.value && searchQuery.value.trim()) runGlobalSearch(); });
 watch(() => dirtyFiles.value.map((file) => file.path).join("\0"), pruneSelectedChangePaths);
@@ -1056,7 +1352,9 @@ onMounted(async () => {
   document.addEventListener("click", hideAllContextMenus);
   document.addEventListener("keydown", handleGlobalCommandPaletteShortcut);
   window.addEventListener("resize", hideAllContextMenus);
+  window.addEventListener("resize", scheduleActiveSshTerminalFit);
   window.addEventListener("beforeunload", beforeUnload);
+  window.addEventListener("pagehide", handlePageHide);
 });
 
 onBeforeUnmount(() => {
@@ -1067,6 +1365,7 @@ onBeforeUnmount(() => {
   inlineCompletionDisposables.splice(0).forEach((disposable) => disposable.dispose());
   abortAiCompletionRequest();
   aiAbortController.value?.abort();
+  closeAllSshSessions({ disposeTerminal: true });
   openFiles.forEach((file) => disposeFileModels(file, { force: true }));
   disposeWorkspaceModels({ force: true });
   revokePreviewResourceUrls();
@@ -1075,7 +1374,9 @@ onBeforeUnmount(() => {
   document.removeEventListener("click", hideAllContextMenus);
   document.removeEventListener("keydown", handleGlobalCommandPaletteShortcut);
   window.removeEventListener("resize", hideAllContextMenus);
+  window.removeEventListener("resize", scheduleActiveSshTerminalFit);
   window.removeEventListener("beforeunload", beforeUnload);
+  window.removeEventListener("pagehide", handlePageHide);
 });
 
 function tr(key, params = {}) {
@@ -1302,6 +1603,477 @@ function showPanel(view) {
   nextTick(layoutVisibleEditors);
 }
 
+function createSshDraft(source = {}) {
+  return {
+    id: source.id || "",
+    name: source.name || "",
+    host: source.host || "",
+    port: Number(source.port) || 22,
+    username: source.username || "",
+    authType: source.authType === "privateKey" ? "privateKey" : "password",
+    password: source.password || "",
+    privateKey: source.privateKey || "",
+    passphrase: source.passphrase || "",
+    exposeToAi: Boolean(source.exposeToAi),
+    whitelistText: Array.isArray(source.whitelist) ? source.whitelist.join("\n") : String(source.whitelistText || ""),
+  };
+}
+
+function openCreateSshDialog() {
+  sshDialog.mode = "create";
+  sshDialog.draft = createSshDraft({ port: 22 });
+  sshDialog.visible = true;
+}
+
+function openEditSshDialog(connection) {
+  sshDialog.mode = "edit";
+  sshDialog.draft = createSshDraft(connection);
+  sshDialog.visible = true;
+}
+
+function closeSshDialog() {
+  sshDialog.visible = false;
+}
+
+function applySshWhitelistTemplateToDialog() {
+  sshDialog.draft.whitelistText = String(settings.ssh.whitelistTemplate || DEFAULT_SSH_WHITELIST_TEMPLATE).trim();
+}
+
+function resetSshWhitelistTemplate() {
+  settings.ssh.whitelistTemplate = DEFAULT_SSH_WHITELIST_TEMPLATE;
+}
+
+function applySshTerminalTheme() {
+  sshSessions.forEach((session) => {
+    session.terminal?.options && (session.terminal.options.theme = getSshTerminalTheme());
+  });
+}
+
+function saveSshDialog() {
+  const config = normalizeSshConfig(sshDialog.draft);
+  if (!config.name || !config.host || !config.username) {
+    showAlert(tr("ssh.error.required"), { tone: "danger" });
+    return;
+  }
+  if (sshDialog.mode === "edit") {
+    const index = settings.ssh.connections.findIndex((item) => item.id === config.id);
+    if (index >= 0) settings.ssh.connections.splice(index, 1, config);
+  } else {
+    settings.ssh.connections.push({ ...config, id: createSshConfigId() });
+  }
+  closeSshDialog();
+}
+
+function normalizeSshConfig(value = {}) {
+  const port = Math.max(1, Math.min(Number(value.port) || 22, 65535));
+  return {
+    id: value.id || "",
+    name: String(value.name || "").trim(),
+    host: String(value.host || "").trim(),
+    port,
+    username: String(value.username || "").trim(),
+    authType: value.authType === "privateKey" ? "privateKey" : "password",
+    password: value.authType === "privateKey" ? "" : String(value.password || ""),
+    privateKey: value.authType === "privateKey" ? String(value.privateKey || "") : "",
+    passphrase: value.authType === "privateKey" ? String(value.passphrase || "") : "",
+    exposeToAi: Boolean(value.exposeToAi),
+    whitelist: normalizeSshWhitelist(value.whitelistText ?? value.whitelist),
+  };
+}
+
+function normalizeSshWhitelist(value) {
+  const items = Array.isArray(value) ? value : String(value || "").split(/[\n,]/);
+  return uniqueStrings(items).slice(0, 100);
+}
+
+function createSshConfigId() {
+  return `ssh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function deleteSshConfig(id) {
+  const config = getSshConfigById(id);
+  if (!config || isSshConnected(id)) return;
+  const confirmed = await showConfirm(tr("ssh.confirmDelete", { name: config.name || config.host }), { title: tr("ssh.delete"), tone: "danger" });
+  if (!confirmed) return;
+  settings.ssh.connections = settings.ssh.connections.filter((item) => item.id !== id);
+  disposeSshTerminal(sshSessions.get(id));
+  sshSessions.delete(id);
+  if (activeSshTerminalId.value === id) activeSshTerminalId.value = "";
+  touchSshState();
+  setStatus(tr("ssh.deletedStatus", { name: config.name || config.host }), "");
+}
+
+function getSshConfigById(id) {
+  return settings.ssh.connections.find((connection) => connection.id === id) || null;
+}
+
+function isSshConnected(id) {
+  sshRevision.value;
+  return Boolean(sshSessions.get(id)?.connected);
+}
+
+async function connectSshConfig(config) {
+  if (!sshFeatureEnabled.value) {
+    await showAlert(tr("ssh.error.backendDisabled"), { tone: "danger" });
+    return null;
+  }
+  const normalized = normalizeSshConfig(config);
+  const existing = sshSessions.get(normalized.id);
+  if (existing?.connected) {
+    existing.tabOpen = true;
+    activateSshTerminal(normalized.id);
+    return existing;
+  }
+  closeSshSession(existing, { silent: true });
+  const session = createSshSession(normalized);
+  sshSessions.set(normalized.id, session);
+  activeSshTerminalId.value = normalized.id;
+  activeDiffPath.value = "";
+  touchSshState();
+  setStatus(tr("ssh.connecting", { name: session.title }), `${normalized.host}:${normalized.port}`);
+  nextTick(attachActiveSshTerminal);
+
+  let socket;
+  try {
+    session.websocketUrl = buildSshWebSocketUrl();
+    socket = new WebSocket(session.websocketUrl);
+  } catch (error) {
+    failSshConnection(session);
+    return session;
+  }
+  session.ws = socket;
+  session.connectTimer = window.setTimeout(() => failSshConnection(session), SSH_CONNECT_TIMEOUT_MS);
+  socket.addEventListener("open", () => {
+    fitSshTerminal(session);
+    socket.send(JSON.stringify({ type: "connect", ...buildSshConnectPayload(normalized, session) }));
+    startSshHeartbeat(session);
+  });
+  socket.addEventListener("message", (event) => handleSshWebSocketMessage(session, event.data));
+  socket.addEventListener("close", (event) => {
+    if (session.closing) {
+      markSshSessionClosed(session);
+      return;
+    }
+    if (!session.connected && !session.connectFailed) {
+      failSshConnection(session);
+      return;
+    }
+    const reason = event.reason || (event.code && event.code !== 1000 ? `WebSocket closed (${event.code})` : "");
+    if (reason) appendSshOutput(session, `\n[${new Date().toLocaleTimeString(settings.locale)}] ${reason}\n`);
+    markSshSessionClosed(session);
+  });
+  socket.addEventListener("error", () => {
+    if (session.closing) return;
+    failSshConnection(session);
+  });
+  return session;
+}
+
+function createSshSession(config) {
+  return {
+    configId: config.id,
+    title: config.name || config.host,
+    host: config.host,
+    port: config.port,
+    username: config.username,
+    connected: false,
+    connectionId: "",
+    connectionInfo: null,
+    output: "",
+    tabOpen: true,
+    ws: null,
+    terminal: createXtermTerminal(),
+    fitAddon: createXtermFitAddon(),
+    terminalAttached: false,
+    terminalDataDisposable: null,
+    terminalResizeObserver: null,
+    cols: 120,
+    rows: 30,
+    heartbeatTimer: 0,
+    connectTimer: 0,
+    connectFailed: false,
+    closing: false,
+    websocketUrl: "",
+    startedAt: Date.now(),
+    lastActiveAt: Date.now(),
+  };
+}
+
+function createXtermTerminal() {
+  const terminal = markRaw(new Terminal({
+    cursorBlink: false,
+    disableStdin: true,
+    convertEol: true,
+    fontFamily: "Consolas, 'Courier New', monospace",
+    fontSize: 13,
+    theme: getSshTerminalTheme(),
+  }));
+  return terminal;
+}
+
+function setSshTerminalInputEnabled(session, enabled) {
+  if (!session?.terminal) return;
+  session.terminal.options.disableStdin = !enabled;
+  session.terminal.options.cursorBlink = Boolean(enabled);
+  if (enabled) {
+    session.terminal.focus();
+  } else {
+    session.terminal.blur?.();
+  }
+}
+
+function createXtermFitAddon() {
+  return markRaw(new FitAddon());
+}
+
+function getSshTerminalTheme() {
+  return sshTerminalThemes[settings.ssh.terminalTheme] || sshTerminalThemes.dark;
+}
+
+function attachActiveSshTerminal() {
+  const session = activeSshTerminal.value;
+  const host = sshTerminalHost.value;
+  if (!session || !host) return;
+  if (!session.terminal) {
+    session.terminal = createXtermTerminal();
+    if (!session.terminal) return;
+    session.fitAddon = createXtermFitAddon();
+    touchSshState();
+    nextTick(attachActiveSshTerminal);
+    return;
+  }
+  if (!session.fitAddon) session.fitAddon = createXtermFitAddon();
+  host.textContent = "";
+  if (!session.terminalAttached) {
+    if (session.fitAddon) session.terminal.loadAddon(session.fitAddon);
+    session.terminal.open(host);
+    session.terminalAttached = true;
+    session.terminalDataDisposable = session.terminal.onData((data) => {
+      if (session.connected && session.ws?.readyState === WebSocket.OPEN) session.ws.send(JSON.stringify({ type: "input", data }));
+    });
+    if (window.ResizeObserver) {
+      session.terminalResizeObserver = new ResizeObserver(() => scheduleSshTerminalFit(session));
+      session.terminalResizeObserver.observe(host);
+    }
+    if (session.output) session.terminal.write(session.output);
+  } else if (session.terminal.element && session.terminal.element.parentElement !== host) {
+    host.appendChild(session.terminal.element);
+  }
+  scheduleSshTerminalFit(session);
+  session.terminal.focus();
+}
+
+function scheduleActiveSshTerminalFit() {
+  const session = activeSshTerminal.value;
+  if (session) scheduleSshTerminalFit(session);
+}
+
+function scheduleSshTerminalFit(session) {
+  requestAnimationFrame(() => fitSshTerminal(session));
+}
+
+function fitSshTerminal(session) {
+  if (!session?.terminal || !session.fitAddon || !session.terminal.element) return;
+  try {
+    session.fitAddon.fit();
+    const cols = session.terminal.cols;
+    const rows = session.terminal.rows;
+    if (!cols || !rows) return;
+    if (session.cols === cols && session.rows === rows) return;
+    session.cols = cols;
+    session.rows = rows;
+    if (session.connected && session.ws?.readyState === WebSocket.OPEN) {
+      session.ws.send(JSON.stringify({ type: "resize", cols, rows }));
+    }
+  } catch (error) {
+    console.error("Failed to fit SSH terminal", error);
+  }
+}
+
+function buildSshConnectPayload(config, session = null) {
+  return {
+    name: config.name,
+    host: config.host,
+    port: config.port,
+    username: config.username,
+    authType: config.authType,
+    password: config.authType === "password" ? config.password : "",
+    privateKey: config.authType === "privateKey" ? config.privateKey : "",
+    passphrase: config.authType === "privateKey" ? config.passphrase : "",
+    cols: session?.cols || 120,
+    rows: session?.rows || 30,
+  };
+}
+
+function buildSshWebSocketUrl() {
+  const base = new URL(getBackendBaseUrl());
+  base.protocol = base.protocol === "https:" ? "wss:" : "ws:";
+  base.pathname = SSH_WEBSOCKET_PATH;
+  base.search = "";
+  const securityKey = String(settings.ssh.securityKey || "").trim();
+  if (securityKey) base.searchParams.set("securityKey", securityKey);
+  return base.href;
+}
+
+function handleSshWebSocketMessage(session, raw) {
+  let event;
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    appendSshOutput(session, String(raw || ""));
+    return;
+  }
+  if (event.type === "connected") {
+    window.clearTimeout(session.connectTimer);
+    session.connectTimer = 0;
+    session.connectFailed = false;
+    session.closing = false;
+    session.connected = true;
+    setSshTerminalInputEnabled(session, true);
+    session.connectionId = event.connectionId || event.connection?.id || "";
+    session.connectionInfo = event.connection || null;
+    session.lastActiveAt = Date.now();
+    appendSshOutput(session, `[${new Date().toLocaleTimeString(settings.locale)}] ${tr("ssh.connected")}\n`);
+    setStatus(tr("ssh.connectedStatus", { name: session.title }), session.connectionId);
+    scheduleSshTerminalFit(session);
+    return;
+  }
+  if (event.type === "output") {
+    session.lastActiveAt = Date.now();
+    appendSshOutput(session, event.data || "");
+    return;
+  }
+  if (event.type === "closed") {
+    appendSshOutput(session, `\n[${new Date().toLocaleTimeString(settings.locale)}] ${event.message || tr("ssh.disconnected")}\n`);
+    markSshSessionClosed(session);
+    return;
+  }
+  if (event.type === "error") {
+    failSshConnection(session);
+    return;
+  }
+  touchSshState();
+}
+
+function failSshConnection(session) {
+  if (!session) return;
+  window.clearTimeout(session.connectTimer);
+  session.connectTimer = 0;
+  session.connectFailed = true;
+  session.closing = false;
+  session.connected = false;
+  setSshTerminalInputEnabled(session, false);
+  window.clearInterval(session.heartbeatTimer);
+  session.heartbeatTimer = 0;
+  const message = tr("ssh.connectFailed");
+  appendSshOutput(session, `\n[${new Date().toLocaleTimeString(settings.locale)}] ${message}\n`);
+  setStatus(tr("ssh.connectFailedStatus"), session.title);
+}
+
+function appendSshOutput(session, data) {
+  if (!session) return;
+  const text = String(data || "");
+  session.output = `${session.output || ""}${text}`.slice(-SSH_OUTPUT_MAX_CHARS);
+  session.terminal?.write?.(text);
+  touchSshState();
+}
+
+function startSshHeartbeat(session) {
+  window.clearInterval(session.heartbeatTimer);
+  session.heartbeatTimer = window.setInterval(() => {
+    if (session.ws?.readyState === WebSocket.OPEN) session.ws.send(JSON.stringify({ type: "heartbeat" }));
+  }, 25000);
+}
+
+function markSshSessionClosed(session) {
+  if (!session) return;
+  session.connected = false;
+  session.closing = false;
+  setSshTerminalInputEnabled(session, false);
+  window.clearTimeout(session.connectTimer);
+  session.connectTimer = 0;
+  window.clearInterval(session.heartbeatTimer);
+  session.heartbeatTimer = 0;
+  setStatus(tr("ssh.closedStatus", { name: session.title }), "");
+  touchSshState();
+}
+
+function disconnectSshConfig(id) {
+  closeSshSession(sshSessions.get(id));
+}
+
+function closeSshSession(session, options = {}) {
+  if (!session) return;
+  session.closing = true;
+  window.clearTimeout(session.connectTimer);
+  session.connectTimer = 0;
+  window.clearInterval(session.heartbeatTimer);
+  session.heartbeatTimer = 0;
+  if (session.ws?.readyState === WebSocket.OPEN) {
+    try { session.ws.send(JSON.stringify({ type: "close" })); } catch {}
+  }
+  try { session.ws?.close(); } catch {}
+  session.connected = false;
+  setSshTerminalInputEnabled(session, false);
+  if (!options.silent) appendSshOutput(session, `\n[${new Date().toLocaleTimeString(settings.locale)}] ${tr("ssh.disconnected")}\n`);
+  touchSshState();
+}
+
+function closeAllSshSessions(options = {}) {
+  sshSessions.forEach((session) => {
+    closeSshSession(session, { silent: true });
+    if (options.disposeTerminal) disposeSshTerminal(session);
+  });
+}
+
+function disposeSshTerminal(session) {
+  if (!session) return;
+  session.terminalResizeObserver?.disconnect?.();
+  session.terminalResizeObserver = null;
+  session.terminalDataDisposable?.dispose?.();
+  session.terminalDataDisposable = null;
+  session.terminal?.dispose?.();
+  session.terminal = null;
+  session.fitAddon = null;
+  session.terminalAttached = false;
+}
+
+function activateSshTerminal(configId) {
+  const session = sshSessions.get(configId);
+  if (!session) return;
+  session.tabOpen = true;
+  activeSshTerminalId.value = configId;
+  activeDiffPath.value = "";
+  diffEditor.value?.setModel(null);
+  setStatus(session.title, session.connected ? tr("ssh.connected") : tr("ssh.disconnected"));
+  nextTick(attachActiveSshTerminal);
+}
+
+function closeSshTerminalTab(configId) {
+  const session = sshSessions.get(configId);
+  if (!session) return;
+  closeSshSession(session, { silent: true });
+  disposeSshTerminal(session);
+  session.tabOpen = false;
+  sshSessions.delete(configId);
+  if (activeSshTerminalId.value === configId) {
+    activeSshTerminalId.value = "";
+    activateLastOpenFile();
+  }
+  touchSshState();
+}
+
+function sendSshCommand(session, command) {
+  if (!session?.connected || session.ws?.readyState !== WebSocket.OPEN) throw new Error(tr("ssh.disconnected"));
+  session.ws.send(JSON.stringify({ type: "input", data: `${command}\n` }));
+  session.lastActiveAt = Date.now();
+  touchSshState();
+}
+
+function touchSshState() {
+  sshRevision.value += 1;
+}
+
 async function openFolder() {
   if (!window.showDirectoryPicker) {
     setStatus(tr("error.unsupportedBrowser"), "");
@@ -1318,6 +2090,7 @@ async function openFolder() {
     registerWorkspaceFileActions();
     activePath.value = "";
     activeDiffPath.value = "";
+    activeSshTerminalId.value = "";
     collapsedPaths.clear();
     await refreshTree({ collapseAll: true });
     setStatus(tr("status.openedFolder", { name: handle.name }), tr("status.permissionGranted"));
@@ -1750,6 +2523,7 @@ function refreshReadonlyPreviewModel(file) {
 function activateFile(path) {
   const file = openFiles.get(path);
   if (!file) return;
+  activeSshTerminalId.value = "";
   if (file.deleted) {
     activateDiff(path);
     return;
@@ -1790,6 +2564,7 @@ function focusActivePreviewEditor() {
 function activateDiff(path) {
   const file = openFiles.get(path);
   if (!file) return;
+  activeSshTerminalId.value = "";
   activePath.value = path;
   activeDiffPath.value = path;
   if (!isTextFileState(file)) {
@@ -1821,6 +2596,7 @@ function closeFile(path) {
 
 function activateLastOpenFile(excludedPath = "") {
   const nextPath = Array.from(openFiles.values()).filter((file) => !file.closed && file.path !== excludedPath).map((file) => file.path).at(-1) || "";
+  activeSshTerminalId.value = "";
   activePath.value = "";
   activeDiffPath.value = "";
   diffEditor.value?.setModel(null);
@@ -2274,6 +3050,14 @@ function validateBackendEnabled() {
   if (!isBackendEnabled()) throw new Error(tr("ai.error.backendDisabled"));
 }
 
+function getAiExposedSshConfigs() {
+  return (settings.ssh?.connections || []).filter((connection) => connection.exposeToAi);
+}
+
+function isSshAiAvailable() {
+  return isBackendEnabled() && getAiExposedSshConfigs().length > 0;
+}
+
 function getBackendBaseUrl() {
   const baseUrl = normalizeBackendBaseUrlValue(settings.backend?.baseUrl) || defaultBackendSettings.baseUrl;
   try {
@@ -2661,7 +3445,7 @@ async function compressAiContext() {
 
 async function runAiAgent(prompt, signal, session = getActiveAiSession()) {
   const conversation = [{ role: "user", content: buildAgentPrompt(prompt, session) }];
-  for (let round = 0; round < 10; round += 1) {
+  for (let round = 0; round < AI_AGENT_MAX_TOOL_CALL_ROUNDS; round += 1) {
     const payload = { model: settings.ai.agentModel.trim(), instructions: getAgentInstructions(), input: conversation, tools: getAiToolDefinitions() };
     if (settings.ai.reasoningEffort && settings.ai.reasoningEffort !== "default") payload.reasoning = { effort: settings.ai.reasoningEffort };
     const response = await callOpenAiResponses(payload, signal);
@@ -2718,7 +3502,7 @@ function getAgentInstructions() {
     "You are an autonomous coding assistant inside a browser-based Monaco editor.",
     "Use list_tools when you need to check which tools are currently available.",
     "Never claim a file changed unless a tool reports success.",
-    "You have at most 10 tool-call rounds per user request; batch related reads and edits, avoid retry loops, and finish with the best available result before exhausting the limit.",
+    `You have at most ${AI_AGENT_MAX_TOOL_CALL_ROUNDS} tool-call rounds per user request; batch related reads and edits, avoid retry loops, and finish with the best available result before exhausting the limit.`,
     "Use run_javascript for deterministic calculations, parsing, or data transformations. It runs in an isolated browser Web Worker with no DOM, editor, or workspace file access; pass needed data as input.",
   ];
   if (isWorkspaceLoaded()) {
@@ -2741,6 +3525,11 @@ function getAgentInstructions() {
     instructions.push("Use request_proxy when you need to fetch external HTTP resources that may be blocked by browser CORS.");
   } else {
     instructions.push("External HTTP fetches through request_proxy are disabled because the backend server setting is not enabled.");
+  }
+  if (isSshAiAvailable()) {
+    instructions.push("SSH tools are available for SSH settings explicitly exposed to AI. When using execute_ssh_command, provide a clear reason, a commands array containing only every main command used by the shell command, and a high_risk boolean based on your risk assessment. List every SSH command you ran in your final answer. Main commands outside each setting's whitelist require user approval; high_risk=true requires approval even if whitelisted.");
+  } else {
+    instructions.push("SSH tools are unavailable unless the backend server is enabled and at least one SSH setting is exposed to AI.");
   }
   return instructions.join(" ");
 }
@@ -2790,6 +3579,7 @@ function getAiToolDefinitions() {
   if (isBackendEnabled()) {
     tools.push({ type: "function", name: "request_proxy", description: "Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits. Returns status, headers and truncated text response.", parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, max_chars: { type: "number", description: "Maximum response body characters to return. Defaults to 20000." } }, required: ["url"] } });
   }
+  if (isSshAiAvailable()) tools.push(...getAiSshToolDefinitions());
   return tools;
 }
 
@@ -2815,8 +3605,27 @@ function getAiFileToolNames() {
   return getAiFileToolDefinitions().map((tool) => tool.name);
 }
 
+function getAiSshToolDefinitions() {
+  return [
+    { type: "function", name: "get_ssh_connections", description: "Get SSH settings exposed to AI, including name, host, port, active state, and command whitelist. Secrets are never returned.", parameters: { type: "object", properties: {} } },
+    { type: "function", name: "open_ssh_connection", description: "Open an exposed SSH connection by id, name, or host. The backend SSH WebSocket performs the actual SSH connection.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
+    { type: "function", name: "activate_ssh_terminal", description: "Switch the visible editor tab to an already active exposed SSH terminal by id, name, or host. Does not execute any SSH command.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
+    { type: "function", name: "close_ssh_connection", description: "Close an active exposed SSH connection by id, name, or host.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
+    { type: "function", name: "read_ssh_output", description: "Read recent output from an active exposed SSH connection.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, max_chars: { type: "number", description: "Maximum output characters. Defaults to 20000." } }, required: ["connection"] } },
+    { type: "function", name: "execute_ssh_command", description: "Execute a command on an active exposed SSH connection. The AI must provide a reason, commands array containing only every main command used by the shell command, and high_risk based on its own risk assessment. Main commands outside the whitelist require approval; high_risk=true always requires approval.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, command: { type: "string" }, commands: { type: "array", items: { type: "string" }, description: "Required list of main commands used by command, excluding arguments. Include every command in chains, pipes, and substitutions. Example: for 'ls -la && whoami', pass ['ls','whoami']." }, high_risk: { type: "boolean", description: "Required. AI-assessed risk flag. Set true if the command may modify files/system state, affect services, expose secrets, consume significant resources, or otherwise be risky." }, reason: { type: "string", description: "Required explanation of why this SSH command is needed." } }, required: ["connection", "command", "commands", "high_risk", "reason"] } },
+  ];
+}
+
+function getAiSshToolNames() {
+  return getAiSshToolDefinitions().map((tool) => tool.name);
+}
+
 function isAiFileToolName(name) {
   return getAiFileToolNames().includes(name);
+}
+
+function isAiSshToolName(name) {
+  return getAiSshToolNames().includes(name);
 }
 
 function aiToolListTools() {
@@ -2828,10 +3637,14 @@ function aiToolListTools() {
   if (!isBackendEnabled()) {
     unavailable.push({ name: "request_proxy", description: "Fetch an external HTTP/HTTPS URL through the configured backend request proxy.", reason: "Backend server setting is disabled" });
   }
+  if (!isSshAiAvailable()) {
+    unavailable.push(...getAiSshToolDefinitions().map((tool) => ({ ...formatAiToolAvailability(tool), reason: isBackendEnabled() ? "No SSH setting is exposed to AI" : "Backend server setting is disabled" })));
+  }
   return {
     summary: `Available tools: ${available.map((tool) => tool.name).join(", ") || "none"}`,
     workspace_loaded: isWorkspaceLoaded(),
     backend_enabled: isBackendEnabled(),
+    ssh_ai_available: isSshAiAvailable(),
     available,
     unavailable,
   };
@@ -2848,6 +3661,7 @@ function parseAiToolArguments(call) {
 async function runAiToolCall(call, args = {}, session = getActiveAiSession()) {
   try {
     if (isAiFileToolName(call.name) && !isWorkspaceLoaded()) return { ok: false, summary: `Tool ${call.name} is unavailable because no workspace folder is open` };
+    if (isAiSshToolName(call.name) && !isSshAiAvailable()) return { ok: false, summary: `Tool ${call.name} is unavailable because SSH is not exposed to AI or backend is disabled` };
     switch (call.name) {
       case "list_tools": return okTool(aiToolListTools());
       case "list_files": return okTool(await aiToolListFiles(args));
@@ -2857,6 +3671,12 @@ async function runAiToolCall(call, args = {}, session = getActiveAiSession()) {
       case "search_text": return okTool(await aiToolSearchText(args));
       case "run_javascript": return await aiToolRunJavaScript(args);
       case "request_proxy": return okTool(await aiToolRequestProxy(args));
+      case "get_ssh_connections": return okTool(aiToolGetSshConnections());
+      case "open_ssh_connection": return okTool(await aiToolOpenSshConnection(args.connection));
+      case "activate_ssh_terminal": return okTool(aiToolActivateSshTerminal(args.connection));
+      case "close_ssh_connection": return okTool(aiToolCloseSshConnection(args.connection));
+      case "read_ssh_output": return okTool(aiToolReadSshOutput(args));
+      case "execute_ssh_command": return okTool(await aiToolExecuteSshCommand(args));
       case "get_current_file": return okTool(aiToolGetCurrentFile());
       case "replace_in_file": return okTool(await aiToolReplaceInFile(args, session));
       case "replace_in_files": return okTool(await aiToolReplaceInFiles(args, session));
@@ -3033,9 +3853,31 @@ function reportError(messageKey, error) {
 }
 
 function beforeUnload(event) {
-  if (!Array.from(openFiles.values()).some((file) => file.dirty)) return;
+  if (!shouldConfirmLeaveEditor()) return;
+  const message = tr("confirm.leaveWithSsh");
   event.preventDefault();
-  event.returnValue = "";
+  event.returnValue = message;
+  return message;
+}
+
+function handlePageHide() {
+  closeAllSshSessions({ disposeTerminal: true });
+}
+
+function hasUnsavedFiles() {
+  return Array.from(openFiles.values()).some((file) => file.dirty);
+}
+
+function shouldConfirmLeaveEditor() {
+  return hasUnsavedFiles() || hasActiveSshSessions();
+}
+
+function hasActiveSshSessions() {
+  return Array.from(sshSessions.values()).some(isSshSessionActive);
+}
+
+function isSshSessionActive(session) {
+  return Boolean(session && !session.closing && (session.connected || session.ws?.readyState === WebSocket.CONNECTING || session.ws?.readyState === WebSocket.OPEN));
 }
 
 async function exportSettingsUrl() {
@@ -3057,15 +3899,25 @@ function loadSettings() {
     const shortcuts = { ...vscodeShortcuts, ...(saved.shortcuts || {}) };
     const ai = { ...defaultAiSettings, ...(saved.ai || {}) };
     const backend = { ...defaultBackendSettings, ...(saved.backend || {}) };
+    const ssh = { ...defaultSshSettings, ...(saved.ssh || {}) };
     if (!aiReasoningEfforts.includes(ai.reasoningEffort)) ai.reasoningEffort = defaultAiSettings.reasoningEffort;
     backend.enabled = Boolean(backend.enabled);
     backend.baseUrl = normalizeBackendBaseUrlValue(backend.baseUrl) || defaultBackendSettings.baseUrl;
-    const loaded = { ...defaultSettings, ...saved, sidebarWidth: clampSidebarWidth(saved.sidebarWidth), shortcuts, ai, backend };
+    if (!sshTerminalThemes[ssh.terminalTheme]) ssh.terminalTheme = defaultSshSettings.terminalTheme;
+    ssh.whitelistTemplate = String(ssh.whitelistTemplate || DEFAULT_SSH_WHITELIST_TEMPLATE).trim();
+    ssh.connections = Array.isArray(ssh.connections) ? ssh.connections.map(normalizeStoredSshConfig).filter(Boolean) : [];
+    const loaded = { ...defaultSettings, ...saved, sidebarWidth: clampSidebarWidth(saved.sidebarWidth), shortcuts, ai, backend, ssh };
     if (imported) localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
     return loaded;
   } catch {
     return structuredClone(defaultSettings);
   }
+}
+
+function normalizeStoredSshConfig(value) {
+  const config = normalizeSshConfig(value);
+  if (!config.id) config.id = createSshConfigId();
+  return config.name || config.host ? config : null;
 }
 
 function readSettingsFromUrl() {
@@ -3500,6 +4352,109 @@ function shouldSkipProxyRequestHeader(name) {
   return ["host", "connection", "content-length", "transfer-encoding", "upgrade", "expect", "proxy-host", "proxy-cors", "proxy-follow-redirect"].includes(normalized);
 }
 
+function aiToolGetSshConnections() {
+  const connections = getAiExposedSshConfigs().map((connection) => ({
+    id: connection.id,
+    name: connection.name,
+    host: connection.host,
+    port: connection.port || 22,
+    username: connection.username,
+    active: isSshConnected(connection.id),
+    whitelist: connection.whitelist || [],
+  }));
+  return { summary: `${connections.length} SSH connection(s) exposed to AI`, connections };
+}
+
+async function aiToolOpenSshConnection(identifier) {
+  const config = getAiExposedSshConfig(identifier);
+  const session = await connectSshConfig(config);
+  return { summary: `Opened SSH connection ${config.name || config.host}`, connection: formatAiSshConnection(config, session) };
+}
+
+function aiToolActivateSshTerminal(identifier) {
+  const config = getAiExposedSshConfig(identifier);
+  const session = getActiveSshSessionForConfig(config);
+  activateSshTerminal(config.id);
+  return { summary: `Activated SSH terminal ${config.name || config.host}`, connection: formatAiSshConnection(config, session) };
+}
+
+function aiToolCloseSshConnection(identifier) {
+  const config = getAiExposedSshConfig(identifier);
+  disconnectSshConfig(config.id);
+  return { summary: `Closed SSH connection ${config.name || config.host}`, connection: formatAiSshConnection(config, sshSessions.get(config.id)) };
+}
+
+function aiToolReadSshOutput({ connection, max_chars: maxChars = 20000 } = {}) {
+  const config = getAiExposedSshConfig(connection);
+  const session = getActiveSshSessionForConfig(config);
+  const limit = Math.max(1000, Math.min(Number(maxChars) || 20000, SSH_OUTPUT_MAX_CHARS));
+  const output = String(session.output || "");
+  return { summary: `Read ${Math.min(output.length, limit)} SSH output chars from ${config.name || config.host}`, connection: formatAiSshConnection(config, session), truncated: output.length > limit, output: output.slice(-limit) };
+}
+
+async function aiToolExecuteSshCommand({ connection, command, commands, high_risk: highRisk, reason } = {}) {
+  const config = getAiExposedSshConfig(connection);
+  const session = getActiveSshSessionForConfig(config);
+  const normalizedCommand = String(command || "").trim();
+  const mainCommands = normalizeAiSshCommandList(commands);
+  const normalizedReason = String(reason || "").trim();
+  if (!normalizedCommand) throw new Error("command is required");
+  if (!mainCommands.length) throw new Error(tr("ssh.error.commandListRequired"));
+  if (typeof highRisk !== "boolean") throw new Error("high_risk is required");
+  if (!normalizedReason) throw new Error(tr("ssh.error.commandReasonRequired"));
+  await authorizeAiSshCommand(config, normalizedCommand, mainCommands, highRisk, normalizedReason);
+  const beforeLength = String(session.output || "").length;
+  sendSshCommand(session, normalizedCommand);
+  await delay(SSH_COMMAND_OUTPUT_WAIT_MS);
+  const output = String(session.output || "").slice(beforeLength).slice(-20000);
+  return { summary: tr("ssh.toolExecutedCommand", { command: normalizedCommand, reason: normalizedReason }), connection: formatAiSshConnection(config, session), command: normalizedCommand, commands: mainCommands, high_risk: highRisk, reason: normalizedReason, output };
+}
+
+function getAiExposedSshConfig(identifier) {
+  const value = String(identifier || "").trim();
+  const config = getAiExposedSshConfigs().find((connection) => connection.id === value || connection.name === value || connection.host === value);
+  if (!config) throw new Error(tr("ssh.error.notExposed"));
+  return config;
+}
+
+function getActiveSshSessionForConfig(config) {
+  const session = sshSessions.get(config.id);
+  if (!session?.connected) throw new Error(tr("ssh.disconnected"));
+  return session;
+}
+
+function formatAiSshConnection(config, session) {
+  return { id: config.id, name: config.name, host: config.host, port: config.port || 22, username: config.username, active: Boolean(session?.connected), whitelist: config.whitelist || [] };
+}
+
+async function authorizeAiSshCommand(config, command, mainCommands, highRisk, reason) {
+  const whitelisted = areSshMainCommandsWhitelisted(config, mainCommands);
+  if (!highRisk && whitelisted) return;
+  const messageKey = highRisk ? "ssh.confirmHighRiskCommand" : "ssh.confirmUnauthorizedCommand";
+  const approved = await showConfirm(tr(messageKey, { name: config.name || config.host, command, commands: mainCommands.join(", "), reason }), { title: tr("ssh.run"), tone: "danger" });
+  if (!approved) throw new Error(tr("ssh.error.commandRejected"));
+}
+
+function areSshMainCommandsWhitelisted(config, mainCommands) {
+  const whitelist = new Set(normalizeSshWhitelist(config.whitelist || []).map(normalizeMainCommandName));
+  return mainCommands.length > 0 && mainCommands.every((command) => whitelist.has(command));
+}
+
+function normalizeAiSshCommandList(commands) {
+  if (!Array.isArray(commands)) return [];
+  return uniqueStrings(commands.map(normalizeMainCommandName)).filter(Boolean);
+}
+
+function normalizeMainCommandName(command) {
+  const value = String(command || "").trim();
+  if (!value || /\s/.test(value)) return "";
+  return value;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function aiToolGetCurrentFile() {
   const file = activeFile.value;
   if (!file) return { summary: "No active file" };
@@ -3902,6 +4857,22 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .change-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .change-main strong { font-size: 13px; font-weight: 600; }
 .code-editor-view .change-main small { color: var(--muted); font-size: 11px; }
+.code-editor-view .ssh-list { display: grid; align-content: start; gap: 8px; min-height: 0; overflow: auto; padding: 0 12px 16px; }
+.code-editor-view .ssh-disabled-card strong { font-size: 13px; }
+.code-editor-view .ssh-card { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-soft); }
+.code-editor-view .ssh-card.active { border-color: var(--accent-strong); }
+.code-editor-view .ssh-card-main { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; }
+.code-editor-view .ssh-card-main > .codicon { color: var(--accent-strong); font-size: 17px; }
+.code-editor-view .ssh-card-main div { display: grid; min-width: 0; gap: 2px; }
+.code-editor-view .ssh-card-main strong,
+.code-editor-view .ssh-card-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-editor-view .ssh-card-main strong { font-size: 13px; }
+.code-editor-view .ssh-card-main small,
+.code-editor-view .ssh-card-meta { color: var(--muted); font-size: 11px; }
+.code-editor-view .ssh-card-meta { display: flex; flex-wrap: wrap; gap: 8px; }
+.code-editor-view .ssh-card-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.code-editor-view .ssh-card-actions button { padding: 5px 7px; font-size: 12px; }
+.code-editor-view .ssh-card-actions .danger { color: #ffb3b3; }
 .code-editor-view .ai-session-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 8px; padding: 0 12px 10px; }
 .code-editor-view .ai-session-select { display: grid; min-width: 0; gap: 5px; color: var(--muted); font-size: 12px; }
 .code-editor-view .ai-session-select select { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--input); color: var(--text); padding: 6px 7px; }
@@ -3964,6 +4935,12 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .editor-stage { position: relative; min-width: 0; min-height: 0; }
 .code-editor-view .monaco-host { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
 .code-editor-view .monaco-host.visible { opacity: 1; pointer-events: auto; }
+.code-editor-view .ssh-terminal { position: absolute; inset: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); min-width: 0; min-height: 0; background: var(--editor); }
+.code-editor-view .ssh-terminal-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 12px; font-weight: 600; }
+.code-editor-view .ssh-terminal-header small { color: var(--muted); font-weight: 500; }
+.code-editor-view .ssh-terminal-host { min-width: 0; min-height: 0; overflow: hidden; padding: 8px; }
+.code-editor-view .ssh-terminal-host .terminal { height: 100%; }
+.code-editor-view .ssh-terminal-fallback { min-width: 0; min-height: 0; margin: 0; overflow: auto; padding: 10px 12px; background: var(--editor); color: var(--text); font-family: Consolas, 'Courier New', monospace; font-size: 13px; line-height: 1.45; white-space: pre-wrap; }
 .code-editor-view .editor-stage.preview-open .monaco-host.visible,
 .code-editor-view .editor-stage.preview-open .unsupported-preview { right: min(480px, 42vw); }
 .code-editor-view .preview-pane { position: absolute; inset: 0 0 0 auto; z-index: 4; display: grid; grid-template-rows: 34px minmax(0, 1fr); width: min(480px, 42vw); border-left: 1px solid var(--border); background: var(--editor); color: var(--text); box-shadow: -12px 0 24px rgb(0 0 0 / 14%); }
@@ -3997,17 +4974,19 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .status-right-group select:focus { border-color: var(--accent-strong); background: var(--input); color: var(--text); outline: none; }
 .code-editor-view .status-right-group select:disabled { opacity: 0.5; }
 .code-editor-view .editor-dialog-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 18px; background: rgb(0 0 0 / 46%); backdrop-filter: blur(2px); }
-.code-editor-view .editor-dialog { display: grid; gap: 14px; width: min(460px, 100%); padding: 18px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); box-shadow: 0 20px 60px var(--shadow); }
+.code-editor-view .editor-dialog { display: grid; gap: 14px; width: min(560px, 100%); max-height: min(760px, calc(100vh - 36px)); overflow: auto; padding: 18px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); box-shadow: 0 20px 60px var(--shadow); }
 .code-editor-view .editor-dialog-header { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .code-editor-view .editor-dialog-header .codicon { flex: 0 0 auto; color: var(--accent-strong); font-size: 18px; }
 .code-editor-view .editor-dialog-header .codicon-warning,
 .code-editor-view .editor-dialog-header .codicon-error { color: #ffb3b3; }
 .code-editor-view .editor-dialog h2 { min-width: 0; margin: 0; overflow: hidden; font-size: 15px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.code-editor-view .editor-dialog-message { margin: 0; color: var(--text); font-size: 13px; line-height: 1.55; white-space: pre-line; }
+.code-editor-view .editor-dialog-message { margin: 0; overflow-wrap: anywhere; color: var(--text); font-size: 13px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .code-editor-view .editor-dialog-input-row { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
 .code-editor-view .editor-dialog-input-row input { width: 100%; border: 1px solid var(--border); border-radius: 5px; background: var(--input); color: var(--text); padding: 8px 9px; }
 .code-editor-view .editor-dialog-input-row input:focus { border-color: var(--accent-strong); outline: none; box-shadow: 0 0 0 1px var(--accent-strong); }
-.code-editor-view .editor-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.code-editor-view .ssh-dialog { width: min(620px, 100%); max-height: min(760px, calc(100vh - 36px)); overflow: auto; }
+.code-editor-view .ssh-dialog-grid { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 10px; }
+.code-editor-view .editor-dialog-actions { position: sticky; bottom: -18px; display: flex; justify-content: flex-end; gap: 8px; margin: 0 -18px -18px; padding: 12px 18px 18px; border-top: 1px solid var(--border); background: var(--panel); }
 .code-editor-view .editor-dialog-actions button { min-width: 76px; padding: 7px 12px; }
 .code-editor-view .editor-dialog-actions .primary { border-color: var(--accent); background: var(--accent); color: #ffffff; }
 .code-editor-view .editor-dialog-actions .primary:hover:not(:disabled) { border-color: var(--accent-strong); background: var(--accent-strong); }
