@@ -82,15 +82,17 @@ start_app() {
     return
   fi
 
+  mkdir -p "${APP_DIR}/logs"
+
   if [[ -x "${APP_DIR}/${APP_NAME}" ]]; then
-    nohup "${APP_DIR}/${APP_NAME}" > /dev/null 2>&1 < /dev/null &
+    (cd "${APP_DIR}" && nohup "${APP_DIR}/${APP_NAME}" > /dev/null 2>&1 < /dev/null &)
   elif [[ -f "${APP_DIR}/${APP_NAME}.jar" ]]; then
     local -a java_opts=()
     if [[ -n "${JAVA_OPTS:-}" ]]; then
       # shellcheck disable=SC2206
       java_opts=(${JAVA_OPTS})
     fi
-    nohup java "${java_opts[@]}" -jar "${APP_DIR}/${APP_NAME}.jar" > /dev/null 2>&1 < /dev/null &
+    (cd "${APP_DIR}" && nohup java "${java_opts[@]}" -jar "${APP_DIR}/${APP_NAME}.jar" > /dev/null 2>&1 < /dev/null &)
   else
     fail "no deployable artifact found in ${APP_DIR}"
   fi
