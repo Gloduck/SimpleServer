@@ -1,10 +1,10 @@
 package cn.gloduck.api.service.jrebel;
 
-import cn.gloduck.api.ApplicationContext;
 import cn.gloduck.api.entity.config.JrebelConfig;
 import cn.gloduck.api.entity.model.jrebel.JrebelJsonBaseModel;
 import cn.gloduck.api.entity.model.jrebel.JrebelLeasesModel;
 import cn.gloduck.api.entity.model.jrebel.JrebelLeasesV1Model;
+import jakarta.enterprise.context.ApplicationScoped;
 import lombok.NonNull;
 
 import java.nio.charset.StandardCharsets;
@@ -12,10 +12,11 @@ import java.security.KeyFactory;
 import java.security.Signature;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 
+@ApplicationScoped
 public class JRebelService {
     private static final String CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    private static final Random RANDOM = new Random();
 
     private static final String JSON_SUCCESS_STATUS_CODE = "SUCCESS";
     private static final String LEASES_SIGN_PRIVATE_KEY = """
@@ -67,7 +68,7 @@ public class JRebelService {
             signatureList.add(offlineFrom.toString());
             signatureList.add(offlineUntil.toString());
         }
-        Long licenseUntil = now + (config.licenseValidDays * 24 * 60 * 60 * 1000);
+        Long licenseUntil = now + ((config.licenseValidDays == null ? 180L : config.licenseValidDays) * 24 * 60 * 60 * 1000);
 
         // 构造返回值
         JrebelLeasesModel leasesModel = JrebelLeasesModel.builder()
@@ -144,7 +145,7 @@ public class JRebelService {
         StringBuilder randomString = new StringBuilder(length);
 
         for (int i = 0; i < length; i++) {
-            int index = RANDOM.nextInt(CHARACTERS.length());
+            int index = ThreadLocalRandom.current().nextInt(CHARACTERS.length());
             randomString.append(CHARACTERS.charAt(index));
         }
 
@@ -153,16 +154,5 @@ public class JRebelService {
 
     public JRebelService(JrebelConfig config) {
         this.config = config;
-    }
-
-
-    private static JRebelService instance;
-
-    public static JRebelService instance() {
-        if (instance == null) {
-            JrebelConfig config = ApplicationContext.getConfig(JrebelConfig.class);
-            instance = new JRebelService(config);
-        }
-        return instance;
     }
 }

@@ -1,41 +1,47 @@
 package cn.gloduck.api.controller;
 
+import cn.gloduck.api.entity.model.torrent.TorrentHandlerInfo;
+import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.service.torrent.TorrentService;
 import cn.gloduck.common.entity.base.Result;
-import cn.gloduck.server.core.enums.HttpMethod;
-import cn.gloduck.server.core.handler.ControllerHandler;
-import cn.gloduck.server.core.handler.styles.classes.JsonControllerHandler;
-import cn.gloduck.server.core.util.HttpExchangeUtils;
+import cn.gloduck.common.entity.base.ScrollPageResult;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
 
 import java.util.List;
-import java.util.Map;
 
+@Path("/api/torrent")
+@Produces(MediaType.APPLICATION_JSON)
 public class TorrentController {
-    private TorrentService torrentService = TorrentService.instance();
+    private final TorrentService torrentService;
 
-    public ControllerHandler listHandlers() {
-        return new JsonControllerHandler<>(HttpMethod.GET, "/api/torrent/listHandlers", t -> Result.success(torrentService.listHandlers()));
+    public TorrentController(TorrentService torrentService) {
+        this.torrentService = torrentService;
     }
 
-    public ControllerHandler queryDetail() {
-        return new JsonControllerHandler<>(HttpMethod.GET, "/api/torrent/queryDetail", t -> {
-            Map<String, List<String>> parameters = HttpExchangeUtils.getAllRequestParameters(t);
-            String id = HttpExchangeUtils.getStringParameter(parameters, "id");
-            String code = HttpExchangeUtils.getStringParameter(parameters, "code");
-            return Result.success(torrentService.queryDetail(id, code));
-        });
+    @GET
+    @Path("/listHandlers")
+    public Result<List<TorrentHandlerInfo>> listHandlers() {
+        return Result.success(torrentService.listHandlers());
     }
 
-    public ControllerHandler search() {
-        return new JsonControllerHandler<>(HttpMethod.GET, "/api/torrent/search", t -> {
-            Map<String, List<String>> parameters = HttpExchangeUtils.getAllRequestParameters(t);
-            String keyword = HttpExchangeUtils.getStringParameter(parameters, "keyword");
-            String code = HttpExchangeUtils.getStringParameter(parameters, "code");
-            Integer pageIndex = HttpExchangeUtils.getIntegerParameter(parameters, "pageIndex");
-            Integer pageSize = HttpExchangeUtils.getIntegerParameter(parameters, "pageSize");
-            String sortField = HttpExchangeUtils.getStringParameter(parameters, "sortField");
-            String sortOrder = HttpExchangeUtils.getStringParameter(parameters, "sortOrder");
-            return Result.success(torrentService.search(pageIndex, pageSize, keyword, code, sortField, sortOrder));
-        });
+    @GET
+    @Path("/queryDetail")
+    public Result<TorrentInfo> queryDetail(@QueryParam("id") String id, @QueryParam("code") String code) {
+        return Result.success(torrentService.queryDetail(id, code));
+    }
+
+    @GET
+    @Path("/search")
+    public Result<ScrollPageResult<TorrentInfo>> search(@QueryParam("keyword") String keyword,
+                                                        @QueryParam("code") String code,
+                                                        @QueryParam("pageIndex") Integer pageIndex,
+                                                        @QueryParam("pageSize") Integer pageSize,
+                                                        @QueryParam("sortField") String sortField,
+                                                        @QueryParam("sortOrder") String sortOrder) {
+        return Result.success(torrentService.search(pageIndex, pageSize, keyword, code, sortField, sortOrder));
     }
 }

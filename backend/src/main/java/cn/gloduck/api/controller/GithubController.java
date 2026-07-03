@@ -2,17 +2,25 @@ package cn.gloduck.api.controller;
 
 import cn.gloduck.api.service.github.GithubService;
 import cn.gloduck.common.entity.base.Result;
-import cn.gloduck.server.core.enums.HttpMethod;
-import cn.gloduck.server.core.handler.ControllerHandler;
-import cn.gloduck.server.core.handler.styles.classes.JsonControllerHandler;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.core.MediaType;
 
+import java.util.List;
+
+@Path("/api/github")
+@Produces(MediaType.APPLICATION_JSON)
 public class GithubController {
-    private final GithubService githubService = GithubService.instance();
+    private final GithubService githubService;
 
-    public ControllerHandler hotSearches() {
-        return new JsonControllerHandler<>(HttpMethod.GET, "/api/github/hotSearches", t -> {
-            return Result.success(githubService.getHotSearches());
-        });
+    public GithubController(GithubService githubService) {
+        this.githubService = githubService;
     }
 
+    @GET
+    @Path("/hotSearches")
+    public Result<List<String>> hotSearches() {
+        return Result.success(githubService.getHotSearches());
+    }
 }

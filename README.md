@@ -1,6 +1,6 @@
 # SimpleServer
 
-一个自用的 API 服务，基于 JDK 自带的 `HttpServer` 实现，使用 CSV 文件作为轻量数据库，并支持 GraalVM Native Image 构建。
+一个自用的 API 服务，后端基于 Quarkus 实现，使用 CSV 文件作为轻量数据库，并支持 GraalVM Native Image 构建。
 
 当前已包含的功能：
 
@@ -21,6 +21,30 @@
 - `db/`：本地开发阶段使用的 CSV 数据目录
 - `target/`：构建输出目录，生成 jar/native、配置文件、管理脚本和压缩包
 
+## 本地启动
+
+开发模式：
+
+```bash
+mvn -f backend/pom.xml quarkus:dev
+```
+
+Quarkus dev 默认监听调试端口 `5005`，IDE 可以通过 remote debugger attach 到 `localhost:5005`。
+
+普通 jar：
+
+```bash
+mvn -f backend/pom.xml package -DskipTests
+java -jar backend/target/SimpleServer-1.0-runner.jar
+```
+
+Native：
+
+```bash
+mvn -f backend/pom.xml package -Dquarkus.native.enabled=true -Dquarkus.native.native-image-xmx=2g -DskipTests
+backend/target/SimpleServer-1.0-runner
+```
+
 ## 配置说明
 
 默认配置文件位于 `backend/src/main/resources/config.json`。
@@ -36,15 +60,13 @@
 {
   "log": {
     "level": "INFO",
-    "file": "logs/${yyyy}-${MM}-${dd}.log",
-    "flushIntervalSeconds": 1
+    "file": "logs/app.log"
   }
 }
 ```
 
 - `log.level`：日志级别
-- `log.file`：日志文件路径模板；不配置时仅输出控制台
-- `log.flushIntervalSeconds`：日志文件定时刷盘间隔，单位秒
+- `log.file`：日志文件路径；当前由 Quarkus file logging 输出，不支持日期模板
 
 ## 构建脚本
 
@@ -61,7 +83,7 @@ bash script/build.sh clean buildJar
 
 说明：
 
-- `buildJar`：构建前端并打包后端 jar 版本
+- `buildJar`：构建前端并打包后端 Quarkus runner jar 版本
 - `buildNative`：构建前端并打包后端 native 版本，需要本机可用 `native-image`
 - `clean`：清理前端构建目录、后端构建目录和根目录 `target/`
 

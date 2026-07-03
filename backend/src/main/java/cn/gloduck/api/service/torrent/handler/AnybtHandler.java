@@ -3,7 +3,7 @@ package cn.gloduck.api.service.torrent.handler;
 import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.common.entity.base.ScrollPageResult;
-import cn.gloduck.server.core.util.JsonUtils;
+import cn.gloduck.api.utils.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 

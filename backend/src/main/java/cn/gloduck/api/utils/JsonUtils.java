@@ -1,4 +1,4 @@
-package cn.gloduck.server.core.util;
+package cn.gloduck.api.utils;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;

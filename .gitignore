@@ -2,6 +2,8 @@ target/
 dist/
 node_modules/
 backend/src/main/resources/front/
+backend/src/main/resources/META-INF/resources/
+logs/
 .env
 
 ### IntelliJ IDEA ###

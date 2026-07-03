@@ -1,16 +1,20 @@
 package cn.gloduck.api.service.clipboard;
 
-import cn.gloduck.api.entity.db.OnlineClipBoard;
 import cn.gloduck.api.dao.CsvDbFactoryPool;
+import cn.gloduck.api.entity.db.OnlineClipBoard;
 import cn.gloduck.db.CsvDbFactory;
+import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.Date;
 import java.util.Objects;
 
+@ApplicationScoped
 public class OnlineClipBoardService {
-    private static OnlineClipBoardService instance;
+    private final CsvDbFactory clipboardFactory;
 
-    private final CsvDbFactory clipboardFactory = CsvDbFactoryPool.clipboard;
+    public OnlineClipBoardService(CsvDbFactoryPool csvDbFactoryPool) {
+        this.clipboardFactory = csvDbFactoryPool.clipboard();
+    }
 
     public boolean save(OnlineClipBoard data) {
         OnlineClipBoard existData = clipboardFactory
@@ -57,12 +61,5 @@ public class OnlineClipBoardService {
         return clipboardFactory.selectFrom(OnlineClipBoard.class)
                 .eq(OnlineClipBoard.Fileds.ID, id)
                 .fetchOne();
-    }
-
-    public static OnlineClipBoardService instance() {
-        if (instance == null) {
-            instance = new OnlineClipBoardService();
-        }
-        return instance;
     }
 }

@@ -1,19 +1,27 @@
 package cn.gloduck.api.dao;
 
-import cn.gloduck.api.ApplicationContext;
 import cn.gloduck.api.entity.db.OnlineClipBoard;
+import cn.gloduck.api.utils.FileUtils;
 import cn.gloduck.db.CsvDbFactory;
 import cn.gloduck.db.converter.CsvJsonBasedConverter;
+import jakarta.annotation.PostConstruct;
+import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.Arrays;
 
+@ApplicationScoped
 public class CsvDbFactoryPool {
-    public static final CsvDbFactory clipboard = new CsvDbFactory(
-            ApplicationContext.resolveApplicationDirectory().resolve("db").resolve("clipboard").toString(),
-            new CsvJsonBasedConverter()
-    );
+    private final CsvDbFactory clipboard;
 
-    public static void init() {
+    public CsvDbFactoryPool() {
+        this.clipboard = new CsvDbFactory(
+                FileUtils.applicationDirectory(CsvDbFactoryPool.class).resolve("db").resolve("clipboard").toString(),
+                new CsvJsonBasedConverter()
+        );
+    }
+
+    @PostConstruct
+    void init() {
         clipboard.createDbIfNotExists(OnlineClipBoard.class.getSimpleName(), Arrays.asList(
                 OnlineClipBoard.Fileds.ID,
                 OnlineClipBoard.Fileds.CONTENT_TYPE,
@@ -21,5 +29,9 @@ public class CsvDbFactoryPool {
                 OnlineClipBoard.Fileds.CREATE_DATE,
                 OnlineClipBoard.Fileds.UPDATE_DATE
         ));
+    }
+
+    public CsvDbFactory clipboard() {
+        return clipboard;
     }
 }

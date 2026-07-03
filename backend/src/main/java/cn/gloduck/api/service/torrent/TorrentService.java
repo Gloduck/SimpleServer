@@ -1,12 +1,12 @@
 package cn.gloduck.api.service.torrent;
 
-import cn.gloduck.api.ApplicationContext;
 import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.entity.model.torrent.TorrentHandlerInfo;
 import cn.gloduck.api.entity.model.torrent.TorrentInfo;
 import cn.gloduck.api.exceptions.ApiException;
 import cn.gloduck.api.service.torrent.handler.*;
 import cn.gloduck.common.entity.base.ScrollPageResult;
+import jakarta.enterprise.context.ApplicationScoped;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.logging.Logger;
 
+@ApplicationScoped
 public class TorrentService {
     private static final Logger LOGGER = Logger.getLogger(TorrentService.class.getName());
     private final Map<String, Boolean> handlerStatusMap;
@@ -166,15 +167,5 @@ public class TorrentService {
         return new ScrollPageResult<>((long) pageIndex, lastHasNext, combinedResults);
     }
 
-    private static TorrentService instance;
-
     private final TorrentConfig config;
-
-    public static TorrentService instance() {
-        if (instance == null) {
-            TorrentConfig config = ApplicationContext.getConfig(TorrentConfig.class);
-            instance = new TorrentService(config);
-        }
-        return instance;
-    }
 }

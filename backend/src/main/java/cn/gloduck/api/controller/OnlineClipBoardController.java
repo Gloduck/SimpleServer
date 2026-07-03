@@ -3,41 +3,40 @@ package cn.gloduck.api.controller;
 import cn.gloduck.api.entity.db.OnlineClipBoard;
 import cn.gloduck.api.service.clipboard.OnlineClipBoardService;
 import cn.gloduck.common.entity.base.Result;
-import cn.gloduck.server.core.enums.HttpMethod;
-import cn.gloduck.server.core.handler.ControllerHandler;
-import cn.gloduck.server.core.handler.styles.classes.JsonControllerHandler;
-import cn.gloduck.server.core.util.HttpExchangeUtils;
-import cn.gloduck.server.core.util.JsonUtils;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
 
-import java.util.List;
-import java.util.Map;
-
+@Path("/api/clipboard")
+@Produces(MediaType.APPLICATION_JSON)
 public class OnlineClipBoardController {
-    private OnlineClipBoardService service = OnlineClipBoardService.instance();
+    private final OnlineClipBoardService service;
 
-    public ControllerHandler getById() {
-        return new JsonControllerHandler<>(HttpMethod.GET, "/api/clipboard/query", exchange -> {
-            Map<String, List<String>> parameters = HttpExchangeUtils.getAllRequestParameters(exchange);
-            String id = HttpExchangeUtils.getStringParameter(parameters, "id");
-            return Result.success(service.getById(id));
-        });
+    public OnlineClipBoardController(OnlineClipBoardService service) {
+        this.service = service;
     }
 
-    public ControllerHandler save() {
-        return new JsonControllerHandler<>(HttpMethod.POST, "/api/clipboard/save", exchange -> {
-            OnlineClipBoard onlineClipBoard = JsonUtils.readValue(exchange.getRequestBody(), OnlineClipBoard.class);
-            boolean success = service.save(onlineClipBoard);
-            return success ? Result.success() : Result.fail();
-        });
+    @GET
+    @Path("/query")
+    public Result<OnlineClipBoard> getById(@QueryParam("id") String id) {
+        return Result.success(service.getById(id));
     }
 
-    public ControllerHandler delete() {
-        return new JsonControllerHandler<>(HttpMethod.DELETE, "/api/clipboard/delete", exchange -> {
-            Map<String, List<String>> parameters = HttpExchangeUtils.getAllRequestParameters(exchange);
-            String id = HttpExchangeUtils.getStringParameter(parameters, "id");
-            boolean success = service.delete(id);
-            return success ? Result.success() : Result.fail();
-        });
+    @POST
+    @Path("/save")
+    public Result<Void> save(OnlineClipBoard onlineClipBoard) {
+        boolean success = service.save(onlineClipBoard);
+        return success ? Result.success() : Result.fail();
     }
 
+    @DELETE
+    @Path("/delete")
+    public Result<Void> delete(@QueryParam("id") String id) {
+        boolean success = service.delete(id);
+        return success ? Result.success() : Result.fail();
+    }
 }

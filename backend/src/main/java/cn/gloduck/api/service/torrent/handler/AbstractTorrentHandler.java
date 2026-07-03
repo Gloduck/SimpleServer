@@ -3,7 +3,7 @@ package cn.gloduck.api.service.torrent.handler;
 import cn.gloduck.api.entity.config.TorrentConfig;
 import cn.gloduck.api.exceptions.ApiException;
 import cn.gloduck.api.utils.HttpClientUtils;
-import cn.gloduck.server.core.util.JsonUtils;
+import cn.gloduck.api.utils.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;

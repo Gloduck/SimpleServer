@@ -4,6 +4,4 @@ public class LogConfig {
     public String level;
 
     public String file;
-
-    public Integer flushIntervalSeconds;
 }

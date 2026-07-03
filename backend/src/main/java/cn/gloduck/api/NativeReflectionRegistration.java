@@ -22,8 +22,7 @@ public class NativeReflectionRegistration implements Feature {
     public void beforeAnalysis(BeforeAnalysisAccess access) {
         String[] scanPackages = {
                 "cn.gloduck.common.entity",
-                "cn.gloduck.api.entity",
-                "cn.gloduck.api.controller"
+                "cn.gloduck.api.entity"
         };
 
         for (String scanPackage : scanPackages) {
@@ -31,7 +30,7 @@ public class NativeReflectionRegistration implements Feature {
         }
 
         String[] resourceDirs = {
-                "front"
+                "META-INF/resources"
         };
 
         for (String resourceDir : resourceDirs) {

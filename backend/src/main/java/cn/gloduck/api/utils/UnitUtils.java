@@ -1,6 +1,5 @@
 package cn.gloduck.api.utils;
 
-import cn.gloduck.api.service.torrent.handler.AbstractTorrentHandler;
 import cn.gloduck.common.entity.base.Pair;
 
 import java.util.ArrayList;
@@ -9,7 +8,7 @@ import java.util.Objects;
 import java.util.logging.Logger;
 
 public class UnitUtils {
-    private final static Logger LOGGER = Logger.getLogger(AbstractTorrentHandler.class.getName());
+    private final static Logger LOGGER = Logger.getLogger(UnitUtils.class.getName());
 
     private static final List<Pair<String, Long>> UNIT_MAP = new ArrayList<>();
 

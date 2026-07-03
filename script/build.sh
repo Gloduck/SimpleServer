@@ -7,7 +7,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 FRONTEND_DIR="${PROJECT_ROOT}/frontend"
 FRONTEND_DIST_DIR="${FRONTEND_DIR}/dist"
 BACKEND_DIR="${PROJECT_ROOT}/backend"
-BACKEND_FRONT_DIR="${BACKEND_DIR}/src/main/resources/front"
+BACKEND_FRONT_DIR="${BACKEND_DIR}/src/main/resources/META-INF/resources"
 BACKEND_TARGET_DIR="${BACKEND_DIR}/target"
 ROOT_TARGET_DIR="${PROJECT_ROOT}/target"
 CONFIG_FILE="${BACKEND_DIR}/src/main/resources/config.json"
@@ -110,15 +110,15 @@ build_frontend() {
 build_backend_jar() {
   printf '==> Building backend jar\n'
   mvn -f "${BACKEND_DIR}/pom.xml" clean package
-  JAVA_ARTIFACT="$(find "${BACKEND_TARGET_DIR}" -maxdepth 1 -type f -name "${APP_NAME}*.jar" ! -name 'original-*.jar' | sort | tail -n 1)"
+  JAVA_ARTIFACT="$(find "${BACKEND_TARGET_DIR}" -maxdepth 1 -type f -name "${APP_NAME}*-runner.jar" | sort | tail -n 1)"
   [[ -f "${JAVA_ARTIFACT}" ]] || fail "jar artifact not found: ${JAVA_ARTIFACT}"
 }
 
 build_backend_native() {
   printf '==> Building backend native image\n'
   require_command native-image
-  mvn -f "${BACKEND_DIR}/pom.xml" clean package -Pnative native:build
-  JAVA_ARTIFACT="${BACKEND_TARGET_DIR}/${APP_NAME}"
+  mvn -f "${BACKEND_DIR}/pom.xml" clean package -Dquarkus.native.enabled=true -Dquarkus.native.native-image-xmx=2g -DskipTests
+  JAVA_ARTIFACT="$(find "${BACKEND_TARGET_DIR}" -maxdepth 1 -type f -name "${APP_NAME}*-runner" | sort | tail -n 1)"
   [[ -f "${JAVA_ARTIFACT}" ]] || fail "native artifact not found: ${JAVA_ARTIFACT}"
 }
 
