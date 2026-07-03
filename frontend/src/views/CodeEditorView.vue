@@ -129,6 +129,16 @@
             </button>
           </div>
         </header>
+        <div class="ai-session-bar">
+          <label class="ai-session-select">
+            <span>{{ tr('ai.session') }}</span>
+            <select v-model="activeAiSessionId">
+              <option v-for="session in aiSessions" :key="session.id" :value="session.id">{{ session.title }} · {{ session.messages.length }}</option>
+            </select>
+          </label>
+          <button type="button" class="small-button" @click="createAiSessionAndActivate">{{ tr('ai.newSession') }}</button>
+          <button type="button" class="small-button" :disabled="aiBusy || aiSessions.length <= 1" @click="deleteActiveAiSession">{{ tr('ai.deleteSession') }}</button>
+        </div>
         <div class="ai-chat">
           <div ref="aiMessagesEl" class="ai-chat-messages">
             <div v-if="aiMessages.length === 0" class="workspace-card">{{ tr('ai.empty') }}</div>
@@ -560,6 +570,12 @@ const messages = {
     "ai.contextSummaryTitle": "上下文摘要",
     "ai.resetConversation": "重置对话",
     "ai.conversationReset": "当前对话已重置",
+    "ai.session": "会话",
+    "ai.defaultSessionTitle": "会话 {count}",
+    "ai.newSession": "新建会话",
+    "ai.deleteSession": "删除会话",
+    "ai.sessionCreated": "已新建会话",
+    "ai.sessionDeleted": "会话已删除",
     "ai.agentModel": "对话模型",
     "ai.reasoningEffort": "思考等级",
     "ai.reasoning.default": "默认",
@@ -593,6 +609,7 @@ const messages = {
     "confirm.deleteDirtyHint": "\n\n包含 {count} 个未保存标签，删除后这些修改会丢失。",
     "confirm.revert": "确定回滚“{path}”的未保存修改吗？",
     "confirm.revertSelected": "确定回滚所选 {count} 个未保存变更吗？",
+    "confirm.deleteAiSession": "确定删除当前 AI 会话吗？此操作不会回滚文件修改。",
     "imagePreview.aria": "图片预览",
     "imagePreview.type": "图片",
     "unsupportedFile.aria": "不支持文件预览",
@@ -754,6 +771,12 @@ const messages = {
     "ai.contextSummaryTitle": "Context Summary",
     "ai.resetConversation": "Reset Chat",
     "ai.conversationReset": "Current chat reset",
+    "ai.session": "Session",
+    "ai.defaultSessionTitle": "Session {count}",
+    "ai.newSession": "New Session",
+    "ai.deleteSession": "Delete Session",
+    "ai.sessionCreated": "Session created",
+    "ai.sessionDeleted": "Session deleted",
     "ai.agentModel": "Chat Model",
     "ai.reasoningEffort": "Reasoning",
     "ai.reasoning.default": "Default",
@@ -787,6 +810,7 @@ const messages = {
     "confirm.deleteDirtyHint": "\n\nIt contains {count} unsaved tab(s). Those changes will be lost.",
     "confirm.revert": "Revert unsaved changes in “{path}”?",
     "confirm.revertSelected": "Revert {count} selected unsaved change(s)?",
+    "confirm.deleteAiSession": "Delete the current AI session? This will not revert file changes.",
     "imagePreview.aria": "Image Preview",
     "imagePreview.type": "Image",
     "unsupportedFile.aria": "Unsupported File Preview",
@@ -905,8 +929,15 @@ const dialogInput = ref(null);
 const dialogPrimaryButton = ref(null);
 const dialogState = reactive({ visible: false, mode: "alert", title: "", message: "", value: "", placeholder: "", confirmLabel: "", cancelLabel: "", tone: "default", selectOnFocus: false });
 const settings = reactive(loadSettings());
-const aiMessages = reactive([]);
-const aiPrompt = ref("");
+let aiSessionSerial = 0;
+const aiSessions = reactive([createAiSession()]);
+const activeAiSessionId = ref(aiSessions[0].id);
+const activeAiSession = computed(() => aiSessions.find((session) => session.id === activeAiSessionId.value) || aiSessions[0] || null);
+const aiMessages = computed(() => activeAiSession.value?.messages || []);
+const aiPrompt = computed({
+  get: () => activeAiSession.value?.prompt || "",
+  set: (value) => { getActiveAiSession().prompt = value; },
+});
 const aiBusy = ref(false);
 const aiAbortController = shallowRef(null);
 const aiAvailableModels = ref([]);
@@ -925,7 +956,7 @@ const aiAgentModelOptions = computed(() => {
 });
 const aiModelOptions = computed(() => uniqueStrings([settings.ai.completionModel, ...aiAgentModelOptions.value, defaultAiSettings.completionModel, ...aiAvailableModels.value]));
 const aiContextLength = computed(() => formatRecentAiMessages({ includePendingUserMessage: true }).length);
-const canResetAiConversation = computed(() => Boolean(aiPrompt.value.trim() || aiMessages.length || getAiTouchedFiles().length));
+const canResetAiConversation = computed(() => Boolean(aiPrompt.value.trim() || aiMessages.value.length || getAiTouchedFiles().length));
 const tree = computed(() => {
   dirtyRevision.value;
   return mergePendingFilesIntoTree(diskTree.value, Array.from(openFiles.values()).filter((file) => file.isNew || file.deleted));
@@ -972,7 +1003,8 @@ const dialogIconClass = computed(() => ({
 
 watch(() => settings.locale, () => { document.documentElement.lang = settings.locale; });
 watch(() => settings.ai.agentModels, syncSelectedAgentModel);
-watch(() => aiMessages.length, () => { nextTick(scrollAiMessagesToBottom); });
+watch(() => aiMessages.value.length, () => { nextTick(scrollAiMessagesToBottom); });
+watch(activeAiSessionId, () => { nextTick(scrollAiMessagesToBottom); });
 watch(searchMatchCase, () => { if (searchSearched.value && searchQuery.value.trim()) runGlobalSearch(); });
 watch(() => dirtyFiles.value.map((file) => file.path).join("\0"), pruneSelectedChangePaths);
 watch(previewPaneVisible, () => { nextTick(layoutVisibleEditors); });
@@ -1793,6 +1825,7 @@ function removeFileState(path) {
   if (!file) return;
   disposeFileModels(file, { force: true });
   openFiles.delete(path);
+  removeAiTouchedPath(path);
   selectedChangePaths.delete(path);
   if (activePath.value === path) activateLastOpenFile(path);
 }
@@ -2307,12 +2340,65 @@ function extractFunctionCalls(response) {
   return (response.output || []).filter((item) => item.type === "function_call" && item.name);
 }
 
-function addAiMessage(role, content, meta = {}) {
-  aiMessages.push(createAiMessage(role, content, meta));
+function createAiSession() {
+  aiSessionSerial += 1;
+  return { id: `ai-session-${Date.now()}-${aiSessionSerial}`, title: tr("ai.defaultSessionTitle", { count: aiSessionSerial }), prompt: "", messages: [], touchedPaths: new Set() };
+}
+
+function getActiveAiSession() {
+  if (activeAiSession.value) return activeAiSession.value;
+  const session = createAiSession();
+  aiSessions.push(session);
+  activeAiSessionId.value = session.id;
+  return session;
+}
+
+function createAiSessionAndActivate() {
+  const session = createAiSession();
+  aiSessions.push(session);
+  activeAiSessionId.value = session.id;
+  setStatus(tr("ai.sessionCreated"), session.title);
+}
+
+async function deleteActiveAiSession() {
+  if (aiBusy.value || aiSessions.length <= 1) return;
+  const index = aiSessions.findIndex((session) => session.id === activeAiSessionId.value);
+  if (index === -1) return;
+  const confirmed = await showConfirm(tr("confirm.deleteAiSession"), { title: tr("ai.deleteSession"), tone: "danger" });
+  if (!confirmed) return;
+  aiSessions.splice(index, 1);
+  activeAiSessionId.value = aiSessions[Math.min(index, aiSessions.length - 1)].id;
+  refreshAiTouchedFlags();
+  touchDirtyState();
+  setStatus(tr("ai.sessionDeleted"), "");
+}
+
+function addAiMessage(role, content, meta = {}, session = getActiveAiSession()) {
+  session.messages.push(createAiMessage(role, content, meta));
 }
 
 function createAiMessage(role, content, meta = {}) {
   return { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, role, content, ...meta };
+}
+
+function getActiveAiTouchedPaths(session = getActiveAiSession()) {
+  return session.touchedPaths;
+}
+
+function markAiTouchedFile(file, session = getActiveAiSession()) {
+  getActiveAiTouchedPaths(session).add(file.path);
+  file.aiTouched = true;
+}
+
+function refreshAiTouchedFlags() {
+  const touchedPaths = new Set();
+  aiSessions.forEach((session) => session.touchedPaths.forEach((path) => touchedPaths.add(path)));
+  openFiles.forEach((file) => { file.aiTouched = touchedPaths.has(file.path); });
+}
+
+function removeAiTouchedPath(path) {
+  aiSessions.forEach((session) => session.touchedPaths.delete(path));
+  refreshAiTouchedFlags();
 }
 
 function scrollAiMessagesToBottom() {
@@ -2473,28 +2559,29 @@ async function requestAiCompletion(file, model, position, signal) {
 }
 
 async function sendAiPrompt() {
+  const session = getActiveAiSession();
   const prompt = aiPrompt.value.trim();
   if (!prompt || aiBusy.value) return;
   try {
     validateAiConfig(settings.ai.agentModel.trim());
   } catch (error) {
-    addAiMessage("assistant", error.message);
+    addAiMessage("assistant", error.message, {}, session);
     return;
   }
   aiPrompt.value = "";
   aiBusy.value = true;
-  addAiMessage("user", prompt);
+  addAiMessage("user", prompt, {}, session);
   const controller = new AbortController();
   aiAbortController.value = controller;
   try {
-    await runAiAgent(prompt, controller.signal);
+    await runAiAgent(prompt, controller.signal, session);
     setStatus(tr("status.aiCompleted"), settings.ai.agentModel.trim());
   } catch (error) {
     if (error.name === "AbortError") {
-      addAiMessage("assistant", tr("status.aiStopped"));
+      addAiMessage("assistant", tr("status.aiStopped"), {}, session);
       setStatus(tr("status.aiStopped"), "");
     } else {
-      addAiMessage("assistant", error.message || String(error));
+      addAiMessage("assistant", error.message || String(error), {}, session);
       setStatus("AI Error", error.message || String(error));
     }
   } finally {
@@ -2509,20 +2596,18 @@ function stopAiTask() {
 
 function resetAiConversation() {
   if (aiBusy.value || !canResetAiConversation.value) return;
+  const session = getActiveAiSession();
   aiPrompt.value = "";
-  aiMessages.splice(0, aiMessages.length);
-  let changed = false;
-  openFiles.forEach((file) => {
-    if (!file.aiTouched) return;
-    file.aiTouched = false;
-    changed = true;
-  });
-  if (changed) dirtyRevision.value += 1;
+  session.messages.splice(0, session.messages.length);
+  session.touchedPaths.clear();
+  session.title = tr("ai.defaultSessionTitle", { count: aiSessions.indexOf(session) + 1 });
+  refreshAiTouchedFlags();
+  touchDirtyState();
   setStatus(tr("ai.conversationReset"), "");
 }
 
 async function compressAiContext() {
-  if (aiBusy.value || !aiMessages.length) return;
+  if (aiBusy.value || !aiMessages.value.length) return;
   try {
     validateAiConfig(settings.ai.agentModel.trim());
   } catch (error) {
@@ -2543,7 +2628,7 @@ async function compressAiContext() {
     }, controller.signal);
     const summary = extractResponseText(response);
     if (!summary) throw new Error("Empty compressed context");
-    aiMessages.splice(0, aiMessages.length, createAiMessage("assistant", `# ${tr("ai.contextSummaryTitle")}\n\n${summary}`));
+    aiMessages.value.splice(0, aiMessages.value.length, createAiMessage("assistant", `# ${tr("ai.contextSummaryTitle")}\n\n${summary}`));
     await nextTick();
     setStatus(tr("ai.contextCompressed"), `${beforeLength} -> ${aiContextLength.value} chars`);
   } catch (error) {
@@ -2559,14 +2644,14 @@ async function compressAiContext() {
   }
 }
 
-async function runAiAgent(prompt, signal) {
-  const conversation = [{ role: "user", content: buildAgentPrompt(prompt) }];
+async function runAiAgent(prompt, signal, session = getActiveAiSession()) {
+  const conversation = [{ role: "user", content: buildAgentPrompt(prompt, session) }];
   for (let round = 0; round < 10; round += 1) {
     const payload = { model: settings.ai.agentModel.trim(), instructions: getAgentInstructions(), input: conversation, tools: getAiToolDefinitions() };
     if (settings.ai.reasoningEffort && settings.ai.reasoningEffort !== "default") payload.reasoning = { effort: settings.ai.reasoningEffort };
     const response = await callOpenAiResponses(payload, signal);
     const text = extractResponseText(response);
-    if (text) addAiMessage("assistant", text);
+    if (text) addAiMessage("assistant", text, {}, session);
     const toolCalls = extractFunctionCalls(response);
     if (!toolCalls.length) return;
     conversation.push(...(response.output || []));
@@ -2575,17 +2660,17 @@ async function runAiAgent(prompt, signal) {
       const args = parseAiToolArguments(call);
       if (call.name === "read_image") {
         const result = await runAiReadImageToolCall(args, imageInputs);
-        addAiMessage("tool", result.summary || "", { expanded: false, tool: { name: call.name, ok: result.ok, args, result } });
+        addAiMessage("tool", result.summary || "", { expanded: false, tool: { name: call.name, ok: result.ok, args, result } }, session);
         conversation.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
         continue;
       }
-      const result = await runAiToolCall(call, args);
-      addAiMessage("tool", result.summary || "", { expanded: false, tool: { name: call.name, ok: result.ok, args, result } });
+      const result = await runAiToolCall(call, args, session);
+      addAiMessage("tool", result.summary || "", { expanded: false, tool: { name: call.name, ok: result.ok, args, result } }, session);
       conversation.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
     }
     if (imageInputs.length) conversation.push(buildImageInputMessage(imageInputs));
   }
-  addAiMessage("assistant", "Reached the tool-call round limit. Review the current changes before continuing.");
+  addAiMessage("assistant", "Reached the tool-call round limit. Review the current changes before continuing.", {}, session);
 }
 
 async function runAiReadImageToolCall(args, imageInputs) {
@@ -2637,34 +2722,38 @@ function getAgentInstructions() {
   return instructions.join(" ");
 }
 
-function buildAgentPrompt(prompt) {
+function buildAgentPrompt(prompt, session = getActiveAiSession()) {
   const current = activeFile.value ? `${activeFile.value.path} (${activeFile.value.language})` : "none";
+  const touchedPaths = getActiveAiTouchedPaths(session);
   return [
     `Workspace: ${rootName.value || "unknown"}`,
     `Current file: ${current}`,
     `Open files: ${openFileList.value.map((file) => file.path).join(", ") || "none"}`,
-    `Dirty files: ${formatFileStateList(dirtyFiles.value)}`,
-    `AI-touched files: ${formatFileStateList(getAiTouchedFiles())}`,
-    `Recent chat:\n${formatRecentAiMessages()}`,
+    `Dirty files: ${formatFileStateList(dirtyFiles.value, { touchedPaths })}`,
+    `AI-touched files: ${formatFileStateList(getAiTouchedFiles(session), { touchedPaths })}`,
+    `Recent chat:\n${formatRecentAiMessages({ session })}`,
     `User request:\n${prompt}`,
   ].join("\n");
 }
 
-function getAiTouchedFiles() {
+function getAiTouchedFiles(session = getActiveAiSession()) {
   dirtyRevision.value;
-  return Array.from(openFiles.values()).filter((file) => file.aiTouched);
+  const touchedPaths = getActiveAiTouchedPaths(session);
+  return Array.from(openFiles.values()).filter((file) => touchedPaths.has(file.path));
 }
 
-function formatFileStateList(files) {
+function formatFileStateList(files, options = {}) {
   if (!files.length) return "none";
+  const touchedPaths = options.touchedPaths || getActiveAiTouchedPaths();
   return files.map((file) => {
-    const flags = [file.isNew ? "new" : "", file.deleted ? "pending-delete" : "", file.dirty ? "dirty" : "", file.aiTouched ? "ai-touched" : ""].filter(Boolean).join(",");
+    const flags = [file.isNew ? "new" : "", file.deleted ? "pending-delete" : "", file.dirty ? "dirty" : "", touchedPaths.has(file.path) ? "ai-touched" : ""].filter(Boolean).join(",");
     return flags ? `${file.path} [${flags}]` : file.path;
   }).join(", ");
 }
 
 function formatRecentAiMessages(options = {}) {
-  const history = options.includePendingUserMessage ? aiMessages : aiMessages.slice(0, -1);
+  const messages = options.session?.messages || aiMessages.value;
+  const history = options.includePendingUserMessage ? messages : messages.slice(0, -1);
   if (!history.length) return "none";
   return history.map((message) => `${message.role}: ${String(message.content || "")}`).join("\n---\n");
 }
@@ -2696,7 +2785,7 @@ function parseAiToolArguments(call) {
   return call.arguments ? JSON.parse(call.arguments) : {};
 }
 
-async function runAiToolCall(call, args = {}) {
+async function runAiToolCall(call, args = {}, session = getActiveAiSession()) {
   try {
     switch (call.name) {
       case "list_files": return okTool(await aiToolListFiles(args));
@@ -2707,10 +2796,10 @@ async function runAiToolCall(call, args = {}) {
       case "run_javascript": return await aiToolRunJavaScript(args);
       case "request_proxy": return okTool(await aiToolRequestProxy(args));
       case "get_current_file": return okTool(aiToolGetCurrentFile());
-      case "replace_in_file": return okTool(await aiToolReplaceInFile(args));
-      case "replace_in_files": return okTool(await aiToolReplaceInFiles(args));
-      case "write_file": return okTool(await aiToolWriteFile(args));
-      case "delete_file": return okTool(await aiToolDeleteFile(args.path));
+      case "replace_in_file": return okTool(await aiToolReplaceInFile(args, session));
+      case "replace_in_files": return okTool(await aiToolReplaceInFiles(args, session));
+      case "write_file": return okTool(await aiToolWriteFile(args, session));
+      case "delete_file": return okTool(await aiToolDeleteFile(args.path, session));
       case "open_file": return okTool(await aiToolOpenFile(args.path));
       case "show_diff": return okTool(await aiToolShowDiff(args.path));
       default: return { ok: false, summary: `Unknown tool: ${call.name}` };
@@ -3357,7 +3446,7 @@ function aiToolGetCurrentFile() {
   return { path: file.path, language: file.language, file_type: file.fileType, dirty: file.dirty, deleted: Boolean(file.deleted), position: isTextFileState(file) ? editor.value?.getPosition() : null, selection: selectedText.slice(0, 8000) };
 }
 
-async function aiToolReplaceInFile({ path, old_text: oldText, new_text: newText }) {
+async function aiToolReplaceInFile({ path, old_text: oldText, new_text: newText }, session = getActiveAiSession()) {
   if (!oldText) throw new Error("old_text is required");
   const file = await ensureFileState(path, { closed: true });
   if (file.deleted) throw new Error(`File is marked for deletion: ${file.path}`);
@@ -3365,18 +3454,19 @@ async function aiToolReplaceInFile({ path, old_text: oldText, new_text: newText 
   const index = content.indexOf(oldText);
   if (index === -1) throw new Error(`Text not found in ${file.path}`);
   file.model.setValue(`${content.slice(0, index)}${newText}${content.slice(index + oldText.length)}`);
+  markAiTouchedFile(file, session);
   updateDirtyState(file);
   setStatus(tr("status.aiChangedFile", { path: file.path }), tr("status.unsaved"));
   return { summary: `Changed ${file.path}`, path: file.path, dirty: file.dirty };
 }
 
-async function aiToolReplaceInFiles({ edits } = {}) {
+async function aiToolReplaceInFiles({ edits } = {}, session = getActiveAiSession()) {
   if (!Array.isArray(edits) || !edits.length) throw new Error("edits is required");
   const results = [];
   for (const [index, edit] of edits.slice(0, 50).entries()) {
     const editNumber = index + 1;
     try {
-      results.push({ index, edit_number: editNumber, ok: true, ...(await aiToolReplaceInFile(edit)) });
+      results.push({ index, edit_number: editNumber, ok: true, ...(await aiToolReplaceInFile(edit, session)) });
     } catch (error) {
       results.push({
         index,
@@ -3393,10 +3483,10 @@ async function aiToolReplaceInFiles({ edits } = {}) {
   return { summary: `Applied ${applied}/${results.length} edit(s)${failed ? `; failed edit(s): ${failedEditNumbers.join(", ")}` : ""}`, applied, failed, failed_edit_numbers: failedEditNumbers, results };
 }
 
-async function aiToolWriteFile({ path, content }) {
+async function aiToolWriteFile({ path, content }, session = getActiveAiSession()) {
   const file = await ensureFileState(path, { closed: true, create: true });
   const created = Boolean(file.isNew);
-  file.aiTouched = true;
+  markAiTouchedFile(file, session);
   if (created) file.aiCreated = true;
   file.deleted = false;
   file.model.setValue(String(content ?? ""));
@@ -3405,7 +3495,7 @@ async function aiToolWriteFile({ path, content }) {
   return { summary: `${created ? "Created" : "Changed"} ${file.path}`, path: file.path, dirty: file.dirty, created };
 }
 
-async function aiToolDeleteFile(path) {
+async function aiToolDeleteFile(path, session = getActiveAiSession()) {
   const normalized = normalizeWorkspacePath(path);
   const file = openFiles.get(normalized);
   if (file?.isNew && !file.handle) {
@@ -3414,7 +3504,7 @@ async function aiToolDeleteFile(path) {
     return { summary: `Removed unsaved new file ${normalized}`, path: normalized, deleted: true, pending: false };
   }
   const deletedFile = await markFileDeleted(normalized, { closed: true });
-  deletedFile.aiTouched = true;
+  markAiTouchedFile(deletedFile, session);
   return { summary: `Marked ${deletedFile.path} for deletion`, path: deletedFile.path, deleted: true, pending: true, dirty: deletedFile.dirty };
 }
 
@@ -3750,6 +3840,9 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .change-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .change-main strong { font-size: 13px; font-weight: 600; }
 .code-editor-view .change-main small { color: var(--muted); font-size: 11px; }
+.code-editor-view .ai-session-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 8px; padding: 0 12px 10px; }
+.code-editor-view .ai-session-select { display: grid; min-width: 0; gap: 5px; color: var(--muted); font-size: 12px; }
+.code-editor-view .ai-session-select select { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--input); color: var(--text); padding: 6px 7px; }
 .code-editor-view .ai-chat { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; flex: 1; }
 .code-editor-view .ai-chat-messages { display: grid; align-content: start; gap: 10px; min-height: 0; overflow: auto; padding: 0 12px 12px; }
 .code-editor-view .ai-message { display: grid; gap: 5px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-soft); }
