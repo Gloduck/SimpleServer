@@ -16,7 +16,13 @@ const MARKDOWN_STYLE = `<style data-simple-server-markdown>
 .markdown-rendered h6 { font-size: 1em; }
 .markdown-rendered p { margin: 0 0 0.75em; }
 .markdown-rendered ul,
-.markdown-rendered ol { margin: 0 0 0.75em; padding-left: 1.5em; }
+.markdown-rendered ol { margin: 0 0 0.75em; padding-left: 1.5em; list-style-position: outside; }
+.markdown-rendered ul { list-style: disc; }
+.markdown-rendered ol { list-style: decimal; }
+.markdown-rendered ul ul { list-style-type: circle; }
+.markdown-rendered ul ul ul { list-style-type: square; }
+.markdown-rendered li > ul,
+.markdown-rendered li > ol { margin: 0.25em 0 0; }
 .markdown-rendered li + li { margin-top: 0.25em; }
 .markdown-rendered blockquote { margin: 0 0 0.75em; padding: 0 0 0 0.85em; border-left: 0.25em solid var(--border, #d0d7de); color: var(--muted, #57606a); }
 .markdown-rendered pre { margin: 0 0 0.75em; overflow: auto; padding: 0.85em; border: 1px solid var(--border, #d0d7de); border-radius: 6px; background: var(--editor, #f6f8fa); color: inherit; line-height: 1.45; }
@@ -132,26 +138,92 @@ function isMarkdownBlockStart(lines, index) {
 }
 
 function parseMarkdownList(lines, startIndex) {
-    const first = lines[startIndex].match(/^\s{0,3}((?:[-*+])|\d+[.)])\s+(.*)$/);
-    if (!first) return null;
+    const first = getMarkdownListItem(lines[startIndex]);
+    if (!first || first.indent > 3) return null;
 
-    const listType = /\d/.test(first[1]) ? 'ol' : 'ul';
+    return parseMarkdownListAt(lines, startIndex, first.indent);
+}
+
+function parseMarkdownListAt(lines, startIndex, baseIndent) {
+    const first = getMarkdownListItem(lines[startIndex]);
+    if (!first || first.indent !== baseIndent) return null;
+
+    const listType = first.type;
     const items = [];
     let index = startIndex;
     while (index < lines.length) {
-        const item = lines[index].match(/^\s{0,3}((?:[-*+])|\d+[.)])\s+(.*)$/);
-        if (!item || (/\d/.test(item[1]) ? 'ol' : 'ul') !== listType) break;
-        const task = item[2].match(/^\[([ xX])\]\s+(.+)$/);
-        if (task && listType === 'ul') {
-            const checked = task[1].toLowerCase() === 'x' ? ' checked' : '';
-            items.push(`<li class="task-list-item"><input type="checkbox" disabled${checked}> ${renderInlineMarkdown(task[2])}</li>`);
-        } else {
-            items.push(`<li>${renderInlineMarkdown(item[2])}</li>`);
-        }
+        const item = getMarkdownListItem(lines[index]);
+        if (!item || item.indent !== baseIndent || item.type !== listType) break;
+
         index++;
+        const contentLines = [item.text];
+        const nestedHtml = [];
+        while (index < lines.length) {
+            const line = lines[index];
+            if (!line.trim()) {
+                index++;
+                break;
+            }
+
+            const nextItem = getMarkdownListItem(line);
+            if (nextItem) {
+                if (nextItem.indent > baseIndent) {
+                    const nested = parseMarkdownListAt(lines, index, nextItem.indent);
+                    if (nested) {
+                        nestedHtml.push(nested.html);
+                        index = nested.nextIndex;
+                        continue;
+                    }
+                }
+                break;
+            }
+
+            if (countMarkdownIndent(line) > baseIndent) {
+                contentLines.push(line.slice(Math.min(line.length, baseIndent + 2)).trimEnd());
+                index++;
+                continue;
+            }
+
+            break;
+        }
+
+        items.push(renderMarkdownListItem(item, contentLines, nestedHtml.join(''), listType));
     }
 
     return { html: `<${listType}>${items.join('')}</${listType}>`, nextIndex: index };
+}
+
+function renderMarkdownListItem(item, contentLines, nestedHtml, listType) {
+    const task = contentLines.length === 1 ? item.text.match(/^\[([ xX])\]\s+(.+)$/) : null;
+    if (task && listType === 'ul') {
+        const checked = task[1].toLowerCase() === 'x' ? ' checked' : '';
+        return `<li class="task-list-item"><input type="checkbox" disabled${checked}> ${renderInlineMarkdown(task[2])}${nestedHtml}</li>`;
+    }
+
+    const content = contentLines
+        .map((line) => line.trim())
+        .filter((line, lineIndex) => line || lineIndex === 0)
+        .map(renderInlineMarkdown)
+        .join('<br>');
+    return `<li>${content}${nestedHtml}</li>`;
+}
+
+function getMarkdownListItem(line) {
+    const match = String(line || '').match(/^([ \t]*)((?:[-*+])|\d+[.)])\s+(.*)$/);
+    if (!match) return null;
+    return {
+        indent: countMarkdownIndent(match[1]),
+        marker: match[2],
+        type: /^\d/.test(match[2]) ? 'ol' : 'ul',
+        text: match[3],
+    };
+}
+
+function countMarkdownIndent(line) {
+    let indent = 0;
+    const whitespace = String(line || '').match(/^[ \t]*/)[0];
+    for (const char of whitespace) indent += char === '\t' ? 4 : 1;
+    return indent;
 }
 
 function isTableStart(lines, index) {

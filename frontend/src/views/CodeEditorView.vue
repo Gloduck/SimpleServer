@@ -322,13 +322,19 @@
           <p>{{ tr('empty.description') }}</p>
           <button @click="openFolder">{{ tr('action.openFolder') }}</button>
         </div>
-        <div ref="editorHost" class="monaco-host" :class="{ visible: (activeFile?.model && !activeDiffPath) || activeDiffUnsupportedFile }" :aria-label="tr('editor.aria')"></div>
+        <div ref="editorHost" class="monaco-host" :class="{ visible: activeTextFile && !activeDiffPath }" :aria-label="tr('editor.aria')"></div>
         <div v-if="activeImageFile && !activeDiffPath" class="image-preview" :aria-label="tr('imagePreview.aria')" @click="focusActivePreviewEditor">
           <img :src="activeImageFile.objectUrl" :alt="activeImageFile.name" />
           <div class="image-preview-meta">
             <strong>{{ activeImageFile.name }}</strong>
             <span>{{ FileUtils.formatFileSize(activeImageFile.size) }} · {{ activeImageFile.mimeType || tr('imagePreview.type') }}</span>
           </div>
+        </div>
+        <div v-if="activeUnsupportedFile && !activeDiffPath" class="unsupported-preview" :aria-label="tr('unsupportedFile.aria')" @click="focusActivePreviewEditor">
+          <span class="codicon codicon-warning" aria-hidden="true"></span>
+          <h2>{{ tr('unsupportedFile.title') }}</h2>
+          <p>{{ tr('unsupportedFile.description') }}</p>
+          <small>{{ activeUnsupportedFile.path }} · {{ FileUtils.formatFileSize(activeUnsupportedFile.size) }}{{ activeUnsupportedFile.mimeType ? ` · ${activeUnsupportedFile.mimeType}` : '' }}</small>
         </div>
         <div v-if="activeDiffUnsupportedFile" class="unsupported-preview diff-placeholder" :aria-label="tr('diff.aria')" @click="focusActivePreviewEditor">
           <span class="codicon codicon-diff-modified" aria-hidden="true"></span>
