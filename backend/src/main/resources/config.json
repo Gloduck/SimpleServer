@@ -111,5 +111,10 @@
       "ChromeDevTools/chrome-devtools-mcp",
       "langgenius/dify"
     ]
+  },
+  "ssh": {
+    "securityKey": "",
+    "maxConnections": 10,
+    "heartbeatTimeoutSeconds": 60
   }
 }

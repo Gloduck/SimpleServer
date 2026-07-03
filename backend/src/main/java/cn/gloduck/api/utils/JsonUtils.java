@@ -28,6 +28,14 @@ public class JsonUtils {
         }
     }
 
+    public static <T> T readValue(String content, Class<T> valueType) {
+        try {
+            return objectMapper.readValue(content, valueType);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public static byte[] writeValueAsBytes(Object value) {
         try {
             return objectMapper.writeValueAsBytes(value);

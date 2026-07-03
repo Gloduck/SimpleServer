@@ -4,6 +4,7 @@ import cn.gloduck.api.entity.config.GithubConfig;
 import cn.gloduck.api.entity.config.JrebelConfig;
 import cn.gloduck.api.entity.config.ProxyRequestConfig;
 import cn.gloduck.api.entity.config.ServerConfig;
+import cn.gloduck.api.entity.config.SshConfig;
 import cn.gloduck.api.entity.config.TorrentConfig;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -39,6 +40,11 @@ public class ConfigProducer {
     @Produces
     public ProxyRequestConfig proxyRequestConfig() {
         return convert(rootNode().path("proxyrequest"), ProxyRequestConfig.class);
+    }
+
+    @Produces
+    public SshConfig sshConfig() {
+        return convert(rootNode().path("ssh"), SshConfig.class);
     }
 
     private JsonNode rootNode() {
