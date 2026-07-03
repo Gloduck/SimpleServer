@@ -6,6 +6,10 @@ const TEXT_EXTENSIONS = new Set([
     'astro', 'bat', 'c', 'cc', 'cfg', 'conf', 'cpp', 'cs', 'css', 'csv', 'dart', 'dockerfile', 'env', 'fs', 'go', 'gql', 'graphql', 'h', 'handlebars', 'hbs', 'hpp', 'htm', 'html', 'ini', 'java', 'js', 'json', 'json5', 'jsonc', 'jsx', 'kt', 'less', 'log', 'lua', 'md', 'mdx', 'mjs', 'php', 'properties', 'ps1', 'py', 'r', 'rb', 'rs', 'sass', 'scss', 'sh', 'sql', 'svelte', 'swift', 'toml', 'ts', 'tsx', 'txt', 'vue', 'xml', 'yaml', 'yml'
 ]);
 
+const TEXT_FILE_NAMES = new Set([
+    '.babelrc', '.browserslistrc', '.dockerignore', '.editorconfig', '.env', '.env.example', '.eslintignore', '.eslintrc', '.gitattributes', '.gitignore', '.gitkeep', '.npmignore', '.npmrc', '.nvmrc', '.prettierignore', '.prettierrc', '.stylelintignore', '.stylelintrc', 'dockerfile', 'license', 'makefile', 'readme'
+]);
+
 const TEXT_MIME_TYPES = new Set([
     'application/javascript',
     'application/json',
@@ -39,7 +43,8 @@ function isImageFileName(fileName) {
 function isTextFile(file) {
     if (!file || isImageFile(file)) return false;
     const mimeType = String(file.type || '').toLowerCase();
-    return mimeType.startsWith('text/') || TEXT_MIME_TYPES.has(mimeType) || TEXT_EXTENSIONS.has(getFileExtension(file.name));
+    const name = getFileName(file.name).toLowerCase();
+    return mimeType.startsWith('text/') || TEXT_MIME_TYPES.has(mimeType) || TEXT_EXTENSIONS.has(getFileExtension(name)) || TEXT_FILE_NAMES.has(name);
 }
 
 function formatFileSize(bytes) {
