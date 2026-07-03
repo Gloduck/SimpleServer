@@ -3895,7 +3895,7 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .ai-session-select select { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--input); color: var(--text); padding: 6px 7px; }
 .code-editor-view .ai-chat { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; flex: 1; }
 .code-editor-view .ai-chat-messages { display: grid; align-content: start; gap: 10px; min-height: 0; overflow: auto; padding: 0 12px 12px; }
-.code-editor-view .ai-message { display: grid; gap: 5px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-soft); }
+.code-editor-view .ai-message { display: grid; min-width: 0; gap: 5px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-soft); }
 .code-editor-view .ai-message strong { color: var(--accent-strong); font-size: 12px; }
 .code-editor-view .ai-message-user strong { color: var(--text); }
 .code-editor-view .ai-message-tool { opacity: 0.88; }
@@ -3904,7 +3904,11 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .ai-tool-details { display: grid; gap: 8px; }
 .code-editor-view .ai-tool-details strong { display: block; margin-bottom: 4px; }
 .code-editor-view .ai-tool-details pre { max-height: 240px; margin: 0; overflow: auto; padding: 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--editor); color: var(--text); font-family: Consolas, 'Courier New', monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; }
-.code-editor-view .ai-message-content { color: var(--text); font-size: 12px; }
+.code-editor-view .ai-message-content { min-width: 0; max-width: 100%; overflow-wrap: anywhere; color: var(--text); font-size: 12px; word-break: break-word; }
+.code-editor-view .ai-message-content * { max-width: 100%; }
+.code-editor-view .ai-message-content pre { overflow-x: auto; white-space: pre-wrap; }
+.code-editor-view .ai-message-content code { white-space: break-spaces; }
+.code-editor-view .ai-message-content table { display: block; overflow-x: auto; }
 .code-editor-view .ai-chat-form { display: grid; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--border); background: var(--panel); }
 .code-editor-view .ai-chat-form textarea { width: 100%; resize: vertical; min-height: 78px; max-height: 180px; border: 1px solid var(--border); border-radius: 5px; background: var(--input); color: var(--text); padding: 8px; line-height: 1.4; }
 .code-editor-view .ai-chat-form button { padding: 7px 10px; }
@@ -3998,12 +4002,20 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .editor-dialog-actions .primary.danger:hover:not(:disabled) { border-color: #d95055; background: #d95055; }
 
 @media (max-width: 760px) {
-  .code-editor-view.app-shell { grid-template-columns: 44px minmax(0, min(var(--side-panel-width, 260px), 55vw)) minmax(0, 1fr); }
-  .code-editor-view.app-shell.side-panel-hidden { grid-template-columns: 44px 0 minmax(0, 1fr); }
+  .code-editor-view.app-shell { grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: minmax(0, 55dvh) minmax(220px, 45dvh); height: 100dvh; }
+  .code-editor-view.app-shell.side-panel-hidden { grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .code-editor-view .activity-bar { grid-row: 1 / -1; }
+  .code-editor-view .editor-shell { grid-column: 2; grid-row: 1; }
+  .code-editor-view .side-panel { grid-column: 2; grid-row: 2; border-top: 1px solid var(--border); border-right: 0; }
+  .code-editor-view.side-panel-hidden .side-panel { display: none; }
+  .code-editor-view.side-panel-hidden .editor-shell { grid-row: 1 / -1; }
+  .code-editor-view .side-panel-resizer { display: none; }
+  .code-editor-view .activity-button { width: 44px; height: 44px; }
   .code-editor-view .panel-actions { grid-template-columns: 1fr; }
   .code-editor-view .panel-actions button:first-child { grid-column: auto; }
   .code-editor-view .shortcut-row { grid-template-columns: 1fr; }
   .code-editor-view .command-center-shortcut { display: none; }
+  .code-editor-view .status-right-group { display: none; }
   .code-editor-view .editor-stage.preview-open .monaco-host.visible,
   .code-editor-view .editor-stage.preview-open .unsupported-preview { right: 0; bottom: 45%; }
   .code-editor-view .preview-pane { inset: auto 0 0 0; width: auto; height: 45%; border-top: 1px solid var(--border); border-left: 0; box-shadow: 0 -12px 24px rgb(0 0 0 / 14%); }
