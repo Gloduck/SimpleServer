@@ -167,8 +167,8 @@
             </article>
           </div>
           <form class="ai-chat-form" @submit.prevent="sendAiPrompt">
-            <textarea v-model="aiPrompt" :placeholder="tr('ai.placeholder')" :disabled="aiBusy || !rootHandle" rows="4" @keydown="handleAiPromptKeydown"></textarea>
-            <button type="submit" :disabled="aiBusy || !rootHandle || !aiPrompt.trim()">{{ aiBusy ? tr('ai.running') : tr('ai.send') }}</button>
+            <textarea v-model="aiPrompt" :placeholder="tr('ai.placeholder')" :disabled="aiBusy" rows="4" @keydown="handleAiPromptKeydown"></textarea>
+            <button type="submit" :disabled="aiBusy || !aiPrompt.trim()">{{ aiBusy ? tr('ai.running') : tr('ai.send') }}</button>
             <div class="ai-chat-options">
               <label>
                 <span>{{ tr('ai.agentModel') }}</span>
@@ -559,7 +559,7 @@ const messages = {
     "status.aiStopped": "AI 任务已停止",
     "status.aiChangedFile": "AI 已修改 {path}",
     "status.aiModelsLoaded": "已拉取 {count} 个模型",
-    "ai.empty": "输入需求，AI 会读取当前工作区并修改内存中的文件；保存仍需手动点击保存。",
+    "ai.empty": "输入需求即可使用 AI；未打开文件夹时，文件读取、搜索和编辑工具不可用。",
     "ai.placeholder": "描述你想让 AI 完成的修改...",
     "ai.send": "发送",
     "ai.running": "运行中...",
@@ -760,7 +760,7 @@ const messages = {
     "status.aiStopped": "AI task stopped",
     "status.aiChangedFile": "AI changed {path}",
     "status.aiModelsLoaded": "Loaded {count} models",
-    "ai.empty": "Enter a request. AI can inspect this workspace and change in-memory files; saving is still manual.",
+    "ai.empty": "Enter a request to use AI. File read, search, and edit tools are unavailable until a folder is opened.",
     "ai.placeholder": "Describe the change you want AI to make...",
     "ai.send": "Send",
     "ai.running": "Running...",
@@ -2254,6 +2254,10 @@ function isBackendEnabled() {
   return Boolean(settings.backend?.enabled);
 }
 
+function isWorkspaceLoaded() {
+  return Boolean(rootHandle.value);
+}
+
 function validateBackendEnabled() {
   if (!isBackendEnabled()) throw new Error(tr("ai.error.backendDisabled"));
 }
@@ -2268,7 +2272,6 @@ function getBackendBaseUrl() {
 }
 
 function validateAiConfig(model) {
-  if (!rootHandle.value) throw new Error(tr("ai.error.noWorkspace"));
   if (!settings.ai.apiKey.trim() || !model) throw new Error(tr("ai.error.missingConfig"));
 }
 
@@ -2701,19 +2704,27 @@ function buildImageInputMessage(images) {
 function getAgentInstructions() {
   const instructions = [
     "You are an autonomous coding assistant inside a browser-based Monaco editor.",
-    "Use tools to inspect and edit the workspace. Never claim a file changed unless a tool reports success.",
-    "All edit tools modify only in-memory editor models. The user must save files manually; new files created by write_file and files marked by delete_file are not written to disk until saved by the user.",
-    "Resolve references like 'the file you created' from Recent chat and AI-touched files before using the current editor file. If multiple files match, ask a short clarification instead of editing or deleting the current file by default.",
+    "Use list_tools when you need to check which tools are currently available.",
+    "Never claim a file changed unless a tool reports success.",
     "You have at most 10 tool-call rounds per user request; batch related reads and edits, avoid retry loops, and finish with the best available result before exhausting the limit.",
-    "When inspecting several known files, prefer one read_files call over many read_file calls.",
-    "Use refresh_tree when you need to rescan the workspace file tree before locating files.",
-    "When applying several local edits, prefer one replace_in_files call over many replace_in_file calls.",
-    "Prefer replace_in_file with exact old_text and minimal new_text for local edits, similar to patch hunks.",
-    "Use write_file only for new files, tiny files, generated files, or when no stable exact local replacement is possible.",
-    "Use read_image when the user asks you to inspect an image file; the tool attaches the image to the next model turn as visual input.",
     "Use run_javascript for deterministic calculations, parsing, or data transformations. It runs in an isolated browser Web Worker with no DOM, editor, or workspace file access; pass needed data as input.",
-    "Prefer small, targeted edits. Explain changed files briefly after tool work is complete; do not paste whole modified files in chat.",
   ];
+  if (isWorkspaceLoaded()) {
+    instructions.push(
+      "Workspace file tools are available. Use tools to inspect and edit the workspace.",
+      "All edit tools modify only in-memory editor models. The user must save files manually; new files created by write_file and files marked by delete_file are not written to disk until saved by the user.",
+      "Resolve references like 'the file you created' from Recent chat and AI-touched files before using the current editor file. If multiple files match, ask a short clarification instead of editing or deleting the current file by default.",
+      "When inspecting several known files, prefer one read_files call over many read_file calls.",
+      "Use refresh_tree when you need to rescan the workspace file tree before locating files.",
+      "When applying several local edits, prefer one replace_in_files call over many replace_in_file calls.",
+      "Prefer replace_in_file with exact old_text and minimal new_text for local edits, similar to patch hunks.",
+      "Use write_file only for new files, tiny files, generated files, or when no stable exact local replacement is possible.",
+      "Use read_image when the user asks you to inspect an image file; the tool attaches the image to the next model turn as visual input.",
+      "Prefer small, targeted edits. Explain changed files briefly after tool work is complete; do not paste whole modified files in chat."
+    );
+  } else {
+    instructions.push("No workspace folder is open. File tools are unavailable; answer without reading, searching, opening, editing, deleting, or diffing workspace files.");
+  }
   if (isBackendEnabled()) {
     instructions.push("Use request_proxy when you need to fetch external HTTP resources that may be blocked by browser CORS.");
   } else {
@@ -2760,13 +2771,24 @@ function formatRecentAiMessages(options = {}) {
 
 function getAiToolDefinitions() {
   const tools = [
+    { type: "function", name: "list_tools", description: "List currently available AI tools and unavailable tools with reasons.", parameters: { type: "object", properties: {} } },
+    { type: "function", name: "run_javascript", description: "Execute a JavaScript snippet in an isolated browser Web Worker for calculations, parsing, or transforming provided input data. The code is the body of an async function with an input variable available; use return to produce a result. No DOM/editor/workspace access.", parameters: { type: "object", properties: { code: { type: "string", description: "JavaScript async function body. Example: return input.items.map(x => x * 2);" }, input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." }, timeout_ms: { type: "number", description: "Optional timeout in milliseconds. Defaults to 2000, max 5000." } }, required: ["code"] } },
+  ];
+  if (isWorkspaceLoaded()) tools.push(...getAiFileToolDefinitions());
+  if (isBackendEnabled()) {
+    tools.push({ type: "function", name: "request_proxy", description: "Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits. Returns status, headers and truncated text response.", parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, max_chars: { type: "number", description: "Maximum response body characters to return. Defaults to 20000." } }, required: ["url"] } });
+  }
+  return tools;
+}
+
+function getAiFileToolDefinitions() {
+  return [
     { type: "function", name: "list_files", description: "List workspace files and directories. By default only lists the first level; set recursive to true to include descendants.", parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root." }, max_items: { type: "number", description: "Maximum items to return." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
     { type: "function", name: "refresh_tree", description: "Refresh the workspace file tree from disk. Use this before locating newly created, deleted, or externally changed files.", parameters: { type: "object", properties: { collapse_all: { type: "boolean", description: "Whether to collapse all directories after refreshing. Defaults to false." } } } },
     { type: "function", name: "read_file", description: "Read a text file. Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads.", parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "number", description: "Optional 1-based starting line number. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return." } }, required: ["path"] } },
     { type: "function", name: "read_files", description: "Read multiple text files in one call. Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads applied to each file.", parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, offset: { type: "number", description: "Optional 1-based starting line number applied to each file. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return per file." }, max_chars_per_file: { type: "number" } }, required: ["paths"] } },
     { type: "function", name: "read_image", description: "Read an image file and attach it to the next model turn for visual analysis. Use this for screenshots, diagrams, mockups, and other workspace image files.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "search_text", description: "Search text across workspace files.", parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string" }, max_results: { type: "number" } }, required: ["query"] } },
-    { type: "function", name: "run_javascript", description: "Execute a JavaScript snippet in an isolated browser Web Worker for calculations, parsing, or transforming provided input data. The code is the body of an async function with an input variable available; use return to produce a result. No DOM/editor/workspace access.", parameters: { type: "object", properties: { code: { type: "string", description: "JavaScript async function body. Example: return input.items.map(x => x * 2);" }, input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." }, timeout_ms: { type: "number", description: "Optional timeout in milliseconds. Defaults to 2000, max 5000." } }, required: ["code"] } },
     { type: "function", name: "get_current_file", description: "Get current editor file, cursor and selected text.", parameters: { type: "object", properties: {} } },
     { type: "function", name: "replace_in_file", description: "Replace the first exact text occurrence in a file in memory. Use this for minimal local edits; do not pass whole-file old_text/new_text unless the file is tiny and no smaller exact edit is possible.", parameters: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } },
     { type: "function", name: "replace_in_files", description: "Apply multiple exact local replacements in one call. Prefer this after batch-reading files and planning several patch hunks. Returns per-edit results; individual edit failures do not abort the whole batch.", parameters: { type: "object", properties: { edits: { type: "array", items: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } } }, required: ["edits"] } },
@@ -2775,10 +2797,36 @@ function getAiToolDefinitions() {
     { type: "function", name: "open_file", description: "Open a file in the editor.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "show_diff", description: "Show diff for an in-memory changed file.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } }
   ];
-  if (isBackendEnabled()) {
-    tools.push({ type: "function", name: "request_proxy", description: "Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits. Returns status, headers and truncated text response.", parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, max_chars: { type: "number", description: "Maximum response body characters to return. Defaults to 20000." } }, required: ["url"] } });
+}
+
+function getAiFileToolNames() {
+  return getAiFileToolDefinitions().map((tool) => tool.name);
+}
+
+function isAiFileToolName(name) {
+  return getAiFileToolNames().includes(name);
+}
+
+function aiToolListTools() {
+  const available = getAiToolDefinitions().map(formatAiToolAvailability);
+  const unavailable = [];
+  if (!isWorkspaceLoaded()) {
+    unavailable.push(...getAiFileToolDefinitions().map((tool) => ({ ...formatAiToolAvailability(tool), reason: "No workspace folder is open" })));
   }
-  return tools;
+  if (!isBackendEnabled()) {
+    unavailable.push({ name: "request_proxy", description: "Fetch an external HTTP/HTTPS URL through the configured backend request proxy.", reason: "Backend server setting is disabled" });
+  }
+  return {
+    summary: `Available tools: ${available.map((tool) => tool.name).join(", ") || "none"}`,
+    workspace_loaded: isWorkspaceLoaded(),
+    backend_enabled: isBackendEnabled(),
+    available,
+    unavailable,
+  };
+}
+
+function formatAiToolAvailability(tool) {
+  return { name: tool.name, description: tool.description || "" };
 }
 
 function parseAiToolArguments(call) {
@@ -2787,7 +2835,9 @@ function parseAiToolArguments(call) {
 
 async function runAiToolCall(call, args = {}, session = getActiveAiSession()) {
   try {
+    if (isAiFileToolName(call.name) && !isWorkspaceLoaded()) return { ok: false, summary: `Tool ${call.name} is unavailable because no workspace folder is open` };
     switch (call.name) {
+      case "list_tools": return okTool(aiToolListTools());
       case "list_files": return okTool(await aiToolListFiles(args));
       case "refresh_tree": return okTool(await aiToolRefreshTree(args));
       case "read_file": return okTool(await aiToolReadFile(args));
