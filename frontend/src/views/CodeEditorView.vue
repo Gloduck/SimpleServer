@@ -565,7 +565,7 @@ const messages = {
     "status.aiStopped": "AI 任务已停止",
     "status.aiChangedFile": "AI 已修改 {path}",
     "status.aiModelsLoaded": "已拉取 {count} 个模型",
-    "ai.empty": "输入需求即可使用 AI；未打开文件夹时，文件读取、搜索和编辑工具不可用。",
+    "ai.empty": "告诉 AI 你想做什么，它会尽力帮你完成。",
     "ai.placeholder": "描述你想让 AI 完成的修改...",
     "ai.send": "发送",
     "ai.running": "运行中...",
