@@ -581,6 +581,8 @@ const AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS = 2000;
 const AI_JAVASCRIPT_MAX_TIMEOUT_MS = 5000;
 const AI_JAVASCRIPT_MAX_CODE_CHARS = 20000;
 const AI_JAVASCRIPT_MAX_LOGS = 100;
+const AI_AGENTS_FILE_NAME = "AGENTS.md";
+const AI_AGENTS_MAX_CHARS = 30000;
 const AI_AGENT_MAX_TOOL_CALL_ROUNDS = 25;
 const SSH_OUTPUT_MAX_CHARS = 120000;
 const SSH_COMMAND_OUTPUT_WAIT_MS = 700;
@@ -3464,8 +3466,9 @@ async function compressAiContext() {
 
 async function runAiAgent(prompt, signal, session = getActiveAiSession()) {
   const conversation = [{ role: "user", content: buildAgentPrompt(prompt, session) }];
+  const agentInstructions = await getAgentInstructions();
   for (let round = 0; round < AI_AGENT_MAX_TOOL_CALL_ROUNDS; round += 1) {
-    const payload = { model: settings.ai.agentModel.trim(), instructions: getAgentInstructions(), input: conversation, tools: getAiToolDefinitions() };
+    const payload = { model: settings.ai.agentModel.trim(), instructions: agentInstructions, input: conversation, tools: getAiToolDefinitions() };
     if (settings.ai.reasoningEffort && settings.ai.reasoningEffort !== "default") payload.reasoning = { effort: settings.ai.reasoningEffort };
     const response = await callOpenAiResponses(payload, signal);
     const text = extractResponseText(response);
@@ -3516,7 +3519,7 @@ function buildImageInputMessage(images) {
   return { role: "user", content };
 }
 
-function getAgentInstructions() {
+async function getAgentInstructions() {
   const instructions = [
     "You are an autonomous coding assistant inside a browser-based Monaco editor.",
     "Use list_tools when you need to check which tools are currently available.",
@@ -3550,7 +3553,36 @@ function getAgentInstructions() {
   } else {
     instructions.push("SSH tools are unavailable unless the backend server is enabled and at least one SSH setting is exposed to AI.");
   }
+  const agentsMd = await readRootAgentsMd();
+  if (agentsMd) instructions.push(formatAgentsMdInstructions(agentsMd));
   return instructions.join(" ");
+}
+
+async function readRootAgentsMd() {
+  if (!rootHandle.value) return "";
+  const opened = openFiles.get(AI_AGENTS_FILE_NAME);
+  if (isTextFileState(opened)) return opened.model.getValue();
+  try {
+    const handle = await rootHandle.value.getFileHandle(AI_AGENTS_FILE_NAME);
+    const file = await handle.getFile();
+    if (!isReadableTextFile(file)) return "";
+    return await file.text();
+  } catch (error) {
+    if (error?.name === "NotFoundError") return "";
+    console.warn(`Failed to load ${AI_AGENTS_FILE_NAME}:`, error);
+    return "";
+  }
+}
+
+function formatAgentsMdInstructions(content) {
+  const text = String(content || "").trim();
+  if (!text) return "";
+  const truncated = text.length > AI_AGENTS_MAX_CHARS;
+  return [
+    `Additional workspace instructions from root ${AI_AGENTS_FILE_NAME}:`,
+    truncated ? text.slice(0, AI_AGENTS_MAX_CHARS) : text,
+    truncated ? `[${AI_AGENTS_FILE_NAME} truncated to ${AI_AGENTS_MAX_CHARS} characters]` : "",
+  ].filter(Boolean).join("\n");
 }
 
 function buildAgentPrompt(prompt, session = getActiveAiSession()) {
