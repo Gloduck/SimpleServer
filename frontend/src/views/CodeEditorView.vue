@@ -3985,6 +3985,7 @@ function getAgentInstructions() {
     "Treat the Workspace context message as the current condition summary. Use list_tools for current tool availability and do not use unavailable tools.",
     "Never claim a file changed unless a tool reports success.",
     `You have at most ${AI_AGENT_MAX_TOOL_CALL_ROUNDS} tool-call rounds per user request; batch related reads and edits, avoid retry loops, and finish with the best available result before exhausting the limit.`,
+    "Do not repeatedly retry the same failed operation with superficial argument changes. If a tool reports a deterministic failure such as request too large, permission denied, not found, or command rejected, stop that approach, explain the failure, and ask before trying a different approach with the same goal.",
     "When multiple independent tool calls are needed and their arguments are already known, issue them in the same response instead of one tool call per round. Only serialize tool calls when a later call depends on an earlier result.",
     "Use run_javascript for deterministic calculations, parsing, or data transformations. It runs in an isolated browser Web Worker with no DOM, editor, or workspace file access; pass needed data as input.",
     "When workspace file tools are available, use tools to inspect and edit the workspace.",
@@ -3997,7 +3998,8 @@ function getAgentInstructions() {
     "Use read_image when the user asks you to inspect an image file; the tool attaches the image to the next model turn as visual input.",
     "Prefer small, targeted edits. Explain changed files briefly after tool work is complete; do not paste whole modified files in chat.",
     "When request_proxy is available, use it for external HTTP resources that may be blocked by browser CORS.",
-    "When SSH tools are available, they are only for SSH settings explicitly exposed to AI. When using execute_ssh_command, provide a clear reason, a commands array containing only every main command used by the shell command, and a high_risk boolean based on your risk assessment. List every SSH command you ran in your final answer. Main commands outside each setting's whitelist require user approval; high_risk=true requires approval even if whitelisted.",
+    "When SSH tools are available, they are only for SSH settings explicitly exposed to AI. Prefer commands from the connection whitelist when they can complete the task, and choose concise commands or flags that produce short output when possible. When using execute_ssh_command, provide a clear reason, a commands array containing only every main command used by the shell command, and a high_risk boolean based on your risk assessment. List every SSH command you ran in your final answer. Main commands outside each setting's whitelist require user approval; high_risk=true requires approval even if whitelisted.",
+    "If an SSH command approval is rejected, do not try alternate SSH commands for the same purpose unless the user explicitly asks you to continue or grants permission.",
     "Users may also type commands manually in active SSH terminals. When that context matters, use read_ssh_output to inspect the terminal transcript and infer relevant user input when it is visible.",
     "When using SFTP tools, local_path is always a path relative to the currently opened browser workspace, never an absolute path, URL, SSH path, or server path. For upload, local_path names the workspace file to read; remote_path names the destination path on the SSH server. For download, remote_path names the source file on the SSH server; local_path names the workspace-relative destination file. SFTP upload/download tools return after the background task is submitted and visible in the task list. For very small files, you may briefly wait or check task completion; for larger files, just ensure submission returned without error unless the user explicitly asks to wait or the next step truly depends on completion. If you are unsure of the workspace path, use list_files or ask the user before starting the transfer.",
   ];
@@ -4785,10 +4787,11 @@ function createVirtualFileState(path, options = {}) {
 }
 
 async function aiToolListFiles({ path = "", max_items: maxItems = 200, recursive = false } = {}) {
-  const nodes = path ? [findNodeByPath(tree.value, normalizeWorkspacePath(path))].filter(Boolean) : tree.value;
+  const normalizedPath = String(path || "").trim() === "." ? "" : normalizeWorkspacePath(path);
+  const nodes = normalizedPath ? [findNodeByPath(tree.value, normalizedPath)].filter(Boolean) : tree.value;
   if (!nodes.length) throw new Error(path ? `Path not found: ${path}` : "No files loaded");
   const limit = Math.max(1, Math.min(Number(maxItems) || 200, 1000));
-  const sourceNodes = path && nodes[0]?.kind === "directory" ? nodes[0].children || [] : nodes;
+  const sourceNodes = normalizedPath && nodes[0]?.kind === "directory" ? nodes[0].children || [] : nodes;
   const items = recursive ? flattenTree(nodes, limit) : listTreeLevel(sourceNodes, limit);
   return { summary: `${items.length} item(s)`, items };
 }
