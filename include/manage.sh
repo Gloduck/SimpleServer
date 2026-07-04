@@ -76,6 +76,17 @@ status_app() {
   printf 'Service is running, pid=%s\n' "$(IFS=,; printf '%s' "${pids[*]}")"
 }
 
+run_detached() {
+  (
+    cd "${APP_DIR}"
+    if command -v setsid >/dev/null 2>&1; then
+      setsid "$@" > /dev/null 2>&1 < /dev/null &
+    else
+      nohup "$@" > /dev/null 2>&1 < /dev/null &
+    fi
+  )
+}
+
 start_app() {
   if is_running; then
     status_app
@@ -85,14 +96,14 @@ start_app() {
   mkdir -p "${APP_DIR}/logs"
 
   if [[ -x "${APP_DIR}/${APP_NAME}" ]]; then
-    (cd "${APP_DIR}" && nohup "${APP_DIR}/${APP_NAME}" > /dev/null 2>&1 < /dev/null &)
+    run_detached "${APP_DIR}/${APP_NAME}"
   elif [[ -f "${APP_DIR}/${APP_NAME}.jar" ]]; then
     local -a java_opts=()
     if [[ -n "${JAVA_OPTS:-}" ]]; then
       # shellcheck disable=SC2206
       java_opts=(${JAVA_OPTS})
     fi
-    (cd "${APP_DIR}" && nohup java "${java_opts[@]}" -jar "${APP_DIR}/${APP_NAME}.jar" > /dev/null 2>&1 < /dev/null &)
+    run_detached java "${java_opts[@]}" -jar "${APP_DIR}/${APP_NAME}.jar"
   else
     fail "no deployable artifact found in ${APP_DIR}"
   fi
