@@ -9,7 +9,28 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build native (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+            node-architecture: x64
+            msvc-arch: ''
+          - os: windows-latest
+            platform: windows-x64
+            node-architecture: x64
+            msvc-arch: x64
+          - os: windows-11-arm
+            platform: windows-arm64
+            node-architecture: arm64
+            msvc-arch: arm64
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4
@@ -18,6 +39,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          architecture: ${{ matrix.node-architecture }}
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -33,12 +55,28 @@ jobs:
           components: 'native-image'
           cache: 'maven'
 
+      - name: Set up MSVC for native image
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc-arch }}
+
+      - name: Check native image toolchain
+        run: |
+          java -version
+          native-image --version
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            command -v cl.exe
+            cl.exe /Bv
+            command -v link.exe
+          fi
+
       - name: Build native package
         run: bash script/build.sh clean buildNative
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: SimpleServer-native
+          name: SimpleServer-native-${{ matrix.platform }}
           path: target/SimpleServer.tar.gz
           if-no-files-found: error

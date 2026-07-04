@@ -14,13 +14,20 @@ CONFIG_FILE="${BACKEND_DIR}/src/main/resources/config.json"
 INCLUDE_DIR="${PROJECT_ROOT}/include"
 
 APP_NAME="SimpleServer"
+NATIVE_FILE_EXTENSION=""
+
+case "$(uname -s 2>/dev/null || printf '')" in
+  MINGW*|MSYS*|CYGWIN*)
+    NATIVE_FILE_EXTENSION=".exe"
+    ;;
+esac
 
 SHOULD_CLEAN="false"
 BUILD_TARGET=""
 ARCHIVE_FILE="${ROOT_TARGET_DIR}/${APP_NAME}.tar.gz"
 OUTPUT_CONFIG_FILE="${ROOT_TARGET_DIR}/config.json"
 OUTPUT_JAR_FILE="${ROOT_TARGET_DIR}/${APP_NAME}.jar"
-OUTPUT_NATIVE_FILE="${ROOT_TARGET_DIR}/${APP_NAME}"
+OUTPUT_NATIVE_FILE="${ROOT_TARGET_DIR}/${APP_NAME}${NATIVE_FILE_EXTENSION}"
 
 usage() {
   cat <<'EOF'
@@ -41,9 +48,13 @@ fail() {
 }
 
 require_command() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    fail "missing required command: $1"
+  if command -v "$1" >/dev/null 2>&1; then
+    return
   fi
+  if [[ "${NATIVE_FILE_EXTENSION}" == ".exe" ]] && command -v "$1.cmd" >/dev/null 2>&1; then
+    return
+  fi
+  fail "missing required command: $1"
 }
 
 parse_args() {
@@ -118,7 +129,7 @@ build_backend_native() {
   printf '==> Building backend native image\n'
   require_command native-image
   mvn -f "${BACKEND_DIR}/pom.xml" clean package -Dquarkus.native.enabled=true -Dquarkus.native.native-image-xmx=2g -DskipTests
-  JAVA_ARTIFACT="$(find "${BACKEND_TARGET_DIR}" -maxdepth 1 -type f -name "${APP_NAME}*-runner" | sort | tail -n 1)"
+  JAVA_ARTIFACT="$(find "${BACKEND_TARGET_DIR}" -maxdepth 1 -type f \( -name "${APP_NAME}*-runner" -o -name "${APP_NAME}*-runner.exe" \) | sort | tail -n 1)"
   [[ -f "${JAVA_ARTIFACT}" ]] || fail "native artifact not found: ${JAVA_ARTIFACT}"
 }
 
@@ -139,7 +150,7 @@ assemble_artifacts() {
   esac
   cp "${CONFIG_FILE}" "${OUTPUT_CONFIG_FILE}"
   cp -R "${INCLUDE_DIR}/." "${ROOT_TARGET_DIR}/"
-  mapfile -t INCLUDE_ARTIFACTS < <(find "${INCLUDE_DIR}" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
+  mapfile -t INCLUDE_ARTIFACTS < <(find "${INCLUDE_DIR}" -mindepth 1 -maxdepth 1 -exec basename {} \; | sort)
   (
     cd "${ROOT_TARGET_DIR}"
     archive_items=("${PACKAGE_ARTIFACT}" "$(basename "${OUTPUT_CONFIG_FILE}")")
