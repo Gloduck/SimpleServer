@@ -204,28 +204,6 @@
           <strong>{{ tr('ssh.disabledTitle') }}</strong>
           <small>{{ tr('ssh.disabledDescription') }}</small>
         </div>
-        <section class="sftp-task-panel">
-          <button type="button" class="sftp-task-toggle" @click="sftpTasksCollapsed = !sftpTasksCollapsed">
-            <span>{{ tr('sftp.tasks') }} · {{ sftpTasks.length }}</span>
-            <span class="codicon" :class="sftpTasksCollapsed ? 'codicon-chevron-right' : 'codicon-chevron-down'" aria-hidden="true"></span>
-          </button>
-          <div v-if="!sftpTasksCollapsed" class="sftp-task-list">
-            <div v-if="sftpTasks.length === 0" class="workspace-card">{{ tr('sftp.noTasks') }}</div>
-            <article v-for="task in sftpTasks" :key="task.id" class="sftp-task-card" :class="`sftp-task-${task.status}`">
-              <div class="sftp-task-main">
-                <strong>{{ tr(task.type === 'upload' ? 'sftp.upload' : 'sftp.download') }} · {{ task.connectionName }}</strong>
-                <small>{{ task.localPath }} ⇄ {{ task.remotePath }}</small>
-              </div>
-              <div class="sftp-task-meta">
-                <span>{{ tr(`sftp.status.${task.status}`) }}</span>
-                <span>{{ formatSftpTaskProgress(task) }}</span>
-              </div>
-              <progress :value="task.total ? task.loaded : 0" :max="task.total || 1"></progress>
-              <p v-if="task.error" class="sftp-task-error">{{ task.error }}</p>
-              <button type="button" class="small-button" :disabled="!canCancelSftpTask(task)" @click="cancelSftpTask(task.id)">{{ tr('sftp.cancel') }}</button>
-            </article>
-          </div>
-        </section>
         <div class="ssh-list">
           <div v-if="settings.ssh.connections.length === 0" class="workspace-card">{{ tr('ssh.empty') }}</div>
           <article v-for="connection in settings.ssh.connections" :key="connection.id" class="ssh-card" :class="{ active: isSshConnected(connection.id) }">
@@ -250,6 +228,28 @@
             </div>
           </article>
         </div>
+        <section class="sftp-task-panel">
+          <button type="button" class="sftp-task-toggle" @click="sftpTasksCollapsed = !sftpTasksCollapsed">
+            <span>{{ tr('sftp.tasks') }} · {{ sftpTasks.length }}</span>
+            <span class="codicon" :class="sftpTasksCollapsed ? 'codicon-chevron-right' : 'codicon-chevron-down'" aria-hidden="true"></span>
+          </button>
+          <div v-if="!sftpTasksCollapsed" class="sftp-task-list">
+            <div v-if="sftpTasks.length === 0" class="workspace-card">{{ tr('sftp.noTasks') }}</div>
+            <article v-for="task in sftpTasks" :key="task.id" class="sftp-task-card" :class="`sftp-task-${task.status}`">
+              <div class="sftp-task-main">
+                <strong>{{ tr(task.type === 'upload' ? 'sftp.upload' : 'sftp.download') }} · {{ task.connectionName }}</strong>
+                <small>{{ task.localPath }} ⇄ {{ task.remotePath }}</small>
+              </div>
+              <div class="sftp-task-meta">
+                <span>{{ tr(`sftp.status.${task.status}`) }}</span>
+                <span>{{ formatSftpTaskProgress(task) }}</span>
+              </div>
+              <progress :value="task.total ? task.loaded : 0" :max="task.total || 1"></progress>
+              <p v-if="task.error" class="sftp-task-error">{{ task.error }}</p>
+              <button type="button" class="small-button" :disabled="!canCancelSftpTask(task)" @click="cancelSftpTask(task.id)">{{ tr('sftp.cancel') }}</button>
+            </article>
+          </div>
+        </section>
       </section>
 
       <section v-show="activeView === 'settings'" class="panel-view active">
@@ -5619,7 +5619,7 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .change-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .change-main strong { font-size: 13px; font-weight: 600; }
 .code-editor-view .change-main small { color: var(--muted); font-size: 11px; }
-.code-editor-view .ssh-list { display: grid; align-content: start; gap: 8px; min-height: 0; overflow: auto; padding: 0 12px 16px; }
+.code-editor-view .ssh-list { display: grid; flex: 1 1 auto; align-content: start; gap: 8px; min-height: 0; overflow: auto; padding: 0 12px 16px; }
 .code-editor-view .ssh-disabled-card strong { font-size: 13px; }
 .code-editor-view .ssh-card { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-soft); }
 .code-editor-view .ssh-card.active { border-color: var(--accent-strong); }
