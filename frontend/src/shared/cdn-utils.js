@@ -79,6 +79,9 @@ const CdnUtils = {
                 };
                 window.define = undefined;
                 document.head.append(script);
+            }).catch((error) => {
+                resourceLoadPromises.delete(src);
+                throw error;
             }));
         }
         return resourceLoadPromises.get(src);
@@ -97,6 +100,9 @@ const CdnUtils = {
                 };
                 script.onerror = () => reject(new Error(`Failed to load ${label}`));
                 document.head.append(script);
+            }).catch((error) => {
+                resourceLoadPromises.delete(src);
+                throw error;
             }));
         }
         return resourceLoadPromises.get(src);
@@ -114,6 +120,9 @@ const CdnUtils = {
                 link.onload = resolve;
                 link.onerror = () => reject(new Error(`Failed to load ${label}`));
                 document.head.append(link);
+            }).catch((error) => {
+                resourceLoadPromises.delete(href);
+                throw error;
             }));
         }
         return resourceLoadPromises.get(href);
@@ -163,7 +172,7 @@ const CdnUtils = {
     loadVditor() {
         return Promise.all([
             this.loadStyle(this.vditor.style, 'Vditor stylesheet'),
-            this.loadScript(this.vditor.script, () => window.Vditor, 'Vditor')
+            this.loadScriptWithoutAmd(this.vditor.script, () => window.Vditor, 'Vditor')
         ]).then(([, Vditor]) => Vditor);
     },
 
