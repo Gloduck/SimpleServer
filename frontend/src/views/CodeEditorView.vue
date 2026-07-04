@@ -3980,28 +3980,16 @@ function buildImageInputMessage(images) {
 function getAgentInstructions() {
   const instructions = [
     "You are an autonomous coding assistant inside a browser-based Monaco editor.",
-    "You run in a browser sandbox, not on the user's local machine. Do not claim you can directly run local shell commands, terminal commands, filesystem commands, package managers, git, or host tools unless an explicit tool listed below is available and you actually use it.",
-    "Use list_tools when you need to check which tools are currently available. Use get_tool_details when you need parameter details for specific tools.",
-    "Treat the Workspace context message as the current condition summary. Use list_tools for current tool availability and do not use unavailable tools.",
-    "Never claim a file changed unless a tool reports success.",
-    `You have at most ${AI_AGENT_MAX_TOOL_CALL_ROUNDS} tool-call rounds per user request; batch related reads and edits, avoid retry loops, and finish with the best available result before exhausting the limit.`,
-    "Do not repeatedly retry the same failed operation with superficial argument changes. If a tool reports a deterministic failure such as request too large, permission denied, not found, or command rejected, stop that approach, explain the failure, and ask before trying a different approach with the same goal.",
-    "When multiple independent tool calls are needed and their arguments are already known, issue them in the same response instead of one tool call per round. Only serialize tool calls when a later call depends on an earlier result.",
-    "Use run_javascript for deterministic calculations, parsing, or data transformations. It runs in an isolated browser Web Worker with no DOM, editor, or workspace file access; pass needed data as input.",
-    "When workspace file tools are available, use tools to inspect and edit the workspace.",
-    "All edit tools modify only in-memory editor models. The user must save files manually; new files created by write_file and files marked by delete_file are not written to disk until saved by the user.",
+    "You run in a browser sandbox, not on the user's local machine. Be accurate about what you can and cannot access.",
+    "Be concise, direct, and answer the user's request without unnecessary preamble or postamble.",
+    "Before changing code, understand the surrounding conventions and follow the existing style, patterns, naming, and libraries.",
+    "Do not assume a library or framework is available just because it is common; rely on what the project already uses.",
+    "Follow security best practices. Never introduce code that exposes, logs, or commits secrets, keys, or credentials.",
+    "Do not add code comments unless they are needed to explain non-obvious behavior or the user asks for them.",
+    "When multiple independent tool calls are needed and their inputs are already known, issue those tool calls together in the same response instead of one per round. Prefer batch tools when available to reduce latency and token usage.",
+    "Never claim something changed unless you have confirmed it through the available context.",
     "Resolve references like 'the file you created' from Recent chat and AI-touched files before using the current editor file. If multiple files match, ask a short clarification instead of editing or deleting the current file by default.",
-    "When reading several files or applying several edits, prefer the batch tools read_files and replace_in_files over multiple single-file tool calls.",
-    "Use refresh_tree when you need to rescan the workspace file tree before locating files.",
-    "Prefer replace_in_file with exact old_text and minimal new_text for local edits, similar to patch hunks.",
-    "Use write_file only for new files, tiny files, generated files, or when no stable exact local replacement is possible.",
-    "Use read_image when the user asks you to inspect an image file; the tool attaches the image to the next model turn as visual input.",
-    "Prefer small, targeted edits. Explain changed files briefly after tool work is complete; do not paste whole modified files in chat.",
-    "When request_proxy is available, use it for external HTTP resources that may be blocked by browser CORS.",
-    "When SSH tools are available, they are only for SSH settings explicitly exposed to AI. Prefer commands from the connection whitelist when they can complete the task, and choose concise commands or flags that produce short output when possible. When using execute_ssh_command, provide a clear reason, a commands array containing only every main command used by the shell command, and a high_risk boolean based on your risk assessment. List every SSH command you ran in your final answer. Main commands outside each setting's whitelist require user approval; high_risk=true requires approval even if whitelisted.",
-    "If an SSH command approval is rejected, do not try alternate SSH commands for the same purpose unless the user explicitly asks you to continue or grants permission.",
-    "Users may also type commands manually in active SSH terminals. When that context matters, use read_ssh_output to inspect the terminal transcript and infer relevant user input when it is visible.",
-    "When using SFTP tools, local_path is always a path relative to the currently opened browser workspace, never an absolute path, URL, SSH path, or server path. For upload, local_path names the workspace file to read; remote_path names the destination path on the SSH server. For download, remote_path names the source file on the SSH server; local_path names the workspace-relative destination file. SFTP upload/download tools return after the background task is submitted and visible in the task list. Only briefly wait or poll task completion when the file is likely small, such as a text file or roughly under 1MB. For larger or unknown-size files, do not repeatedly call tools just to wait for completion; report that the transfer was submitted unless the user explicitly asks to wait or the next step truly depends on completion. If you are unsure of the workspace path, use list_files or ask the user before starting the transfer.",
+    "Prefer small, targeted edits. Explain changed files briefly; do not paste whole modified files in chat.",
   ];
   const agentsMd = getRootAgentsMdContent();
   if (agentsMd) instructions.push(formatAgentsMdInstructions(agentsMd));
@@ -4063,9 +4051,18 @@ function buildAgentWorkspaceContext() {
     `Workspace loaded: ${workspaceLoaded ? "yes" : "no"}`,
     `Backend enabled: ${backendEnabled ? "yes" : "no"}`,
     `SSH exposed count: ${sshConnections.length}`,
+    "Tool requirement status:",
+    ...formatAiRequirementStatusLines(),
     `${AI_AGENTS_FILE_NAME}: ${getRootAgentsMdContent() ? "loaded" : "not loaded"}`,
     `Locale: ${settings.locale}`,
   ].join("\n");
+}
+
+function formatAiRequirementStatusLines() {
+  return ["workspace", "backend", "ssh_exposed"].map((requirement) => {
+    const status = getAiRequirementStatus(requirement);
+    return `- ${requirement}: ${status.met ? "available" : `unavailable (${status.reason})`}`;
+  });
 }
 
 function buildAgentRecentChatMessages(session = getActiveAiSession()) {
@@ -4159,80 +4156,54 @@ function formatAiUsage(usage) {
 
 function getAiToolDefinitions() {
   return getAiAllToolDefinitions()
-    .filter((tool) => getAiToolAvailability(tool).available)
     .map(stripAiToolInternalMetadata);
 }
 
-function getAiBaseToolDefinitions() {
+function getAiAllToolDefinitions() {
   return [
-    { type: "function", name: "list_tools", description: "List AI tool names, short descriptions, and current availability. Set only_available to true to omit unavailable tools. Does not include parameter schemas; use get_tool_details for that.", parameters: { type: "object", properties: { only_available: { type: "boolean", description: "When true, return only tools that are currently available. Defaults to false." } } } },
-    { type: "function", name: "get_tool_details", description: "Get parameter schemas and parameter descriptions for specific AI tools by name. Use after list_tools when you need exact arguments.", parameters: { type: "object", properties: { names: { type: "array", items: { type: "string" }, description: "Tool names to describe." } }, required: ["names"] } },
-    { type: "function", name: "run_javascript", description: "Execute a JavaScript snippet in an isolated browser Web Worker for calculations, parsing, or transforming provided input data. The code is the body of an async function with an input variable available; use return to produce a result. No DOM/editor/workspace access.", parameters: { type: "object", properties: { code: { type: "string", description: "JavaScript async function body. Example: return input.items.map(x => x * 2);" }, input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." }, timeout_ms: { type: "number", description: "Optional timeout in milliseconds. Defaults to 2000, max 5000." } }, required: ["code"] } },
+    { type: "function", name: "get_tool_availability", description: aiToolDescription(
+      "Check current AI tool availability and requirement status.",
+      "Use this when you are unsure whether workspace, backend, SSH, or SFTP related tools are currently usable. This tool does not return parameter schemas; use each tool's own description and parameters directly.",
+      "All tools are visible to you, but tools with unmet requirements will fail if called. Prefer checking availability before using tools that depend on workspace, backend, or exposed SSH settings."
+    ), parameters: { type: "object", properties: { names: { type: "array", items: { type: "string" }, description: "Optional tool names to check. Omit to return all tools." } } } },
+    { type: "function", name: "run_javascript", description: aiToolDescription(
+      "Execute a JavaScript snippet in an isolated browser Web Worker for deterministic calculations, parsing, or transforming data supplied in input.",
+      "The code is the body of an async function with an input variable available; use return to produce the result. Console logs are captured and returned.",
+      "No DOM, editor, workspace filesystem, network, or host access is available. Pass every required value through input. Do not use this as a substitute for workspace file tools or SSH tools.",
+      "Limits: code is capped, output is sanitized/truncated, timeout defaults to 2000ms and is capped at 5000ms."
+    ), parameters: { type: "object", properties: { code: { type: "string", description: "JavaScript async function body. Example: return input.items.map(x => x * 2);" }, input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." }, timeout_ms: { type: "number", description: "Optional timeout in milliseconds. Defaults to 2000, max 5000." } }, required: ["code"] } },
+    { type: "function", name: "list_files", requirements: ["workspace"], description: aiToolDescription("List workspace files and directories.", "Use path relative to workspace root. Use an empty path or '.' for the workspace root. By default only the first level is listed; set recursive to true for descendants. Use max_items to keep output concise."), parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root. '.' means workspace root." }, max_items: { type: "number", description: "Maximum items to return. Capped internally." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
+    { type: "function", name: "refresh_tree", requirements: ["workspace"], description: aiToolDescription("Refresh the workspace file tree from disk.", "Use this before locating files that may have been created, deleted, renamed, downloaded, or externally changed."), parameters: { type: "object", properties: { collapse_all: { type: "boolean", description: "Whether to collapse all directories after refreshing. Defaults to false." } } } },
+    { type: "function", name: "read_file", requirements: ["workspace"], description: aiToolDescription("Read a workspace text file.", "Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads. This tool only reads text-like files; binary or unsupported files will fail."), parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "number", description: "Optional 1-based starting line number. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return." } }, required: ["path"] } },
+    { type: "function", name: "read_files", requirements: ["workspace"], description: aiToolDescription("Read multiple workspace text files in one call.", "Prefer this over repeated read_file calls when several files are known. Dirty in-memory content is returned when present. Offset and limit apply to each file."), parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, offset: { type: "number", description: "Optional 1-based starting line number applied to each file. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return per file." }, max_chars_per_file: { type: "number", description: "Maximum characters returned per file." } }, required: ["paths"] } },
+    { type: "function", name: "read_image", requirements: ["workspace"], description: aiToolDescription("Read an image file and attach it to the next model turn for visual analysis.", "Use this for screenshots, diagrams, mockups, and other workspace image files. Do not use it for non-image files or oversized images."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+    { type: "function", name: "search_text", requirements: ["workspace"], description: aiToolDescription("Search exact text across workspace files.", "This is a simple substring search, not a regex search. Use path to limit the search scope and max_results to keep output concise."), parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string" }, max_results: { type: "number" } }, required: ["query"] } },
+    { type: "function", name: "get_current_file", requirements: ["workspace"], description: aiToolDescription("Get the current editor file, cursor position, and selected text.", "Use this for editor context only; do not assume the current file is the user's intended target when recent chat or AI-touched files indicate another file."), parameters: { type: "object", properties: {} } },
+    { type: "function", name: "replace_in_file", requirements: ["workspace"], description: aiToolDescription("Replace the first exact text occurrence in a workspace file in memory.", "Use this for minimal local edits with exact old_text and new_text, similar to patch hunks. Do not pass whole-file old_text/new_text unless the file is tiny and no smaller stable edit is possible.", "This edits only the in-memory editor model. Changes are not saved to disk until the user saves. Do not claim the file changed unless this tool reports success."), parameters: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } },
+    { type: "function", name: "replace_in_files", requirements: ["workspace"], description: aiToolDescription("Apply multiple exact local replacements in one call.", "Prefer this over repeated replace_in_file calls when several edits are known. Use it after batch-reading files and planning several patch hunks. Individual edit failures do not abort the whole batch; inspect per-edit results.", "This edits only in-memory editor models. Changes are not saved to disk until the user saves. Only report files as changed when their individual edit result succeeded."), parameters: { type: "object", properties: { edits: { type: "array", items: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } } }, required: ["edits"] } },
+    { type: "function", name: "write_file", requirements: ["workspace"], description: aiToolDescription("Create or replace a whole workspace file in memory.", "Use only for new files, tiny files, generated files, or when exact local replacement is not stable.", "This edits only the in-memory editor model. New files are not written to disk until the user saves. Do not claim the file changed unless this tool reports success."), parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
+    { type: "function", name: "delete_file", requirements: ["workspace"], description: aiToolDescription("Mark a workspace file for deletion in memory.", "Existing disk files are deleted only when the user saves the deletion. Unsaved new files are removed immediately from memory.", "Be careful resolving ambiguous references before deleting. Do not claim the file was deleted unless this tool reports success."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+    { type: "function", name: "open_file", requirements: ["workspace"], description: aiToolDescription("Open a workspace file in the editor.", "Use this when the user wants a file displayed or when visual editor context is useful."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+    { type: "function", name: "show_diff", requirements: ["workspace"], description: aiToolDescription("Show the diff for an in-memory changed file.", "Use this for files changed, created, or marked for deletion in the editor session."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+    { type: "function", name: "request_proxy", requirements: ["backend"], description: aiToolDescription("Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits.", "Use this for external HTTP resources that browser fetch may block. It returns response status, headers, and truncated text body.", "Only http and https URLs are supported. GET and HEAD requests cannot include a body. Use max_chars to keep large responses concise."), parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, max_chars: { type: "number", description: "Maximum response body characters to return. Defaults to 20000." } }, required: ["url"] } },
+    { type: "function", name: "get_ssh_connections", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Get SSH settings exposed to AI.", "Returns id, name, host, port, active state, and command whitelist. Secrets are never returned. Use this before opening or choosing an SSH connection when the target is ambiguous."), parameters: { type: "object", properties: {} } },
+    { type: "function", name: "open_ssh_connection", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Open an exposed SSH connection by id, name, or host.", "The backend SSH WebSocket performs the actual SSH connection. Reuse active connections when possible instead of reconnecting."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
+    { type: "function", name: "activate_ssh_terminal", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Switch the visible editor tab to an already active exposed SSH terminal.", "This does not execute any SSH command. It requires the connection to already be active."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
+    { type: "function", name: "close_ssh_connection", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Close an active exposed SSH connection by id, name, or host.", "Use only when the user asks to disconnect or when cleanup is clearly part of the requested task."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
+    { type: "function", name: "read_ssh_output", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Read recent output from an active exposed SSH connection.", "This reads the SSH terminal transcript. Commands run through execute_ssh_command and commands manually typed by the user can both appear here, along with their outputs, prompts, and terminal control artifacts.", "Use this to inspect terminal context when needed. When the distinction matters, separate AI-run commands and results from user-run commands and results before drawing conclusions. Output may be truncated and may include ANSI terminal artifacts."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, max_chars: { type: "number", description: "Maximum output characters. Defaults to 20000." } }, required: ["connection"] } },
+    { type: "function", name: "execute_ssh_command", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Execute a command on an active exposed SSH connection.", "Prefer commands from the connection whitelist when they can complete the task, and choose concise commands or flags that produce short output when possible.", "You must provide a clear reason, commands array containing only every main command used by the shell command, and high_risk based on your own risk assessment. Main commands outside the whitelist require approval; high_risk=true always requires approval.", "If an SSH command approval is rejected, do not try alternate SSH commands for the same purpose unless the user explicitly asks you to continue or grants permission. List every SSH command you ran in your final answer."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, command: { type: "string" }, commands: { type: "array", items: { type: "string" }, description: "Required list of main commands used by command, excluding arguments. Include every command in chains, pipes, and substitutions. Example: for 'ls -la && whoami', pass ['ls','whoami']." }, high_risk: { type: "boolean", description: "Required. AI-assessed risk flag. Set true if the command may modify files/system state, affect services, expose secrets, consume significant resources, or otherwise be risky." }, reason: { type: "string", description: "Required explanation of why this SSH command is needed." } }, required: ["connection", "command", "commands", "high_risk", "reason"] } },
+    { type: "function", name: "sftp_upload_file", requirements: ["backend", "ssh_exposed", "workspace"], description: aiToolDescription("Submit one SFTP upload task and return its task_id.", "local_path is a workspace-relative source file path only; remote_path is the destination file path on the SSH server. Missing remote parent directories are created automatically.", "Do not pass absolute local paths, URLs, or SSH server paths as local_path. Upload returns after task submission; only briefly wait or poll completion for likely-small files such as text files or roughly under 1MB. For larger or unknown-size files, report that the task was submitted unless the user explicitly asks to wait or a next step truly depends on completion."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, local_path: { type: "string", description: "Workspace-relative source file path only, for example 'dist/app.zip' or 'src/main.js'." }, remote_path: { type: "string", description: "Destination file path on the SSH server. Missing parent directories are created automatically." }, use_unsaved: { type: "boolean", description: "Upload unsaved dirty editor content when available. Defaults to true." } }, required: ["connection", "local_path", "remote_path"] } },
+    { type: "function", name: "sftp_download_file", requirements: ["backend", "ssh_exposed", "workspace"], description: aiToolDescription("Submit one SFTP download task and return its task_id.", "remote_path is the source file path on the SSH server; local_path is a workspace-relative destination path. Parent directories are created automatically.", "Do not pass absolute local paths, URLs, or SSH server paths as local_path. Download returns after task submission; only briefly wait or poll completion for likely-small files such as text files or roughly under 1MB. For larger or unknown-size files, report that the task was submitted unless the user explicitly asks to wait or a next step truly depends on completion."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, remote_path: { type: "string", description: "Source file path on the SSH server." }, local_path: { type: "string", description: "Workspace-relative destination file path only, for example 'downloads/app.zip'." } }, required: ["connection", "remote_path", "local_path"] } },
+    { type: "function", name: "sftp_list_tasks", requirements: ["backend", "ssh_exposed", "workspace"], description: aiToolDescription("List SFTP upload/download tasks submitted from the current page.", "Returns task progress and status. Do not repeatedly call this just to wait for large or unknown-size transfers; use it when checking is explicitly needed."), parameters: { type: "object", properties: { status: { type: "string", description: "Optional status filter: running, completed, failed, or cancelled." } } } },
+    { type: "function", name: "sftp_cancel_task", requirements: ["backend", "ssh_exposed", "workspace"], description: aiToolDescription("Cancel a running SFTP task.", "Use task_id returned by sftp_upload_file, sftp_download_file, or sftp_list_tasks. Completed, failed, or already-cancelled tasks cannot be cancelled."), parameters: { type: "object", properties: { task_id: { type: "string", description: "Task id returned by sftp_upload_file, sftp_download_file, or sftp_list_tasks." } }, required: ["task_id"] } },
   ];
 }
 
-function getAiRequestProxyToolDefinition() {
-  return { type: "function", name: "request_proxy", requirements: ["backend"], description: "Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits. Returns status, headers and truncated text response.", parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, max_chars: { type: "number", description: "Maximum response body characters to return. Defaults to 20000." } }, required: ["url"] } };
-}
-
-function getAiAllToolDefinitions() {
-  return [...getAiBaseToolDefinitions(), ...getAiFileToolDefinitions(), getAiRequestProxyToolDefinition(), ...getAiSshToolDefinitions()];
-}
-
-function getAiFileToolDefinitions() {
-  return addAiToolRequirements([
-    { type: "function", name: "list_files", description: "List workspace files and directories. By default only lists the first level; set recursive to true to include descendants.", parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root." }, max_items: { type: "number", description: "Maximum items to return." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
-    { type: "function", name: "refresh_tree", description: "Refresh the workspace file tree from disk. Use this before locating newly created, deleted, or externally changed files.", parameters: { type: "object", properties: { collapse_all: { type: "boolean", description: "Whether to collapse all directories after refreshing. Defaults to false." } } } },
-    { type: "function", name: "read_file", description: "Read a text file. Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads.", parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "number", description: "Optional 1-based starting line number. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return." } }, required: ["path"] } },
-    { type: "function", name: "read_files", description: "Read multiple text files in one call. Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads applied to each file.", parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, offset: { type: "number", description: "Optional 1-based starting line number applied to each file. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return per file." }, max_chars_per_file: { type: "number" } }, required: ["paths"] } },
-    { type: "function", name: "read_image", description: "Read an image file and attach it to the next model turn for visual analysis. Use this for screenshots, diagrams, mockups, and other workspace image files.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
-    { type: "function", name: "search_text", description: "Search text across workspace files.", parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string" }, max_results: { type: "number" } }, required: ["query"] } },
-    { type: "function", name: "get_current_file", description: "Get current editor file, cursor and selected text.", parameters: { type: "object", properties: {} } },
-    { type: "function", name: "replace_in_file", description: "Replace the first exact text occurrence in a file in memory. Use this for minimal local edits; do not pass whole-file old_text/new_text unless the file is tiny and no smaller exact edit is possible.", parameters: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } },
-    { type: "function", name: "replace_in_files", description: "Apply multiple exact local replacements in one call. Prefer this after batch-reading files and planning several patch hunks. Returns per-edit results; individual edit failures do not abort the whole batch.", parameters: { type: "object", properties: { edits: { type: "array", items: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } } }, required: ["edits"] } },
-    { type: "function", name: "write_file", description: "Create or replace a whole file in memory. Use only for new files, tiny files, generated files, or when exact local replacement is not stable. Does not save to disk.", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
-    { type: "function", name: "delete_file", description: "Mark a file for deletion in memory. Existing disk files are deleted only when the user saves the deletion; unsaved new files are removed immediately from memory.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
-    { type: "function", name: "open_file", description: "Open a file in the editor.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
-    { type: "function", name: "show_diff", description: "Show diff for an in-memory changed file.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } }
-  ], ["workspace"]);
-}
-
-function getAiSshToolDefinitions() {
-  const sshTools = addAiToolRequirements([
-    { type: "function", name: "get_ssh_connections", description: "Get SSH settings exposed to AI, including name, host, port, active state, and command whitelist. Secrets are never returned.", parameters: { type: "object", properties: {} } },
-    { type: "function", name: "open_ssh_connection", description: "Open an exposed SSH connection by id, name, or host. The backend SSH WebSocket performs the actual SSH connection.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
-    { type: "function", name: "activate_ssh_terminal", description: "Switch the visible editor tab to an already active exposed SSH terminal by id, name, or host. Does not execute any SSH command.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
-    { type: "function", name: "close_ssh_connection", description: "Close an active exposed SSH connection by id, name, or host.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
-    { type: "function", name: "read_ssh_output", description: "Read recent output from an active exposed SSH connection.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, max_chars: { type: "number", description: "Maximum output characters. Defaults to 20000." } }, required: ["connection"] } },
-    { type: "function", name: "execute_ssh_command", description: "Execute a command on an active exposed SSH connection. The AI must provide a reason, commands array containing only every main command used by the shell command, and high_risk based on its own risk assessment. Main commands outside the whitelist require approval; high_risk=true always requires approval.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, command: { type: "string" }, commands: { type: "array", items: { type: "string" }, description: "Required list of main commands used by command, excluding arguments. Include every command in chains, pipes, and substitutions. Example: for 'ls -la && whoami', pass ['ls','whoami']." }, high_risk: { type: "boolean", description: "Required. AI-assessed risk flag. Set true if the command may modify files/system state, affect services, expose secrets, consume significant resources, or otherwise be risky." }, reason: { type: "string", description: "Required explanation of why this SSH command is needed." } }, required: ["connection", "command", "commands", "high_risk", "reason"] } },
-  ], ["backend", "ssh_exposed"]);
-  const sftpTools = addAiToolRequirements([
-    { type: "function", name: "sftp_upload_file", description: "Submit one SFTP upload task and return its task_id.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, local_path: { type: "string", description: "Workspace-relative source file path only, for example 'dist/app.zip' or 'src/main.js'. Do not pass absolute paths, URLs, or SSH server paths." }, remote_path: { type: "string", description: "Destination file path on the SSH server. Missing parent directories are created automatically." }, use_unsaved: { type: "boolean", description: "Upload unsaved dirty editor content when available. Defaults to true." } }, required: ["connection", "local_path", "remote_path"] } },
-    { type: "function", name: "sftp_download_file", description: "Submit one SFTP download task and return its task_id.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, remote_path: { type: "string", description: "Source file path on the SSH server." }, local_path: { type: "string", description: "Workspace-relative destination file path only, for example 'downloads/app.zip'. Do not pass absolute paths, URLs, or SSH server paths. Parent directories are created automatically." } }, required: ["connection", "remote_path", "local_path"] } },
-    { type: "function", name: "sftp_list_tasks", description: "List SFTP upload/download tasks submitted from the current page, including progress and status.", parameters: { type: "object", properties: { status: { type: "string", description: "Optional status filter: running, completed, failed, or cancelled." } } } },
-    { type: "function", name: "sftp_cancel_task", description: "Cancel a running SFTP task.", parameters: { type: "object", properties: { task_id: { type: "string", description: "Task id returned by sftp_upload_file, sftp_download_file, or sftp_list_tasks." } }, required: ["task_id"] } },
-  ], ["backend", "ssh_exposed", "workspace"]);
-  return [...sshTools, ...sftpTools];
-}
-
-function addAiToolRequirements(tools, requirements) {
-  return tools.map((tool) => ({ ...tool, requirements }));
-}
-
-function aiToolListTools({ only_available: onlyAvailable = false } = {}) {
-  const tools = getAiAllToolDefinitions()
-    .map(formatAiToolListItem)
-    .filter((tool) => !onlyAvailable || tool.available);
-  return {
-    summary: `${tools.length} tool(s) returned`,
-    tools,
-  };
-}
-
-function aiToolGetToolDetails({ names } = {}) {
+function aiToolGetToolAvailability({ names } = {}) {
   const definitions = new Map(getAiAllToolDefinitions().map((tool) => [tool.name, tool]));
   const requestedNames = uniqueStrings(Array.isArray(names) ? names.map((name) => String(name || "").trim()).filter(Boolean) : []);
-  const tools = requestedNames.map((name) => {
+  const selected = requestedNames.length ? requestedNames : Array.from(definitions.keys());
+  const tools = selected.map((name) => {
     const tool = definitions.get(name);
     if (!tool) return { name, found: false };
     const availability = getAiToolAvailability(tool);
@@ -4241,20 +4212,24 @@ function aiToolGetToolDetails({ names } = {}) {
       found: true,
       available: availability.available,
       unavailable_reason: availability.reason || "",
-      description: formatAiToolDescriptionWithCondition(tool),
-      parameters: tool.parameters || {},
+      requirements: (tool.requirements || []).map((requirement) => {
+        const status = getAiRequirementStatus(requirement);
+        return { name: requirement, available: status.met, reason: status.met ? "" : status.reason };
+      }),
     };
   });
-  return { summary: `${tools.length} tool detail(s) returned`, tools };
+  return {
+    summary: `${tools.filter((tool) => tool.found !== false && tool.available).length}/${tools.length} tool(s) available`,
+    requirements: ["workspace", "backend", "ssh_exposed"].map((requirement) => {
+      const status = getAiRequirementStatus(requirement);
+      return { name: requirement, available: status.met, reason: status.met ? "" : status.reason };
+    }),
+    tools,
+  };
 }
 
-function formatAiToolListItem(tool) {
-  const availability = getAiToolAvailability(tool);
-  return {
-    name: tool.name,
-    description: formatAiToolDescriptionWithCondition(tool),
-    available: availability.available,
-  };
+function aiToolDescription(...parts) {
+  return parts.filter(Boolean).join("\n\n");
 }
 
 function getAiToolAvailability(name) {
@@ -4289,7 +4264,7 @@ function getAiRequirementStatus(requirement) {
 
 function stripAiToolInternalMetadata(tool) {
   const { requirements, ...definition } = tool;
-  return definition;
+  return { ...definition, description: formatAiToolDescriptionWithCondition(tool) };
 }
 
 function parseAiToolArguments(call) {
@@ -4301,8 +4276,7 @@ async function runAiToolCall(call, args = {}, session = getActiveAiSession()) {
     const availability = getAiToolAvailability(call.name);
     if (availability.found && !availability.available) return { ok: false, summary: `Tool ${call.name} is unavailable because ${availability.reason}` };
     switch (call.name) {
-      case "list_tools": return okTool(aiToolListTools(args));
-      case "get_tool_details": return okTool(aiToolGetToolDetails(args));
+      case "get_tool_availability": return okTool(aiToolGetToolAvailability(args));
       case "list_files": return okTool(await aiToolListFiles(args));
       case "refresh_tree": return okTool(await aiToolRefreshTree(args));
       case "read_file": return okTool(await aiToolReadFile(args));
