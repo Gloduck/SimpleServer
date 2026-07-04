@@ -144,22 +144,24 @@ public class SshService {
             throw new ApiException("upload body is required");
         }
 
-        String tempPath = remotePath + ".uploading-" + UUID.randomUUID();
         com.jcraft.jsch.Session session = null;
         ChannelSftp sftp = null;
         boolean renamed = false;
+        String tempPath = null;
         try {
             session = createSession(request, UUID.randomUUID().toString());
             sftp = openSftp(session);
+            String resolvedRemotePath = resolveRemotePath(sftp, remotePath);
+            tempPath = resolvedRemotePath + ".uploading-" + UUID.randomUUID();
             if (createDirs) {
-                ensureRemoteDirectory(sftp, parentPath(remotePath));
+                ensureRemoteDirectory(sftp, parentPath(resolvedRemotePath));
             }
 
             CountingInputStream countingInput = new CountingInputStream(input);
             sftp.put(countingInput, tempPath);
-            renameUploadedFile(sftp, tempPath, remotePath);
+            renameUploadedFile(sftp, tempPath, resolvedRemotePath);
             renamed = true;
-            return new SftpTransferResult(remotePath, countingInput.count(), "uploaded");
+            return new SftpTransferResult(resolvedRemotePath, countingInput.count(), "uploaded");
         } catch (ApiException e) {
             throw e;
         } catch (Exception e) {
@@ -182,11 +184,12 @@ public class SshService {
         try {
             session = createSession(request, UUID.randomUUID().toString());
             sftp = openSftp(session);
-            SftpATTRS attrs = sftp.lstat(remotePath);
+            String resolvedRemotePath = resolveRemotePath(sftp, remotePath);
+            SftpATTRS attrs = sftp.lstat(resolvedRemotePath);
             if (attrs.isDir()) {
                 throw new ApiException("remotePath is a directory");
             }
-            return new SftpDownload(session, sftp, remotePath, attrs.getSize());
+            return new SftpDownload(session, sftp, resolvedRemotePath, attrs.getSize());
         } catch (ApiException e) {
             closeSftp(sftp, session);
             throw e;
@@ -301,6 +304,17 @@ public class SshService {
         if (remotePath.endsWith("/")) {
             throw new ApiException("remotePath must be a file path");
         }
+    }
+
+    private String resolveRemotePath(ChannelSftp sftp, String remotePath) throws SftpException {
+        String normalized = remotePath.trim().replace('\\', '/');
+        if ("~".equals(normalized)) {
+            return sftp.getHome();
+        }
+        if (normalized.startsWith("~/")) {
+            return sftp.getHome() + normalized.substring(1);
+        }
+        return normalized;
     }
 
     private void ensureRemoteDirectory(ChannelSftp sftp, String directory) throws SftpException {
