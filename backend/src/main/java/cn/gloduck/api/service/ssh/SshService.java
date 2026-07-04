@@ -165,10 +165,11 @@ public class SshService {
         } catch (Exception e) {
             throw new ApiException("SFTP upload failed: " + rootMessage(e), e);
         } finally {
-            if (!renamed) {
-                deleteQuietly(sftp, tempPath);
-            }
+            boolean deletedTemp = renamed || deleteQuietly(sftp, tempPath);
             closeSftp(sftp, session);
+            if (!deletedTemp) {
+                deleteSftpPathWithNewSession(request, tempPath);
+            }
         }
     }
 
@@ -349,13 +350,28 @@ public class SshService {
         }
     }
 
-    private void deleteQuietly(ChannelSftp sftp, String path) {
+    private boolean deleteQuietly(ChannelSftp sftp, String path) {
         if (sftp == null || StringUtils.isNullOrEmpty(path)) {
-            return;
+            return false;
         }
         try {
             sftp.rm(path);
+            return true;
         } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void deleteSftpPathWithNewSession(SshConnectRequest request, String path) {
+        com.jcraft.jsch.Session cleanupSession = null;
+        ChannelSftp cleanupSftp = null;
+        try {
+            cleanupSession = createSession(request, UUID.randomUUID().toString());
+            cleanupSftp = openSftp(cleanupSession);
+            deleteQuietly(cleanupSftp, path);
+        } catch (Exception ignored) {
+        } finally {
+            closeSftp(cleanupSftp, cleanupSession);
         }
     }
 
