@@ -1,5 +1,5 @@
 <template>
-  <div class="code-editor-view app-shell" :class="[`theme-${settings.theme}`, { 'side-panel-hidden': !sidePanelVisible, resizing: sidebarResizing }]" :style="{ '--side-panel-width': `${settings.sidebarWidth}px` }">
+  <div class="code-editor-view app-shell" :class="[`theme-${settings.theme}`, { 'side-panel-hidden': !sidePanelVisible, resizing: sidebarResizing || previewResizing, 'preview-resizing': previewResizing }]" :style="{ '--side-panel-width': `${sidebarWidth}px`, '--preview-pane-width': `${previewWidth}px` }">
     <aside class="activity-bar" :aria-label="tr('nav.main')">
       <button class="activity-button" :class="{ active: activeView === 'explorer' }" :title="tr('activity.explorer')" :aria-label="tr('activity.explorer')" @click="showPanel('explorer')">
         <span class="codicon codicon-files" aria-hidden="true"></span>
@@ -347,7 +347,7 @@
           </section>
         </div>
       </section>
-      <div class="side-panel-resizer" role="separator" aria-orientation="vertical" :aria-valuenow="settings.sidebarWidth" :aria-valuemin="SIDEBAR_MIN_WIDTH" :aria-valuemax="SIDEBAR_MAX_WIDTH" @pointerdown="startSidebarResize"></div>
+      <div class="side-panel-resizer" role="separator" aria-orientation="vertical" :aria-valuenow="sidebarWidth" :aria-valuemin="SIDEBAR_MIN_WIDTH" :aria-valuemax="SIDEBAR_MAX_WIDTH" @pointerdown="startSidebarResize"></div>
     </aside>
 
     <main class="editor-shell">
@@ -414,6 +414,7 @@
           <pre v-if="!activeSshTerminal.terminal" class="ssh-terminal-fallback">{{ activeSshTerminal.output || tr('ssh.noOutput') }}</pre>
         </section>
         <aside v-if="previewPaneVisible && !activeSshTerminal" class="preview-pane" :aria-label="tr('preview.aria')">
+          <div class="preview-pane-resizer" role="separator" aria-orientation="vertical" :aria-valuenow="previewWidth" :aria-valuemin="PREVIEW_MIN_WIDTH" :aria-valuemax="PREVIEW_MAX_WIDTH" @pointerdown="startPreviewResize"></div>
           <header class="preview-header">
             <span>{{ tr(previewMode === 'markdown' ? 'preview.markdown' : 'preview.html') }}</span>
             <button type="button" class="icon-button" :title="tr('action.close')" :aria-label="tr('action.close')" @click="closePreview">
@@ -571,7 +572,11 @@ const DEFAULT_SSH_WHITELIST_TEMPLATE = [
 const defaultSshSettings = { securityKey: "", terminalTheme: "dark", whitelistTemplate: DEFAULT_SSH_WHITELIST_TEMPLATE, connections: [] };
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 640;
-const defaultSettings = { theme: "vs-dark", locale: "zh-CN", fontSize: 14, wordWrap: false, minimap: true, sidebarWidth: 300, shortcuts: { ...vscodeShortcuts }, ai: { ...defaultAiSettings }, backend: { ...defaultBackendSettings }, ssh: { ...defaultSshSettings } };
+const DEFAULT_SIDEBAR_WIDTH = 300;
+const PREVIEW_MIN_WIDTH = 280;
+const PREVIEW_MAX_WIDTH = 900;
+const DEFAULT_PREVIEW_WIDTH = 480;
+const defaultSettings = { theme: "vs-dark", locale: "zh-CN", fontSize: 14, wordWrap: false, minimap: true, shortcuts: { ...vscodeShortcuts }, ai: { ...defaultAiSettings }, backend: { ...defaultBackendSettings }, ssh: { ...defaultSshSettings } };
 const AI_COMPLETION_MANUAL_TRIGGER_WINDOW_MS = 2000;
 const AI_COMPLETION_MANUAL_PREFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_SUFFIX_CHARS = 500;
@@ -1215,6 +1220,9 @@ const dirtyRevision = ref(0);
 const activeView = ref("explorer");
 const sidePanelVisible = ref(true);
 const sidebarResizing = ref(false);
+const previewResizing = ref(false);
+const sidebarWidth = ref(DEFAULT_SIDEBAR_WIDTH);
+const previewWidth = ref(DEFAULT_PREVIEW_WIDTH);
 const keybindingDisposables = [];
 const inlineCompletionDisposables = [];
 const referenceProviderDisposables = [];
@@ -3988,7 +3996,7 @@ function startSidebarResize(event) {
   event.currentTarget.setPointerCapture?.(event.pointerId);
   const move = (moveEvent) => {
     const activityWidth = document.querySelector(".activity-bar")?.getBoundingClientRect().width || 48;
-    settings.sidebarWidth = clampSidebarWidth(moveEvent.clientX - activityWidth);
+    sidebarWidth.value = clampSidebarWidth(moveEvent.clientX - activityWidth);
     editor.value?.layout();
     diffEditor.value?.layout();
   };
@@ -4006,7 +4014,35 @@ function startSidebarResize(event) {
 }
 
 function clampSidebarWidth(value) {
-  return Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, Math.round(Number(value) || defaultSettings.sidebarWidth)));
+  return Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, Math.round(Number(value) || DEFAULT_SIDEBAR_WIDTH)));
+}
+
+function startPreviewResize(event) {
+  if (!previewPaneVisible.value) return;
+  event.preventDefault();
+  previewResizing.value = true;
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  const stage = event.currentTarget.closest(".editor-stage");
+  const move = (moveEvent) => {
+    const stageRight = stage?.getBoundingClientRect().right || window.innerWidth;
+    previewWidth.value = clampPreviewWidth(stageRight - moveEvent.clientX);
+    layoutVisibleEditors();
+  };
+  const stop = () => {
+    previewResizing.value = false;
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+    nextTick(layoutVisibleEditors);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", stop);
+  window.addEventListener("pointercancel", stop);
+  move(event);
+}
+
+function clampPreviewWidth(value) {
+  return Math.max(PREVIEW_MIN_WIDTH, Math.min(PREVIEW_MAX_WIDTH, Math.round(Number(value) || DEFAULT_PREVIEW_WIDTH)));
 }
 
 async function triggerAiCompletion() {
@@ -4079,17 +4115,20 @@ function loadSettings() {
   try {
     const imported = readSettingsFromUrl();
     const saved = imported || JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    const shortcuts = { ...vscodeShortcuts, ...(saved.shortcuts || {}) };
-    const ai = { ...defaultAiSettings, ...(saved.ai || {}) };
-    const backend = { ...defaultBackendSettings, ...(saved.backend || {}) };
-    const ssh = { ...defaultSshSettings, ...(saved.ssh || {}) };
+    const savedSettings = { ...saved };
+    delete savedSettings.sidebarWidth;
+    delete savedSettings.previewWidth;
+    const shortcuts = { ...vscodeShortcuts, ...(savedSettings.shortcuts || {}) };
+    const ai = { ...defaultAiSettings, ...(savedSettings.ai || {}) };
+    const backend = { ...defaultBackendSettings, ...(savedSettings.backend || {}) };
+    const ssh = { ...defaultSshSettings, ...(savedSettings.ssh || {}) };
     if (!aiReasoningEfforts.includes(ai.reasoningEffort)) ai.reasoningEffort = defaultAiSettings.reasoningEffort;
     backend.enabled = Boolean(backend.enabled);
     backend.baseUrl = normalizeBackendBaseUrlValue(backend.baseUrl) || defaultBackendSettings.baseUrl;
     if (!sshTerminalThemes[ssh.terminalTheme]) ssh.terminalTheme = defaultSshSettings.terminalTheme;
     ssh.whitelistTemplate = String(ssh.whitelistTemplate || DEFAULT_SSH_WHITELIST_TEMPLATE).trim();
     ssh.connections = Array.isArray(ssh.connections) ? ssh.connections.map(normalizeStoredSshConfig).filter(Boolean) : [];
-    const loaded = { ...defaultSettings, ...saved, sidebarWidth: clampSidebarWidth(saved.sidebarWidth), shortcuts, ai, backend, ssh };
+    const loaded = { ...defaultSettings, ...savedSettings, shortcuts, ai, backend, ssh };
     if (imported) localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
     return loaded;
   } catch {
@@ -4882,6 +4921,7 @@ function getTreeIconClass(node, collapsed = false) {
   --shadow: rgb(0 0 0 / 40%);
   --folder-icon: #dcb67a;
   --file-icon: #c5c5c5;
+  --preview-pane-size: min(var(--preview-pane-width, 480px), calc(100% - 160px));
   display: grid;
   grid-template-columns: 48px minmax(0, var(--side-panel-width, 300px)) minmax(0, 1fr);
   width: 100vw;
@@ -5139,8 +5179,12 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .ssh-terminal-host .terminal { height: 100%; }
 .code-editor-view .ssh-terminal-fallback { min-width: 0; min-height: 0; margin: 0; overflow: auto; padding: 10px 12px; background: var(--editor); color: var(--text); font-family: Consolas, 'Courier New', monospace; font-size: 13px; line-height: 1.45; white-space: pre-wrap; }
 .code-editor-view .editor-stage.preview-open .monaco-host.visible,
-.code-editor-view .editor-stage.preview-open .unsupported-preview { right: min(480px, 42vw); }
-.code-editor-view .preview-pane { position: absolute; inset: 0 0 0 auto; z-index: 4; display: grid; grid-template-rows: 34px minmax(0, 1fr); width: min(480px, 42vw); border-left: 1px solid var(--border); background: var(--editor); color: var(--text); box-shadow: -12px 0 24px rgb(0 0 0 / 14%); }
+.code-editor-view .editor-stage.preview-open .unsupported-preview { right: var(--preview-pane-size); }
+.code-editor-view .preview-pane { position: absolute; inset: 0 0 0 auto; z-index: 4; display: grid; grid-template-rows: 34px minmax(0, 1fr); width: var(--preview-pane-size); border-left: 1px solid var(--border); background: var(--editor); color: var(--text); box-shadow: -12px 0 24px rgb(0 0 0 / 14%); }
+.code-editor-view .preview-pane-resizer { position: absolute; top: 0; left: -3px; z-index: 6; width: 6px; height: 100%; background: transparent; cursor: col-resize; }
+.code-editor-view .preview-pane-resizer:hover,
+.code-editor-view.preview-resizing .preview-pane-resizer { background: var(--accent); opacity: 0.35; }
+.code-editor-view.preview-resizing .preview-frame { pointer-events: none; }
 .code-editor-view .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 12px; font-weight: 600; }
 .code-editor-view .preview-content { min-height: 0; overflow: auto; padding: 18px; background: var(--editor); color: var(--text); }
 .code-editor-view .markdown-preview { font-size: 14px; line-height: 1.55; }
@@ -5207,6 +5251,7 @@ function getTreeIconClass(node, collapsed = false) {
   .code-editor-view .editor-stage.preview-open .monaco-host.visible,
   .code-editor-view .editor-stage.preview-open .unsupported-preview { right: 0; bottom: 45%; }
   .code-editor-view .preview-pane { inset: auto 0 0 0; width: auto; height: 45%; border-top: 1px solid var(--border); border-left: 0; box-shadow: 0 -12px 24px rgb(0 0 0 / 14%); }
+  .code-editor-view .preview-pane-resizer { display: none; }
   .code-editor-view .editor-dialog-actions { flex-direction: column-reverse; }
   .code-editor-view .editor-dialog-actions button { width: 100%; }
 }
