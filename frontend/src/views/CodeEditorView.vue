@@ -4545,7 +4545,20 @@ function aiToolGetSshConnections() {
 async function aiToolOpenSshConnection(identifier) {
   const config = getAiExposedSshConfig(identifier);
   const session = await connectSshConfig(config);
+  await waitForSshSessionConnected(session);
   return { summary: `Opened SSH connection ${config.name || config.host}`, connection: formatAiSshConnection(config, session) };
+}
+
+async function waitForSshSessionConnected(session, timeoutMs = SSH_CONNECT_TIMEOUT_MS) {
+  if (!session) throw new Error(tr("ssh.disconnected"));
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (session.connected) return session;
+    if (session.connectFailed) throw new Error(tr("ssh.connectFailed"));
+    if (session.closing || session.ws?.readyState === WebSocket.CLOSED) throw new Error(tr("ssh.disconnected"));
+    await delay(100);
+  }
+  throw new Error(tr("ssh.connectFailed"));
 }
 
 function aiToolActivateSshTerminal(identifier) {
