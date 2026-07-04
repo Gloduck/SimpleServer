@@ -129,7 +129,7 @@ jobs:
           fi
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             command -v cl.exe
-            cl.exe /Bv
+            cl.exe -Bv
             command -v link.exe
           fi
 
