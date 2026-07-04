@@ -204,6 +204,28 @@
           <strong>{{ tr('ssh.disabledTitle') }}</strong>
           <small>{{ tr('ssh.disabledDescription') }}</small>
         </div>
+        <section class="sftp-task-panel">
+          <button type="button" class="sftp-task-toggle" @click="sftpTasksCollapsed = !sftpTasksCollapsed">
+            <span>{{ tr('sftp.tasks') }} · {{ sftpTasks.length }}</span>
+            <span class="codicon" :class="sftpTasksCollapsed ? 'codicon-chevron-right' : 'codicon-chevron-down'" aria-hidden="true"></span>
+          </button>
+          <div v-if="!sftpTasksCollapsed" class="sftp-task-list">
+            <div v-if="sftpTasks.length === 0" class="workspace-card">{{ tr('sftp.noTasks') }}</div>
+            <article v-for="task in sftpTasks" :key="task.id" class="sftp-task-card" :class="`sftp-task-${task.status}`">
+              <div class="sftp-task-main">
+                <strong>{{ tr(task.type === 'upload' ? 'sftp.upload' : 'sftp.download') }} · {{ task.connectionName }}</strong>
+                <small>{{ task.localPath }} ⇄ {{ task.remotePath }}</small>
+              </div>
+              <div class="sftp-task-meta">
+                <span>{{ tr(`sftp.status.${task.status}`) }}</span>
+                <span>{{ formatSftpTaskProgress(task) }}</span>
+              </div>
+              <progress :value="task.total ? task.loaded : 0" :max="task.total || 1"></progress>
+              <p v-if="task.error" class="sftp-task-error">{{ task.error }}</p>
+              <button type="button" class="small-button" :disabled="!canCancelSftpTask(task)" @click="cancelSftpTask(task.id)">{{ tr('sftp.cancel') }}</button>
+            </article>
+          </div>
+        </section>
         <div class="ssh-list">
           <div v-if="settings.ssh.connections.length === 0" class="workspace-card">{{ tr('ssh.empty') }}</div>
           <article v-for="connection in settings.ssh.connections" :key="connection.id" class="ssh-card" :class="{ active: isSshConnected(connection.id) }">
@@ -221,6 +243,8 @@
             <div class="ssh-card-actions">
               <button type="button" :disabled="!sshFeatureEnabled || isSshConnected(connection.id)" @click="connectSshConfig(connection)">{{ tr('ssh.connect') }}</button>
               <button type="button" :disabled="!isSshConnected(connection.id)" @click="disconnectSshConfig(connection.id)">{{ tr('ssh.disconnect') }}</button>
+              <button type="button" :disabled="!sshFeatureEnabled || !isWorkspaceLoaded()" @click="openSftpDialog('upload', connection)">{{ tr('sftp.upload') }}</button>
+              <button type="button" :disabled="!sshFeatureEnabled || !isWorkspaceLoaded()" @click="openSftpDialog('download', connection)">{{ tr('sftp.download') }}</button>
               <button type="button" :disabled="!sshFeatureEnabled" @click="openEditSshDialog(connection)">{{ tr('ssh.edit') }}</button>
               <button type="button" class="danger" :disabled="isSshConnected(connection.id)" @click="deleteSshConfig(connection.id)">{{ tr('ssh.delete') }}</button>
             </div>
@@ -538,6 +562,32 @@
         </div>
       </form>
     </div>
+
+    <div v-if="sftpDialog.visible" class="editor-dialog-backdrop" role="presentation" @click.self="closeSftpDialog">
+      <form class="editor-dialog sftp-dialog" role="dialog" aria-modal="true" aria-labelledby="sftp-dialog-title" @submit.prevent="submitSftpDialog" @keydown.esc.prevent.stop="closeSftpDialog" @click.stop>
+        <div class="editor-dialog-header">
+          <span class="codicon" :class="sftpDialog.mode === 'upload' ? 'codicon-cloud-upload' : 'codicon-cloud-download'" aria-hidden="true"></span>
+          <h2 id="sftp-dialog-title">{{ tr(sftpDialog.mode === 'upload' ? 'sftp.uploadTitle' : 'sftp.downloadTitle') }}</h2>
+        </div>
+        <p class="editor-dialog-message">{{ tr('sftp.dialogHint', { name: sftpDialog.connectionName }) }}</p>
+        <label class="setting-row">
+          <span>{{ tr('sftp.localPath') }}</span>
+          <input v-model="sftpDialog.localPath" required autocomplete="off" spellcheck="false" :placeholder="tr('sftp.localPathPlaceholder')" />
+        </label>
+        <label class="setting-row">
+          <span>{{ tr('sftp.remotePath') }}</span>
+          <input v-model="sftpDialog.remotePath" required autocomplete="off" spellcheck="false" placeholder="/tmp/file.bin" />
+        </label>
+        <label v-if="sftpDialog.mode === 'upload'" class="setting-row checkbox-row">
+          <input v-model="sftpDialog.useUnsaved" type="checkbox" />
+          <span>{{ tr('sftp.useUnsaved') }}</span>
+        </label>
+        <div class="editor-dialog-actions">
+          <button type="button" @click="closeSftpDialog">{{ tr('dialog.cancel') }}</button>
+          <button type="submit" class="primary">{{ tr(sftpDialog.mode === 'upload' ? 'sftp.upload' : 'sftp.download') }}</button>
+        </div>
+      </form>
+    </div>
   </div>
 </template>
 
@@ -555,6 +605,8 @@ const STORAGE_KEY = "browser-code-editor-settings";
 const SETTINGS_URL_PARAM = "settings";
 const REQUEST_PROXY_PATH = "/api/requestProxy";
 const SSH_WEBSOCKET_PATH = "/api/ssh/ws";
+const SFTP_UPLOAD_PATH = "/api/ssh/sftp/upload";
+const SFTP_DOWNLOAD_PATH = "/api/ssh/sftp/download";
 CdnUtils.loadCodicons().catch((error) => console.error("Failed to load codicons:", error));
 const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", preview: "Ctrl+Shift+V", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Shift+Enter" };
 const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
@@ -827,6 +879,30 @@ const messages = {
     "ssh.error.commandReasonRequired": "AI 执行 SSH 命令时必须说明用途。",
     "ssh.error.commandListRequired": "AI 执行 SSH 命令时必须提供主命令列表。",
     "ssh.error.commandRejected": "SSH 命令授权已拒绝。",
+    "sftp.upload": "上传",
+    "sftp.download": "下载",
+    "sftp.uploadTitle": "上传文件到服务器",
+    "sftp.downloadTitle": "从服务器下载文件",
+    "sftp.dialogHint": "连接：{name}。本地路径是当前工作区内的相对路径。",
+    "sftp.localPath": "本地路径",
+    "sftp.remotePath": "远程路径",
+    "sftp.localPathPlaceholder": "例如 dist/app.zip",
+    "sftp.useUnsaved": "上传未保存的修改内容",
+    "sftp.tasks": "文件传输",
+    "sftp.noTasks": "暂无文件传输任务。",
+    "sftp.cancel": "取消任务",
+    "sftp.status.running": "进行中",
+    "sftp.status.completed": "已完成",
+    "sftp.status.failed": "失败",
+    "sftp.status.cancelled": "已取消",
+    "sftp.uploadStarted": "已开始上传 {path}",
+    "sftp.downloadStarted": "已开始下载 {path}",
+    "sftp.uploadCompleted": "上传完成 {path}",
+    "sftp.downloadCompleted": "下载完成 {path}",
+    "sftp.cancelled": "传输已取消",
+    "sftp.error.workspaceRequired": "请先打开工作区。",
+    "sftp.error.connectionMissing": "SSH 设置不存在。",
+    "sftp.error.backendResponse": "后端返回异常。",
     "menu.fileTree": "文件树菜单",
     "menu.changes": "变更菜单",
     "menu.editor": "编辑器菜单",
@@ -844,7 +920,7 @@ const messages = {
     "confirm.revert": "确定回滚“{path}”的未保存修改吗？",
     "confirm.revertSelected": "确定回滚所选 {count} 个未保存变更吗？",
     "confirm.deleteAiSession": "确定删除当前 AI 会话吗？此操作不会回滚文件修改。",
-    "confirm.leaveWithSsh": "当前存在未保存内容或活跃 SSH 连接，离开后 SSH 连接会被断开。确定离开吗？",
+    "confirm.leaveWithSsh": "当前存在未保存内容、活跃 SSH 连接或正在进行的文件传输，离开后 SSH 连接和文件传输会被中断。确定离开吗？",
     "imagePreview.aria": "图片预览",
     "imagePreview.type": "图片",
     "unsupportedFile.aria": "不支持文件预览",
@@ -1096,6 +1172,30 @@ const messages = {
     "ssh.error.commandReasonRequired": "AI must explain the purpose before running SSH commands.",
     "ssh.error.commandListRequired": "AI must provide a main-command list before running SSH commands.",
     "ssh.error.commandRejected": "SSH command approval was rejected.",
+    "sftp.upload": "Upload",
+    "sftp.download": "Download",
+    "sftp.uploadTitle": "Upload File to Server",
+    "sftp.downloadTitle": "Download File from Server",
+    "sftp.dialogHint": "Connection: {name}. Local path is relative to the current workspace.",
+    "sftp.localPath": "Local Path",
+    "sftp.remotePath": "Remote Path",
+    "sftp.localPathPlaceholder": "For example dist/app.zip",
+    "sftp.useUnsaved": "Upload unsaved modified content",
+    "sftp.tasks": "File Transfers",
+    "sftp.noTasks": "No file transfer tasks yet.",
+    "sftp.cancel": "Cancel Task",
+    "sftp.status.running": "Running",
+    "sftp.status.completed": "Completed",
+    "sftp.status.failed": "Failed",
+    "sftp.status.cancelled": "Cancelled",
+    "sftp.uploadStarted": "Started uploading {path}",
+    "sftp.downloadStarted": "Started downloading {path}",
+    "sftp.uploadCompleted": "Upload completed {path}",
+    "sftp.downloadCompleted": "Download completed {path}",
+    "sftp.cancelled": "Transfer cancelled",
+    "sftp.error.workspaceRequired": "Open a workspace first.",
+    "sftp.error.connectionMissing": "SSH setting does not exist.",
+    "sftp.error.backendResponse": "Backend returned an error.",
     "menu.fileTree": "File tree menu",
     "menu.changes": "Changes menu",
     "menu.editor": "Editor menu",
@@ -1113,7 +1213,7 @@ const messages = {
     "confirm.revert": "Revert unsaved changes in “{path}”?",
     "confirm.revertSelected": "Revert {count} selected unsaved change(s)?",
     "confirm.deleteAiSession": "Delete the current AI session? This will not revert file changes.",
-    "confirm.leaveWithSsh": "There are unsaved changes or active SSH connections. SSH connections will be disconnected if you leave. Leave this page?",
+    "confirm.leaveWithSsh": "There are unsaved changes, active SSH connections, or running file transfers. SSH connections and file transfers will be interrupted if you leave. Leave this page?",
     "imagePreview.aria": "Image Preview",
     "imagePreview.type": "Image",
     "unsupportedFile.aria": "Unsupported File Preview",
@@ -1254,6 +1354,9 @@ const sshSessions = reactive(new Map());
 const activeSshTerminalId = ref("");
 const sshRevision = ref(0);
 const sshDialog = reactive({ visible: false, mode: "create", draft: createSshDraft() });
+const sftpDialog = reactive({ visible: false, mode: "upload", connectionId: "", connectionName: "", localPath: "", remotePath: "", useUnsaved: true });
+const sftpTasks = reactive([]);
+const sftpTasksCollapsed = ref(true);
 let disableEditorPwa = null;
 let aiSessionSerial = 0;
 const aiSessions = reactive([createAiSession()]);
@@ -1967,6 +2070,324 @@ function buildSshWebSocketUrl() {
   const securityKey = String(settings.ssh.securityKey || "").trim();
   if (securityKey) base.searchParams.set("securityKey", securityKey);
   return base.href;
+}
+
+function openSftpDialog(mode, connection) {
+  if (!connection) return;
+  Object.assign(sftpDialog, {
+    visible: true,
+    mode,
+    connectionId: connection.id,
+    connectionName: connection.name || connection.host,
+    localPath: activePath.value && mode === "upload" ? activePath.value : "",
+    remotePath: "",
+    useUnsaved: true,
+  });
+}
+
+function closeSftpDialog() {
+  sftpDialog.visible = false;
+}
+
+async function submitSftpDialog() {
+  const config = getSshConfigById(sftpDialog.connectionId);
+  if (!config) {
+    await showAlert(tr("sftp.error.connectionMissing"), { tone: "danger" });
+    return;
+  }
+  const options = {
+    localPath: sftpDialog.localPath,
+    remotePath: sftpDialog.remotePath,
+    useUnsaved: Boolean(sftpDialog.useUnsaved),
+  };
+  closeSftpDialog();
+  if (sftpDialog.mode === "upload") {
+    void submitSftpUpload(config, options).catch((error) => showAlert(error.message || String(error), { tone: "danger" }));
+  } else {
+    void submitSftpDownload(config, options).catch((error) => showAlert(error.message || String(error), { tone: "danger" }));
+  }
+}
+
+async function submitSftpUpload(config, { localPath, remotePath, useUnsaved = false } = {}) {
+  validateSftpReady();
+  const normalizedLocalPath = normalizeWorkspacePath(localPath);
+  const normalizedRemotePath = normalizeSftpRemotePath(remotePath);
+  const uploadSource = await getWorkspaceUploadSource(normalizedLocalPath, useUnsaved);
+  const task = createSftpTask("upload", config, normalizedLocalPath, normalizedRemotePath, uploadSource.size);
+  setStatus(tr("sftp.uploadStarted", { path: normalizedLocalPath }), normalizedRemotePath);
+  void runSftpUploadTask(task, config, normalizedLocalPath, normalizedRemotePath, uploadSource);
+  return formatSftpTaskForTool(task, "SFTP upload submitted");
+}
+
+async function runSftpUploadTask(task, config, normalizedLocalPath, normalizedRemotePath, uploadSource) {
+  try {
+    const result = await uploadSftpBody(config, normalizedRemotePath, uploadSource.body, uploadSource.size, task, task.signal);
+    completeSftpTask(task, uploadSource.size);
+    setStatus(tr("sftp.uploadCompleted", { path: normalizedLocalPath }), normalizedRemotePath);
+    return { summary: `Uploaded ${normalizedLocalPath} to ${normalizedRemotePath}`, local_path: normalizedLocalPath, remote_path: normalizedRemotePath, size: result?.data?.size ?? uploadSource.size, result };
+  } catch (error) {
+    failSftpTask(task, error);
+    console.error("SFTP upload failed", error);
+  }
+}
+
+async function submitSftpDownload(config, { localPath, remotePath } = {}) {
+  validateSftpReady();
+  const normalizedLocalPath = normalizeWorkspacePath(localPath);
+  const normalizedRemotePath = normalizeSftpRemotePath(remotePath);
+  const task = createSftpTask("download", config, normalizedLocalPath, normalizedRemotePath, 0);
+  setStatus(tr("sftp.downloadStarted", { path: normalizedRemotePath }), normalizedLocalPath);
+  void runSftpDownloadTask(task, config, normalizedLocalPath, normalizedRemotePath);
+  return formatSftpTaskForTool(task, "SFTP download submitted");
+}
+
+async function runSftpDownloadTask(task, config, normalizedLocalPath, normalizedRemotePath) {
+  try {
+    const size = await downloadSftpToWorkspace(config, normalizedRemotePath, normalizedLocalPath, task, task.signal);
+    completeSftpTask(task, size);
+    await refreshTree();
+    setStatus(tr("sftp.downloadCompleted", { path: normalizedRemotePath }), normalizedLocalPath);
+    return { summary: `Downloaded ${normalizedRemotePath} to ${normalizedLocalPath}`, local_path: normalizedLocalPath, remote_path: normalizedRemotePath, size };
+  } catch (error) {
+    failSftpTask(task, error);
+    console.error("SFTP download failed", error);
+  }
+}
+
+function validateSftpReady() {
+  validateBackendEnabled();
+  if (!isWorkspaceLoaded()) throw new Error(tr("sftp.error.workspaceRequired"));
+}
+
+function normalizeSftpRemotePath(path) {
+  const value = String(path || "").trim();
+  if (!value || value.endsWith("/")) throw new Error("remotePath is required");
+  return value;
+}
+
+async function getWorkspaceUploadSource(path, useUnsaved) {
+  const opened = openFiles.get(path);
+  if (useUnsaved && opened?.dirty && isTextFileState(opened) && !opened.deleted) {
+    const body = new Blob([opened.model.getValue()], { type: getPreviewMimeType(opened) });
+    return { body, size: body.size };
+  }
+  if (opened?.handle && !opened.deleted) {
+    const diskFile = await opened.handle.getFile();
+    return { body: diskFile, size: diskFile.size };
+  }
+  if (opened?.isNew && !opened.handle) throw new Error(`File has no saved disk content: ${path}`);
+  const node = findNodeByPath(tree.value, path);
+  if (!node || node.kind !== "file" || !node.handle) throw new Error(`File not found: ${path}`);
+  const diskFile = await node.handle.getFile();
+  return { body: diskFile, size: diskFile.size };
+}
+
+function createSftpTask(type, config, localPath, remotePath, total = 0) {
+  const controller = new AbortController();
+  const task = reactive({
+    id: `sftp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type,
+    connectionId: config.id,
+    connectionName: config.name || config.host,
+    localPath,
+    remotePath,
+    status: "running",
+    loaded: 0,
+    total: Number(total) || 0,
+    error: "",
+    signal: controller.signal,
+    cancel: () => controller.abort(),
+  });
+  sftpTasks.unshift(task);
+  return task;
+}
+
+function completeSftpTask(task, total = task.total) {
+  if (task.status === "cancelled") return;
+  task.status = "completed";
+  task.loaded = Number(total) || task.loaded;
+  task.total = Number(total) || task.total || task.loaded;
+  task.cancel = null;
+}
+
+function failSftpTask(task, error) {
+  if (task.status === "cancelled") return;
+  if (error?.name === "AbortError") {
+    task.status = "cancelled";
+    task.error = tr("sftp.cancelled");
+  } else {
+    task.status = "failed";
+    task.error = error?.message || String(error);
+  }
+  task.cancel = null;
+}
+
+function formatSftpTaskForTool(task, summary = "SFTP task") {
+  return {
+    summary: `${summary}: ${task.id}`,
+    task_id: task.id,
+    type: task.type,
+    status: task.status,
+    connection: task.connectionName,
+    local_path: task.localPath,
+    remote_path: task.remotePath,
+    loaded: task.loaded,
+    total: task.total,
+    progress: task.total ? Math.max(0, Math.min(100, Math.round((task.loaded / task.total) * 100))) : null,
+    error: task.error || "",
+  };
+}
+
+function cancelSftpTask(taskId) {
+  const task = sftpTasks.find((item) => item.id === taskId);
+  if (!task || !canCancelSftpTask(task)) return;
+  task.status = "cancelled";
+  task.error = tr("sftp.cancelled");
+  task.cancel?.();
+  task.cancel = null;
+}
+
+function canCancelSftpTask(task) {
+  return task?.status === "running" && typeof task.cancel === "function";
+}
+
+function formatSftpTaskProgress(task) {
+  const loaded = FileUtils.formatFileSize(task.loaded || 0);
+  if (!task.total) return loaded;
+  const total = FileUtils.formatFileSize(task.total);
+  const percent = Math.max(0, Math.min(100, Math.round((task.loaded / task.total) * 100)));
+  return `${loaded} / ${total} · ${percent}%`;
+}
+
+function uploadSftpBody(config, remotePath, body, size, task, externalSignal) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const url = buildSftpUrl(SFTP_UPLOAD_PATH, { remotePath, createDirs: "true" });
+    let aborted = false;
+    const abort = () => {
+      aborted = true;
+      xhr.abort();
+    };
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        reject(Object.assign(new Error(tr("sftp.cancelled")), { name: "AbortError" }));
+        return;
+      }
+      externalSignal.addEventListener("abort", abort, { once: true });
+    }
+    xhr.open("POST", url.href);
+    xhr.responseType = "text";
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    applySftpHeaders(xhr, config);
+    task.total = Number(size) || 0;
+    xhr.upload.onprogress = (event) => {
+      task.loaded = event.loaded;
+      if (event.lengthComputable) task.total = event.total;
+    };
+    xhr.onload = () => {
+      if (externalSignal) externalSignal.removeEventListener("abort", abort);
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(`${xhr.status} ${xhr.statusText}`));
+        return;
+      }
+      try {
+        resolve(parseBackendResult(xhr.responseText));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    xhr.onerror = () => {
+      if (externalSignal) externalSignal.removeEventListener("abort", abort);
+      reject(new Error("SFTP upload request failed"));
+    };
+    xhr.onabort = () => {
+      if (externalSignal) externalSignal.removeEventListener("abort", abort);
+      reject(Object.assign(new Error(tr("sftp.cancelled")), { name: aborted ? "AbortError" : "Error" }));
+    };
+    xhr.send(body);
+  });
+}
+
+async function downloadSftpToWorkspace(config, remotePath, localPath, task, externalSignal) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) abort();
+    externalSignal.addEventListener("abort", abort, { once: true });
+  }
+  let writable = null;
+  try {
+    const response = await fetch(buildSftpUrl(SFTP_DOWNLOAD_PATH, { remotePath }), {
+      method: "GET",
+      headers: buildSftpHeaders(config),
+      credentials: "omit",
+      signal: controller.signal,
+    });
+    if (response.headers.get("content-type")?.includes("application/json")) {
+      parseBackendResult(await response.text());
+    }
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    task.total = Number(response.headers.get("content-length")) || 0;
+    const handle = await getFileHandleForPath(localPath, true);
+    writable = await handle.createWritable();
+    if (!response.body) {
+      const blob = await response.blob();
+      await writable.write(blob);
+      task.loaded = blob.size;
+      return blob.size;
+    }
+    const reader = response.body.getReader();
+    let loaded = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      await writable.write(value);
+      loaded += value.byteLength;
+      task.loaded = loaded;
+    }
+    await writable.close();
+    writable = null;
+    return loaded;
+  } catch (error) {
+    if (writable) await writable.abort().catch(() => {});
+    throw error;
+  } finally {
+    if (externalSignal) externalSignal.removeEventListener("abort", abort);
+  }
+}
+
+function buildSftpUrl(path, params = {}) {
+  const url = new URL(`${getBackendBaseUrl()}${path}`);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value != null && value !== "") url.searchParams.set(key, String(value));
+  });
+  return url;
+}
+
+function buildSftpHeaders(config) {
+  const headers = new Headers();
+  const securityKey = String(settings.ssh.securityKey || "").trim();
+  if (securityKey) headers.set("X-Ssh-Security-Key", securityKey);
+  headers.set("X-Ssh-Connect", encodeSshConnectHeader(buildSshConnectPayload(normalizeSshConfig(config))));
+  return headers;
+}
+
+function applySftpHeaders(xhr, config) {
+  buildSftpHeaders(config).forEach((value, name) => xhr.setRequestHeader(name, value));
+}
+
+function encodeSshConnectHeader(payload) {
+  const json = JSON.stringify(payload);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function parseBackendResult(text) {
+  const result = JSON.parse(text || "{}");
+  if (result.code !== 200) throw new Error(result.msg || tr("sftp.error.backendResponse"));
+  return result;
 }
 
 function handleSshWebSocketMessage(session, raw) {
@@ -3576,6 +3997,7 @@ function getAgentInstructions() {
     "Prefer small, targeted edits. Explain changed files briefly after tool work is complete; do not paste whole modified files in chat.",
     "When request_proxy is available, use it for external HTTP resources that may be blocked by browser CORS.",
     "When SSH tools are available, they are only for SSH settings explicitly exposed to AI. When using execute_ssh_command, provide a clear reason, a commands array containing only every main command used by the shell command, and a high_risk boolean based on your risk assessment. List every SSH command you ran in your final answer. Main commands outside each setting's whitelist require user approval; high_risk=true requires approval even if whitelisted.",
+    "When using SFTP tools, local_path is always a path relative to the currently opened browser workspace, never an absolute path, URL, SSH path, or server path. For upload, local_path names the workspace file to read; remote_path names the destination path on the SSH server. For download, remote_path names the source file on the SSH server; local_path names the workspace-relative destination file. If you are unsure of the workspace path, use list_files or ask the user before starting the transfer.",
   ];
   const agentsMd = getRootAgentsMdContent();
   if (agentsMd) instructions.push(formatAgentsMdInstructions(agentsMd));
@@ -3772,7 +4194,7 @@ function getAiFileToolDefinitions() {
 }
 
 function getAiSshToolDefinitions() {
-  return addAiToolRequirements([
+  const sshTools = addAiToolRequirements([
     { type: "function", name: "get_ssh_connections", description: "Get SSH settings exposed to AI, including name, host, port, active state, and command whitelist. Secrets are never returned.", parameters: { type: "object", properties: {} } },
     { type: "function", name: "open_ssh_connection", description: "Open an exposed SSH connection by id, name, or host. The backend SSH WebSocket performs the actual SSH connection.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "activate_ssh_terminal", description: "Switch the visible editor tab to an already active exposed SSH terminal by id, name, or host. Does not execute any SSH command.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
@@ -3780,6 +4202,13 @@ function getAiSshToolDefinitions() {
     { type: "function", name: "read_ssh_output", description: "Read recent output from an active exposed SSH connection.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, max_chars: { type: "number", description: "Maximum output characters. Defaults to 20000." } }, required: ["connection"] } },
     { type: "function", name: "execute_ssh_command", description: "Execute a command on an active exposed SSH connection. The AI must provide a reason, commands array containing only every main command used by the shell command, and high_risk based on its own risk assessment. Main commands outside the whitelist require approval; high_risk=true always requires approval.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, command: { type: "string" }, commands: { type: "array", items: { type: "string" }, description: "Required list of main commands used by command, excluding arguments. Include every command in chains, pipes, and substitutions. Example: for 'ls -la && whoami', pass ['ls','whoami']." }, high_risk: { type: "boolean", description: "Required. AI-assessed risk flag. Set true if the command may modify files/system state, affect services, expose secrets, consume significant resources, or otherwise be risky." }, reason: { type: "string", description: "Required explanation of why this SSH command is needed." } }, required: ["connection", "command", "commands", "high_risk", "reason"] } },
   ], ["backend", "ssh_exposed"]);
+  const sftpTools = addAiToolRequirements([
+    { type: "function", name: "sftp_upload_file", description: "Submit a background upload of one file from the current browser workspace to an exposed SSH server using SFTP. local_path must be relative to the current workspace, such as 'dist/app.zip' or 'src/main.js'; never pass '/home/...', 'C:\\...', URLs, or remote server paths as local_path. remote_path is the destination path on the SSH server. Missing remote parent directories are created automatically. When use_unsaved is true and the file is an open dirty text file, upload the unsaved editor content instead of disk content.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, local_path: { type: "string", description: "Workspace-relative local file path only." }, remote_path: { type: "string", description: "Destination file path on the SSH server." }, use_unsaved: { type: "boolean", description: "Upload unsaved dirty editor content when available. Defaults to true." } }, required: ["connection", "local_path", "remote_path"] } },
+    { type: "function", name: "sftp_download_file", description: "Submit a background download of one SSH server file into the current browser workspace using SFTP. remote_path is the source file path on the SSH server. local_path must be the destination path relative to the current workspace, such as 'downloads/app.zip'; never pass '/home/...', 'C:\\...', URLs, or remote server paths as local_path. Parent directories in the workspace are created automatically.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, remote_path: { type: "string", description: "Source file path on the SSH server." }, local_path: { type: "string", description: "Workspace-relative local destination path only." } }, required: ["connection", "remote_path", "local_path"] } },
+    { type: "function", name: "sftp_list_tasks", description: "List SFTP upload/download tasks submitted from the current page, including progress and status.", parameters: { type: "object", properties: { status: { type: "string", description: "Optional status filter: running, completed, failed, or cancelled." } } } },
+    { type: "function", name: "sftp_cancel_task", description: "Cancel a running SFTP upload/download task by task_id.", parameters: { type: "object", properties: { task_id: { type: "string", description: "Task id returned by sftp_upload_file, sftp_download_file, or sftp_list_tasks." } }, required: ["task_id"] } },
+  ], ["backend", "ssh_exposed", "workspace"]);
+  return [...sshTools, ...sftpTools];
 }
 
 function addAiToolRequirements(tools, requirements) {
@@ -3882,6 +4311,10 @@ async function runAiToolCall(call, args = {}, session = getActiveAiSession()) {
       case "activate_ssh_terminal": return okTool(aiToolActivateSshTerminal(args.connection));
       case "close_ssh_connection": return okTool(aiToolCloseSshConnection(args.connection));
       case "read_ssh_output": return okTool(aiToolReadSshOutput(args));
+      case "sftp_upload_file": return okTool(await aiToolSftpUploadFile(args));
+      case "sftp_download_file": return okTool(await aiToolSftpDownloadFile(args));
+      case "sftp_list_tasks": return okTool(aiToolSftpListTasks(args));
+      case "sftp_cancel_task": return okTool(aiToolSftpCancelTask(args));
       case "execute_ssh_command": return okTool(await aiToolExecuteSshCommand(args));
       case "get_current_file": return okTool(aiToolGetCurrentFile());
       case "replace_in_file": return okTool(await aiToolReplaceInFile(args, session));
@@ -4095,6 +4528,7 @@ function beforeUnload(event) {
 }
 
 function handlePageHide() {
+  cancelRunningSftpTasks();
   closeAllSshSessions({ disposeTerminal: true });
 }
 
@@ -4103,7 +4537,15 @@ function hasUnsavedFiles() {
 }
 
 function shouldConfirmLeaveEditor() {
-  return hasUnsavedFiles() || hasActiveSshSessions();
+  return hasUnsavedFiles() || hasActiveSshSessions() || hasRunningSftpTasks();
+}
+
+function hasRunningSftpTasks() {
+  return sftpTasks.some((task) => task.status === "running");
+}
+
+function cancelRunningSftpTasks() {
+  sftpTasks.filter((task) => task.status === "running").forEach((task) => cancelSftpTask(task.id));
 }
 
 function hasActiveSshSessions() {
@@ -4683,6 +5125,32 @@ function aiToolReadSshOutput({ connection, max_chars: maxChars = 20000 } = {}) {
   return { summary: `Read ${Math.min(output.length, limit)} SSH output chars from ${config.name || config.host}`, connection: formatAiSshConnection(config, session), truncated: output.length > limit, output: output.slice(-limit) };
 }
 
+async function aiToolSftpUploadFile({ connection, local_path: localPath, remote_path: remotePath, use_unsaved: useUnsaved = true } = {}) {
+  const config = getAiExposedSshConfig(connection);
+  return submitSftpUpload(config, { localPath, remotePath, useUnsaved });
+}
+
+async function aiToolSftpDownloadFile({ connection, remote_path: remotePath, local_path: localPath } = {}) {
+  const config = getAiExposedSshConfig(connection);
+  return submitSftpDownload(config, { localPath, remotePath });
+}
+
+function aiToolSftpListTasks({ status } = {}) {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  const tasks = sftpTasks
+    .filter((task) => !normalizedStatus || task.status === normalizedStatus)
+    .map((task) => formatSftpTaskForTool(task, `${task.type} ${task.status}`));
+  return { summary: `${tasks.length} SFTP task(s)`, tasks };
+}
+
+function aiToolSftpCancelTask({ task_id: taskId } = {}) {
+  const task = sftpTasks.find((item) => item.id === String(taskId || ""));
+  if (!task) throw new Error(`SFTP task not found: ${taskId}`);
+  if (!canCancelSftpTask(task)) return { ...formatSftpTaskForTool(task, "SFTP task is not running"), cancelled: false };
+  cancelSftpTask(task.id);
+  return { ...formatSftpTaskForTool(task, "SFTP task cancelled"), cancelled: true };
+}
+
 async function aiToolExecuteSshCommand({ connection, command, commands, high_risk: highRisk, reason } = {}) {
   const config = getAiExposedSshConfig(connection);
   const session = getActiveSshSessionForConfig(config);
@@ -5166,6 +5634,17 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .ssh-card-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .code-editor-view .ssh-card-actions button { padding: 5px 7px; font-size: 12px; }
 .code-editor-view .ssh-card-actions .danger { color: #ffb3b3; }
+.code-editor-view .sftp-task-panel { display: grid; flex: 0 0 auto; gap: 6px; padding: 0 12px 12px; }
+.code-editor-view .sftp-task-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 7px 9px; background: var(--panel-soft); color: var(--text); font-size: 12px; }
+.code-editor-view .sftp-task-list { display: grid; max-height: min(360px, 40vh); overflow: auto; gap: 8px; padding-right: 2px; }
+.code-editor-view .sftp-task-card { display: grid; gap: 6px; padding: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-soft); }
+.code-editor-view .sftp-task-main { display: grid; min-width: 0; gap: 2px; }
+.code-editor-view .sftp-task-main strong { font-size: 12px; }
+.code-editor-view .sftp-task-main small { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.code-editor-view .sftp-task-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
+.code-editor-view .sftp-task-card progress { width: 100%; height: 8px; accent-color: var(--accent); }
+.code-editor-view .sftp-task-error { margin: 0; color: #ffb3b3; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+.code-editor-view .sftp-task-completed { border-color: color-mix(in srgb, var(--accent-strong) 45%, var(--border)); }
 .code-editor-view .ai-session-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 8px; padding: 0 12px 10px; }
 .code-editor-view .ai-session-select { display: grid; min-width: 0; gap: 5px; color: var(--muted); font-size: 12px; }
 .code-editor-view .ai-session-select select { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--input); color: var(--text); padding: 6px 7px; }

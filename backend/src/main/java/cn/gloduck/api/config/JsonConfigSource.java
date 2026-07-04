@@ -3,6 +3,7 @@ package cn.gloduck.api.config;
 import cn.gloduck.api.entity.config.LogConfig;
 import cn.gloduck.api.entity.config.ServerConfig;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.microprofile.config.spi.ConfigSource;
 
@@ -51,7 +52,9 @@ public class JsonConfigSource implements ConfigSource {
             Map<String, String> values = new LinkedHashMap<>();
             applyQuarkusDefaults(values);
 
-            applyConfigLogic(values, OBJECT_MAPPER.treeToValue(ConfigFileLoader.loadRootNode(), ServerConfig.class));
+            JsonNode rootNode = ConfigFileLoader.loadRootNode();
+            applyConfiguredQuarkusProperties(values, rootNode);
+            applyConfigLogic(values, OBJECT_MAPPER.treeToValue(rootNode, ServerConfig.class));
             return Collections.unmodifiableMap(values);
         } catch (Exception e) {
             throw new IllegalStateException("Failed to load " + ConfigFileLoader.CONFIG_FILE_NAME, e);
@@ -63,6 +66,16 @@ public class JsonConfigSource implements ConfigSource {
         values.put("quarkus.package.jar.type", "uber-jar");
         values.put("quarkus.banner.enabled", "false");
         values.put("quarkus.log.console.format", "%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p %s%e%n");
+    }
+
+    private void applyConfiguredQuarkusProperties(Map<String, String> values, JsonNode rootNode) {
+        if (rootNode == null) {
+            return;
+        }
+        JsonNode maxBodySize = rootNode.get("maxBodySize");
+        if (maxBodySize != null && !maxBodySize.isNull()) {
+            values.put("quarkus.http.limits.max-body-size", maxBodySize.asText());
+        }
     }
 
     private void applyConfigLogic(Map<String, String> values, ServerConfig serverConfig) {

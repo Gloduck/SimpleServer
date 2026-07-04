@@ -116,6 +116,14 @@ public class JschNativeRegistration implements Feature {
             "com.jcraft.jsch.jgss.GSSContextKrb5"
     };
 
+    // SFTP channel 和相关数据结构，openChannel("sftp") 通过 JSch 配置类名加载。
+    private static final String[] SFTP_CLASSES = {
+            "com.jcraft.jsch.ChannelSftp",
+            "com.jcraft.jsch.ChannelSession",
+            "com.jcraft.jsch.SftpATTRS",
+            "com.jcraft.jsch.SftpException"
+    };
+
     private static final String[][] REFLECTIVE_CLASS_GROUPS = {
             USER_AUTH_CLASSES,
             KEY_EXCHANGE_CLASSES,
@@ -127,7 +135,8 @@ public class JschNativeRegistration implements Feature {
             SIGNATURE_CLASSES,
             PRIVATE_KEY_KDF_CLASSES,
             COMPRESSION_CLASSES,
-            GSSAPI_CLASSES
+            GSSAPI_CLASSES,
+            SFTP_CLASSES
     };
 
     @Override

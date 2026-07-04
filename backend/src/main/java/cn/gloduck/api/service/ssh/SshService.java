@@ -3,16 +3,23 @@ package cn.gloduck.api.service.ssh;
 import cn.gloduck.api.entity.config.SshConfig;
 import cn.gloduck.api.entity.model.ssh.SshConnectRequest;
 import cn.gloduck.api.entity.model.ssh.SshConnectionInfo;
+import cn.gloduck.api.entity.model.ssh.SftpTransferResult;
 import cn.gloduck.api.exceptions.ApiException;
 import cn.gloduck.api.utils.StringUtils;
+import com.jcraft.jsch.ChannelSftp;
 import com.jcraft.jsch.ChannelShell;
 import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.SftpATTRS;
+import com.jcraft.jsch.SftpException;
 import com.jcraft.jsch.UIKeyboardInteractive;
 import com.jcraft.jsch.UserInfo;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 
+import java.io.FilterInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -79,22 +86,8 @@ public class SshService {
         com.jcraft.jsch.Session sshSession = null;
         ChannelShell channel = null;
         try {
-            JSch jsch = new JSch();
-            boolean privateKeyAuth = isPrivateKeyAuth(request.authType);
-            if (privateKeyAuth) {
-                byte[] keyBytes = request.privateKey.getBytes(StandardCharsets.UTF_8);
-                byte[] passphraseBytes = StringUtils.isNullOrEmpty(request.passphrase) ? null : request.passphrase.getBytes(StandardCharsets.UTF_8);
-                jsch.addIdentity("ssh-key-" + id, keyBytes, null, passphraseBytes);
-            }
-
             int port = request.port == null ? 22 : request.port;
-            sshSession = jsch.getSession(request.username, request.host, port);
-            sshSession.setConfig(sessionConfig(privateKeyAuth));
-            if (!privateKeyAuth) {
-                sshSession.setPassword(request.password);
-            }
-            sshSession.setUserInfo(new PasswordUserInfo(request.password, request.passphrase));
-            sshSession.connect(CONNECT_TIMEOUT_MILLIS);
+            sshSession = createSession(request, id);
 
             channel = (ChannelShell) sshSession.openChannel("shell");
             channel.setPty(true);
@@ -141,6 +134,64 @@ public class SshService {
                 sshSession.disconnect();
             }
             throw new ApiException("SSH connect failed: " + rootMessage(e), e);
+        }
+    }
+
+    public SftpTransferResult uploadSftp(SshConnectRequest request, String remotePath, boolean createDirs, InputStream input) {
+        validate(request);
+        validateRemotePath(remotePath);
+        if (input == null) {
+            throw new ApiException("upload body is required");
+        }
+
+        String tempPath = remotePath + ".uploading-" + UUID.randomUUID();
+        com.jcraft.jsch.Session session = null;
+        ChannelSftp sftp = null;
+        boolean renamed = false;
+        try {
+            session = createSession(request, UUID.randomUUID().toString());
+            sftp = openSftp(session);
+            if (createDirs) {
+                ensureRemoteDirectory(sftp, parentPath(remotePath));
+            }
+
+            CountingInputStream countingInput = new CountingInputStream(input);
+            sftp.put(countingInput, tempPath);
+            renameUploadedFile(sftp, tempPath, remotePath);
+            renamed = true;
+            return new SftpTransferResult(remotePath, countingInput.count(), "uploaded");
+        } catch (ApiException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ApiException("SFTP upload failed: " + rootMessage(e), e);
+        } finally {
+            if (!renamed) {
+                deleteQuietly(sftp, tempPath);
+            }
+            closeSftp(sftp, session);
+        }
+    }
+
+    public SftpDownload openSftpDownload(SshConnectRequest request, String remotePath) {
+        validate(request);
+        validateRemotePath(remotePath);
+
+        com.jcraft.jsch.Session session = null;
+        ChannelSftp sftp = null;
+        try {
+            session = createSession(request, UUID.randomUUID().toString());
+            sftp = openSftp(session);
+            SftpATTRS attrs = sftp.lstat(remotePath);
+            if (attrs.isDir()) {
+                throw new ApiException("remotePath is a directory");
+            }
+            return new SftpDownload(session, sftp, remotePath, attrs.getSize());
+        } catch (ApiException e) {
+            closeSftp(sftp, session);
+            throw e;
+        } catch (Exception e) {
+            closeSftp(sftp, session);
+            throw new ApiException("SFTP download failed: " + rootMessage(e), e);
         }
     }
 
@@ -214,6 +265,110 @@ public class SshService {
             throw new ApiException("SSH connection is not available");
         }
         return connection;
+    }
+
+    private com.jcraft.jsch.Session createSession(SshConnectRequest request, String identitySuffix) throws Exception {
+        JSch jsch = new JSch();
+        boolean privateKeyAuth = isPrivateKeyAuth(request.authType);
+        if (privateKeyAuth) {
+            byte[] keyBytes = request.privateKey.getBytes(StandardCharsets.UTF_8);
+            byte[] passphraseBytes = StringUtils.isNullOrEmpty(request.passphrase) ? null : request.passphrase.getBytes(StandardCharsets.UTF_8);
+            jsch.addIdentity("ssh-key-" + identitySuffix, keyBytes, null, passphraseBytes);
+        }
+
+        int port = request.port == null ? 22 : request.port;
+        com.jcraft.jsch.Session session = jsch.getSession(request.username, request.host, port);
+        session.setConfig(sessionConfig(privateKeyAuth));
+        if (!privateKeyAuth) {
+            session.setPassword(request.password);
+        }
+        session.setUserInfo(new PasswordUserInfo(request.password, request.passphrase));
+        session.connect(CONNECT_TIMEOUT_MILLIS);
+        return session;
+    }
+
+    private ChannelSftp openSftp(com.jcraft.jsch.Session session) throws Exception {
+        ChannelSftp sftp = (ChannelSftp) session.openChannel("sftp");
+        sftp.connect(CONNECT_TIMEOUT_MILLIS);
+        return sftp;
+    }
+
+    private void validateRemotePath(String remotePath) {
+        if (StringUtils.isNullOrEmpty(remotePath) || remotePath.isBlank()) {
+            throw new ApiException("remotePath is required");
+        }
+        if (remotePath.endsWith("/")) {
+            throw new ApiException("remotePath must be a file path");
+        }
+    }
+
+    private void ensureRemoteDirectory(ChannelSftp sftp, String directory) throws SftpException {
+        if (StringUtils.isNullOrEmpty(directory) || ".".equals(directory)) {
+            return;
+        }
+        String normalized = directory.replace('\\', '/');
+        String[] parts = normalized.split("/");
+        String current = normalized.startsWith("/") ? "/" : "";
+        for (String part : parts) {
+            if (part == null || part.isBlank() || ".".equals(part)) {
+                continue;
+            }
+            current = "/".equals(current) ? current + part : (current.isEmpty() ? part : current + "/" + part);
+            try {
+                SftpATTRS attrs = sftp.lstat(current);
+                if (!attrs.isDir()) {
+                    throw new ApiException("Remote path is not a directory: " + current);
+                }
+            } catch (SftpException e) {
+                if (e.id != ChannelSftp.SSH_FX_NO_SUCH_FILE) {
+                    throw e;
+                }
+                sftp.mkdir(current);
+            }
+        }
+    }
+
+    private String parentPath(String remotePath) {
+        String normalized = remotePath.replace('\\', '/');
+        int index = normalized.lastIndexOf('/');
+        if (index < 0) {
+            return ".";
+        }
+        if (index == 0) {
+            return "/";
+        }
+        return normalized.substring(0, index);
+    }
+
+    private void renameUploadedFile(ChannelSftp sftp, String tempPath, String remotePath) throws SftpException {
+        try {
+            sftp.rename(tempPath, remotePath);
+        } catch (SftpException firstError) {
+            deleteQuietly(sftp, remotePath);
+            sftp.rename(tempPath, remotePath);
+        }
+    }
+
+    private void deleteQuietly(ChannelSftp sftp, String path) {
+        if (sftp == null || StringUtils.isNullOrEmpty(path)) {
+            return;
+        }
+        try {
+            sftp.rm(path);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void closeSftp(ChannelSftp sftp, com.jcraft.jsch.Session session) {
+        try {
+            if (sftp != null) {
+                sftp.disconnect();
+            }
+        } finally {
+            if (session != null) {
+                session.disconnect();
+            }
+        }
     }
 
     private void validate(SshConnectRequest request) {
@@ -321,6 +476,74 @@ public class SshService {
         }
         String message = cur.getMessage();
         return StringUtils.isNullOrEmpty(message) ? cur.getClass().getSimpleName() : message;
+    }
+
+    public class SftpDownload implements AutoCloseable {
+        private final com.jcraft.jsch.Session session;
+        private final ChannelSftp sftp;
+        private final String remotePath;
+        private final long size;
+
+        private SftpDownload(com.jcraft.jsch.Session session, ChannelSftp sftp, String remotePath, long size) {
+            this.session = session;
+            this.sftp = sftp;
+            this.remotePath = remotePath;
+            this.size = size;
+        }
+
+        public String remotePath() {
+            return remotePath;
+        }
+
+        public long size() {
+            return size;
+        }
+
+        public void writeTo(OutputStream output) throws IOException {
+            try (InputStream input = sftp.get(remotePath)) {
+                input.transferTo(output);
+                output.flush();
+            } catch (SftpException e) {
+                throw new IOException("SFTP read failed: " + e.getMessage(), e);
+            } finally {
+                close();
+            }
+        }
+
+        @Override
+        public void close() {
+            closeSftp(sftp, session);
+        }
+    }
+
+    private static class CountingInputStream extends FilterInputStream {
+        private long count;
+
+        private CountingInputStream(InputStream in) {
+            super(in);
+        }
+
+        long count() {
+            return count;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int value = super.read();
+            if (value >= 0) {
+                count += 1;
+            }
+            return value;
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            int value = super.read(b, off, len);
+            if (value > 0) {
+                count += value;
+            }
+            return value;
+        }
     }
 
     private static class ForwardingOutputStream extends OutputStream {
