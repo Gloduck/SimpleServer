@@ -119,7 +119,14 @@ jobs:
       - name: Check native image toolchain
         run: |
           java -version
-          native-image --version
+          if command -v native-image >/dev/null 2>&1; then
+            native-image --version
+          elif command -v native-image.cmd >/dev/null 2>&1; then
+            native-image.cmd --version
+          else
+            echo "native-image command not found" >&2
+            exit 1
+          fi
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             command -v cl.exe
             cl.exe /Bv
