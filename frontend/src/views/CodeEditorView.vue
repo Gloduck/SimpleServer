@@ -3598,7 +3598,7 @@ function formatAgentsMdInstructions(content) {
 function buildAgentInputMessages(prompt, session = getActiveAiSession()) {
   return [
     { role: "user", content: buildAgentWorkspaceContext() },
-    { role: "user", content: buildAgentRecentChatContext(session) },
+    ...buildAgentRecentChatMessages(session),
     { role: "user", content: buildAgentTouchedFilesContext(session) },
     { role: "user", content: buildAgentRequestContext(prompt, session) },
   ];
@@ -3619,11 +3619,13 @@ function buildAgentWorkspaceContext() {
   ].join("\n");
 }
 
-function buildAgentRecentChatContext(session = getActiveAiSession()) {
+function buildAgentRecentChatMessages(session = getActiveAiSession()) {
+  const messages = getRecentAiHistoryMessages({ session });
+  if (!messages.length) return [{ role: "user", content: "Recent chat:\nnone" }];
   return [
-    "Recent chat:",
-    formatRecentAiMessages({ session }),
-  ].join("\n");
+    { role: "user", content: "Recent chat messages follow as separate input messages." },
+    ...messages.map((message, index) => ({ role: message.role === "assistant" ? "assistant" : "user", content: `Recent chat ${index + 1} (${message.role}):\n${String(message.content || "")}` })),
+  ];
 }
 
 function buildAgentTouchedFilesContext(session = getActiveAiSession()) {
@@ -3662,10 +3664,14 @@ function formatFileStateList(files, options = {}) {
 }
 
 function formatRecentAiMessages(options = {}) {
-  const messages = options.session?.messages || aiMessages.value;
-  const history = options.includePendingUserMessage ? messages : messages.slice(0, -1);
+  const history = getRecentAiHistoryMessages(options);
   if (!history.length) return "none";
   return history.map((message) => `${message.role}: ${String(message.content || "")}`).join("\n---\n");
+}
+
+function getRecentAiHistoryMessages(options = {}) {
+  const messages = options.session?.messages || aiMessages.value;
+  return options.includePendingUserMessage ? messages : messages.slice(0, -1);
 }
 
 function updateAiContextUsage(response) {
