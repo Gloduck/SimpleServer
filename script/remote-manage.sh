@@ -192,6 +192,7 @@ collect_local_push_files() {
   shopt -s nullglob
   for item in "${TARGET_DIR}"/*; do
     [[ -e "${item}" ]] || continue
+    [[ -f "${item}" ]] || continue
     [[ "${item}" == *.tar.gz ]] && continue
     [[ "${INCLUDE_CONFIG}" != "true" && "$(basename "${item}")" == "config.json" ]] && continue
     files+=("${item}")
