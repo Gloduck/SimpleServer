@@ -3477,7 +3477,7 @@ async function compressAiContext() {
 }
 
 async function runAiAgent(prompt, signal, session = getActiveAiSession()) {
-  const conversation = [{ role: "user", content: buildAgentPrompt(prompt, session) }];
+  const conversation = buildAgentInputMessages(prompt, session);
   const agentInstructions = getAgentInstructions();
   for (let round = 0; round < AI_AGENT_MAX_TOOL_CALL_ROUNDS; round += 1) {
     const payload = { model: settings.ai.agentModel.trim(), instructions: agentInstructions, input: conversation, tools: getAiToolDefinitions() };
@@ -3536,37 +3536,24 @@ function getAgentInstructions() {
   const instructions = [
     "You are an autonomous coding assistant inside a browser-based Monaco editor.",
     "You run in a browser sandbox, not on the user's local machine. Do not claim you can directly run local shell commands, terminal commands, filesystem commands, package managers, git, or host tools unless an explicit tool listed below is available and you actually use it.",
-    "Use list_tools when you need to check which tools are currently available.",
+    "Use list_tools when you need to check which tools are currently available. Use get_tool_details when you need parameter details for specific tools.",
+    "Treat the Workspace context message as the current condition summary. Use list_tools for current tool availability and do not use unavailable tools.",
     "Never claim a file changed unless a tool reports success.",
     `You have at most ${AI_AGENT_MAX_TOOL_CALL_ROUNDS} tool-call rounds per user request; batch related reads and edits, avoid retry loops, and finish with the best available result before exhausting the limit.`,
+    "When multiple independent tool calls are needed and their arguments are already known, issue them in the same response instead of one tool call per round. Only serialize tool calls when a later call depends on an earlier result.",
     "Use run_javascript for deterministic calculations, parsing, or data transformations. It runs in an isolated browser Web Worker with no DOM, editor, or workspace file access; pass needed data as input.",
+    "When workspace file tools are available, use tools to inspect and edit the workspace.",
+    "All edit tools modify only in-memory editor models. The user must save files manually; new files created by write_file and files marked by delete_file are not written to disk until saved by the user.",
+    "Resolve references like 'the file you created' from Recent chat and AI-touched files before using the current editor file. If multiple files match, ask a short clarification instead of editing or deleting the current file by default.",
+    "When reading several files or applying several edits, prefer the batch tools read_files and replace_in_files over multiple single-file tool calls.",
+    "Use refresh_tree when you need to rescan the workspace file tree before locating files.",
+    "Prefer replace_in_file with exact old_text and minimal new_text for local edits, similar to patch hunks.",
+    "Use write_file only for new files, tiny files, generated files, or when no stable exact local replacement is possible.",
+    "Use read_image when the user asks you to inspect an image file; the tool attaches the image to the next model turn as visual input.",
+    "Prefer small, targeted edits. Explain changed files briefly after tool work is complete; do not paste whole modified files in chat.",
+    "When request_proxy is available, use it for external HTTP resources that may be blocked by browser CORS.",
+    "When SSH tools are available, they are only for SSH settings explicitly exposed to AI. When using execute_ssh_command, provide a clear reason, a commands array containing only every main command used by the shell command, and a high_risk boolean based on your risk assessment. List every SSH command you ran in your final answer. Main commands outside each setting's whitelist require user approval; high_risk=true requires approval even if whitelisted.",
   ];
-  if (isWorkspaceLoaded()) {
-    instructions.push(
-      "Workspace file tools are available. Use tools to inspect and edit the workspace.",
-      "All edit tools modify only in-memory editor models. The user must save files manually; new files created by write_file and files marked by delete_file are not written to disk until saved by the user.",
-      "Resolve references like 'the file you created' from Recent chat and AI-touched files before using the current editor file. If multiple files match, ask a short clarification instead of editing or deleting the current file by default.",
-      "When inspecting several known files, prefer one read_files call over many read_file calls.",
-      "Use refresh_tree when you need to rescan the workspace file tree before locating files.",
-      "When applying several local edits, prefer one replace_in_files call over many replace_in_file calls.",
-      "Prefer replace_in_file with exact old_text and minimal new_text for local edits, similar to patch hunks.",
-      "Use write_file only for new files, tiny files, generated files, or when no stable exact local replacement is possible.",
-      "Use read_image when the user asks you to inspect an image file; the tool attaches the image to the next model turn as visual input.",
-      "Prefer small, targeted edits. Explain changed files briefly after tool work is complete; do not paste whole modified files in chat."
-    );
-  } else {
-    instructions.push("No workspace folder is open. File tools are unavailable; answer without reading, searching, opening, editing, deleting, or diffing workspace files.");
-  }
-  if (isBackendEnabled()) {
-    instructions.push("Use request_proxy when you need to fetch external HTTP resources that may be blocked by browser CORS.");
-  } else {
-    instructions.push("External HTTP fetches through request_proxy are disabled because the backend server setting is not enabled.");
-  }
-  if (isSshAiAvailable()) {
-    instructions.push("SSH tools are available for SSH settings explicitly exposed to AI. When using execute_ssh_command, provide a clear reason, a commands array containing only every main command used by the shell command, and a high_risk boolean based on your risk assessment. List every SSH command you ran in your final answer. Main commands outside each setting's whitelist require user approval; high_risk=true requires approval even if whitelisted.");
-  } else {
-    instructions.push("SSH tools are unavailable unless the backend server is enabled and at least one SSH setting is exposed to AI.");
-  }
   const agentsMd = getRootAgentsMdContent();
   if (agentsMd) instructions.push(formatAgentsMdInstructions(agentsMd));
   return instructions.join(" ");
@@ -3608,16 +3595,53 @@ function formatAgentsMdInstructions(content) {
   ].filter(Boolean).join("\n");
 }
 
-function buildAgentPrompt(prompt, session = getActiveAiSession()) {
+function buildAgentInputMessages(prompt, session = getActiveAiSession()) {
+  return [
+    { role: "user", content: buildAgentWorkspaceContext() },
+    { role: "user", content: buildAgentRecentChatContext(session) },
+    { role: "user", content: buildAgentTouchedFilesContext(session) },
+    { role: "user", content: buildAgentRequestContext(prompt, session) },
+  ];
+}
+
+function buildAgentWorkspaceContext() {
+  const workspaceLoaded = isWorkspaceLoaded();
+  const backendEnabled = isBackendEnabled();
+  const sshConnections = getAiExposedSshConfigs();
+  return [
+    "Workspace context:",
+    `Workspace: ${rootName.value || "unknown"}`,
+    `Workspace loaded: ${workspaceLoaded ? "yes" : "no"}`,
+    `Backend enabled: ${backendEnabled ? "yes" : "no"}`,
+    `SSH exposed count: ${sshConnections.length}`,
+    `${AI_AGENTS_FILE_NAME}: ${getRootAgentsMdContent() ? "loaded" : "not loaded"}`,
+    `Locale: ${settings.locale}`,
+  ].join("\n");
+}
+
+function buildAgentRecentChatContext(session = getActiveAiSession()) {
+  return [
+    "Recent chat:",
+    formatRecentAiMessages({ session }),
+  ].join("\n");
+}
+
+function buildAgentTouchedFilesContext(session = getActiveAiSession()) {
+  const touchedPaths = getActiveAiTouchedPaths(session);
+  return [
+    "AI-touched files:",
+    formatFileStateList(getAiTouchedFiles(session), { touchedPaths }),
+  ].join("\n");
+}
+
+function buildAgentRequestContext(prompt, session = getActiveAiSession()) {
   const current = activeFile.value ? `${activeFile.value.path} (${activeFile.value.language})` : "none";
   const touchedPaths = getActiveAiTouchedPaths(session);
   return [
-    `Workspace: ${rootName.value || "unknown"}`,
+    "Current request context:",
     `Current file: ${current}`,
     `Open files: ${openFileList.value.map((file) => file.path).join(", ") || "none"}`,
     `Dirty files: ${formatFileStateList(dirtyFiles.value, { touchedPaths })}`,
-    `AI-touched files: ${formatFileStateList(getAiTouchedFiles(session), { touchedPaths })}`,
-    `Recent chat:\n${formatRecentAiMessages({ session })}`,
     `User request:\n${prompt}`,
   ].join("\n");
 }
@@ -3679,20 +3703,29 @@ function formatAiUsage(usage) {
 }
 
 function getAiToolDefinitions() {
-  const tools = [
-    { type: "function", name: "list_tools", description: "List currently available AI tools and unavailable tools with reasons.", parameters: { type: "object", properties: {} } },
+  return getAiAllToolDefinitions()
+    .filter((tool) => getAiToolAvailability(tool).available)
+    .map(stripAiToolInternalMetadata);
+}
+
+function getAiBaseToolDefinitions() {
+  return [
+    { type: "function", name: "list_tools", description: "List AI tool names, short descriptions, and current availability. Set only_available to true to omit unavailable tools. Does not include parameter schemas; use get_tool_details for that.", parameters: { type: "object", properties: { only_available: { type: "boolean", description: "When true, return only tools that are currently available. Defaults to false." } } } },
+    { type: "function", name: "get_tool_details", description: "Get parameter schemas and parameter descriptions for specific AI tools by name. Use after list_tools when you need exact arguments.", parameters: { type: "object", properties: { names: { type: "array", items: { type: "string" }, description: "Tool names to describe." } }, required: ["names"] } },
     { type: "function", name: "run_javascript", description: "Execute a JavaScript snippet in an isolated browser Web Worker for calculations, parsing, or transforming provided input data. The code is the body of an async function with an input variable available; use return to produce a result. No DOM/editor/workspace access.", parameters: { type: "object", properties: { code: { type: "string", description: "JavaScript async function body. Example: return input.items.map(x => x * 2);" }, input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." }, timeout_ms: { type: "number", description: "Optional timeout in milliseconds. Defaults to 2000, max 5000." } }, required: ["code"] } },
   ];
-  if (isWorkspaceLoaded()) tools.push(...getAiFileToolDefinitions());
-  if (isBackendEnabled()) {
-    tools.push({ type: "function", name: "request_proxy", description: "Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits. Returns status, headers and truncated text response.", parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, max_chars: { type: "number", description: "Maximum response body characters to return. Defaults to 20000." } }, required: ["url"] } });
-  }
-  if (isSshAiAvailable()) tools.push(...getAiSshToolDefinitions());
-  return tools;
+}
+
+function getAiRequestProxyToolDefinition() {
+  return { type: "function", name: "request_proxy", requirements: ["backend"], description: "Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits. Returns status, headers and truncated text response.", parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, max_chars: { type: "number", description: "Maximum response body characters to return. Defaults to 20000." } }, required: ["url"] } };
+}
+
+function getAiAllToolDefinitions() {
+  return [...getAiBaseToolDefinitions(), ...getAiFileToolDefinitions(), getAiRequestProxyToolDefinition(), ...getAiSshToolDefinitions()];
 }
 
 function getAiFileToolDefinitions() {
-  return [
+  return addAiToolRequirements([
     { type: "function", name: "list_files", description: "List workspace files and directories. By default only lists the first level; set recursive to true to include descendants.", parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root." }, max_items: { type: "number", description: "Maximum items to return." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
     { type: "function", name: "refresh_tree", description: "Refresh the workspace file tree from disk. Use this before locating newly created, deleted, or externally changed files.", parameters: { type: "object", properties: { collapse_all: { type: "boolean", description: "Whether to collapse all directories after refreshing. Defaults to false." } } } },
     { type: "function", name: "read_file", description: "Read a text file. Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads.", parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "number", description: "Optional 1-based starting line number. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return." } }, required: ["path"] } },
@@ -3706,60 +3739,95 @@ function getAiFileToolDefinitions() {
     { type: "function", name: "delete_file", description: "Mark a file for deletion in memory. Existing disk files are deleted only when the user saves the deletion; unsaved new files are removed immediately from memory.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "open_file", description: "Open a file in the editor.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "show_diff", description: "Show diff for an in-memory changed file.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } }
-  ];
-}
-
-function getAiFileToolNames() {
-  return getAiFileToolDefinitions().map((tool) => tool.name);
+  ], ["workspace"]);
 }
 
 function getAiSshToolDefinitions() {
-  return [
+  return addAiToolRequirements([
     { type: "function", name: "get_ssh_connections", description: "Get SSH settings exposed to AI, including name, host, port, active state, and command whitelist. Secrets are never returned.", parameters: { type: "object", properties: {} } },
     { type: "function", name: "open_ssh_connection", description: "Open an exposed SSH connection by id, name, or host. The backend SSH WebSocket performs the actual SSH connection.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "activate_ssh_terminal", description: "Switch the visible editor tab to an already active exposed SSH terminal by id, name, or host. Does not execute any SSH command.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "close_ssh_connection", description: "Close an active exposed SSH connection by id, name, or host.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "read_ssh_output", description: "Read recent output from an active exposed SSH connection.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, max_chars: { type: "number", description: "Maximum output characters. Defaults to 20000." } }, required: ["connection"] } },
     { type: "function", name: "execute_ssh_command", description: "Execute a command on an active exposed SSH connection. The AI must provide a reason, commands array containing only every main command used by the shell command, and high_risk based on its own risk assessment. Main commands outside the whitelist require approval; high_risk=true always requires approval.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, command: { type: "string" }, commands: { type: "array", items: { type: "string" }, description: "Required list of main commands used by command, excluding arguments. Include every command in chains, pipes, and substitutions. Example: for 'ls -la && whoami', pass ['ls','whoami']." }, high_risk: { type: "boolean", description: "Required. AI-assessed risk flag. Set true if the command may modify files/system state, affect services, expose secrets, consume significant resources, or otherwise be risky." }, reason: { type: "string", description: "Required explanation of why this SSH command is needed." } }, required: ["connection", "command", "commands", "high_risk", "reason"] } },
-  ];
+  ], ["backend", "ssh_exposed"]);
 }
 
-function getAiSshToolNames() {
-  return getAiSshToolDefinitions().map((tool) => tool.name);
+function addAiToolRequirements(tools, requirements) {
+  return tools.map((tool) => ({ ...tool, requirements }));
 }
 
-function isAiFileToolName(name) {
-  return getAiFileToolNames().includes(name);
-}
-
-function isAiSshToolName(name) {
-  return getAiSshToolNames().includes(name);
-}
-
-function aiToolListTools() {
-  const available = getAiToolDefinitions().map(formatAiToolAvailability);
-  const unavailable = [];
-  if (!isWorkspaceLoaded()) {
-    unavailable.push(...getAiFileToolDefinitions().map((tool) => ({ ...formatAiToolAvailability(tool), reason: "No workspace folder is open" })));
-  }
-  if (!isBackendEnabled()) {
-    unavailable.push({ name: "request_proxy", description: "Fetch an external HTTP/HTTPS URL through the configured backend request proxy.", reason: "Backend server setting is disabled" });
-  }
-  if (!isSshAiAvailable()) {
-    unavailable.push(...getAiSshToolDefinitions().map((tool) => ({ ...formatAiToolAvailability(tool), reason: isBackendEnabled() ? "No SSH setting is exposed to AI" : "Backend server setting is disabled" })));
-  }
+function aiToolListTools({ only_available: onlyAvailable = false } = {}) {
+  const tools = getAiAllToolDefinitions()
+    .map(formatAiToolListItem)
+    .filter((tool) => !onlyAvailable || tool.available);
   return {
-    summary: `Available tools: ${available.map((tool) => tool.name).join(", ") || "none"}`,
-    workspace_loaded: isWorkspaceLoaded(),
-    backend_enabled: isBackendEnabled(),
-    ssh_ai_available: isSshAiAvailable(),
-    available,
-    unavailable,
+    summary: `${tools.length} tool(s) returned`,
+    tools,
   };
 }
 
-function formatAiToolAvailability(tool) {
-  return { name: tool.name, description: tool.description || "" };
+function aiToolGetToolDetails({ names } = {}) {
+  const definitions = new Map(getAiAllToolDefinitions().map((tool) => [tool.name, tool]));
+  const requestedNames = uniqueStrings(Array.isArray(names) ? names.map((name) => String(name || "").trim()).filter(Boolean) : []);
+  const tools = requestedNames.map((name) => {
+    const tool = definitions.get(name);
+    if (!tool) return { name, found: false };
+    const availability = getAiToolAvailability(tool);
+    return {
+      name: tool.name,
+      found: true,
+      available: availability.available,
+      unavailable_reason: availability.reason || "",
+      description: formatAiToolDescriptionWithCondition(tool),
+      parameters: tool.parameters || {},
+    };
+  });
+  return { summary: `${tools.length} tool detail(s) returned`, tools };
+}
+
+function formatAiToolListItem(tool) {
+  const availability = getAiToolAvailability(tool);
+  return {
+    name: tool.name,
+    description: formatAiToolDescriptionWithCondition(tool),
+    available: availability.available,
+  };
+}
+
+function getAiToolAvailability(name) {
+  const tool = typeof name === "string" ? getAiToolDefinitionByName(name) : name;
+  if (!tool) return { found: false, available: false, reason: "Unknown tool" };
+  const unmet = (tool.requirements || []).map(getAiRequirementStatus).filter((requirement) => !requirement.met);
+  return { found: true, available: unmet.length === 0, reason: unmet.map((requirement) => requirement.reason).join("; ") };
+}
+
+function formatAiToolDescriptionWithCondition(tool = {}) {
+  const condition = getAiToolConditionDescription(tool);
+  return condition ? `${tool.description || ""} Condition: ${condition}` : (tool.description || "");
+}
+
+function getAiToolConditionDescription(tool) {
+  if (typeof tool === "string") tool = getAiToolDefinitionByName(tool);
+  return (tool?.requirements || []).map(getAiRequirementStatus).map((requirement) => requirement.description).join("; ");
+}
+
+function getAiToolDefinitionByName(name) {
+  return getAiAllToolDefinitions().find((tool) => tool.name === name) || null;
+}
+
+function getAiRequirementStatus(requirement) {
+  switch (requirement) {
+    case "workspace": return { met: isWorkspaceLoaded(), description: "requires an open workspace folder", reason: "No workspace folder is open" };
+    case "backend": return { met: isBackendEnabled(), description: "requires backend server enabled", reason: "Backend server setting is disabled" };
+    case "ssh_exposed": return { met: getAiExposedSshConfigs().length > 0, description: "requires at least one SSH setting exposed to AI", reason: "No SSH setting is exposed to AI" };
+    default: return { met: false, description: `requires ${requirement}`, reason: `Unknown requirement: ${requirement}` };
+  }
+}
+
+function stripAiToolInternalMetadata(tool) {
+  const { requirements, ...definition } = tool;
+  return definition;
 }
 
 function parseAiToolArguments(call) {
@@ -3768,10 +3836,11 @@ function parseAiToolArguments(call) {
 
 async function runAiToolCall(call, args = {}, session = getActiveAiSession()) {
   try {
-    if (isAiFileToolName(call.name) && !isWorkspaceLoaded()) return { ok: false, summary: `Tool ${call.name} is unavailable because no workspace folder is open` };
-    if (isAiSshToolName(call.name) && !isSshAiAvailable()) return { ok: false, summary: `Tool ${call.name} is unavailable because SSH is not exposed to AI or backend is disabled` };
+    const availability = getAiToolAvailability(call.name);
+    if (availability.found && !availability.available) return { ok: false, summary: `Tool ${call.name} is unavailable because ${availability.reason}` };
     switch (call.name) {
-      case "list_tools": return okTool(aiToolListTools());
+      case "list_tools": return okTool(aiToolListTools(args));
+      case "get_tool_details": return okTool(aiToolGetToolDetails(args));
       case "list_files": return okTool(await aiToolListFiles(args));
       case "refresh_tree": return okTool(await aiToolRefreshTree(args));
       case "read_file": return okTool(await aiToolReadFile(args));
