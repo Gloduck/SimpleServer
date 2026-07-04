@@ -5521,8 +5521,9 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .panel-workspace-name { display: block; overflow: hidden; margin-top: 4px; color: var(--muted); font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .icon-button { width: 28px; height: 28px; padding: 0; }
 .code-editor-view .small-button { padding: 5px 8px; font-size: 12px; }
-.code-editor-view .ai-panel-header { align-items: flex-start; }
-.code-editor-view .ai-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.code-editor-view .ai-panel-header { align-items: stretch; flex-direction: column; }
+.code-editor-view .ai-header-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.code-editor-view .ai-header-actions button { flex: 0 0 auto; }
 .code-editor-view .ai-context-length { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .code-editor-view .panel-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 12px 12px; }
 .code-editor-view .panel-actions button:first-child { grid-column: 1 / -1; }
