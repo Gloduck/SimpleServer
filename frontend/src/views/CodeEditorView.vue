@@ -2240,11 +2240,12 @@ function formatSftpTaskForTool(task, summary = "SFTP task") {
 
 function cancelSftpTask(taskId) {
   const task = sftpTasks.find((item) => item.id === taskId);
-  if (!task || !canCancelSftpTask(task)) return;
+  if (!task || !canCancelSftpTask(task)) return false;
   task.status = "cancelled";
   task.error = tr("sftp.cancelled");
   task.cancel?.();
   task.cancel = null;
+  return true;
 }
 
 function canCancelSftpTask(task) {
@@ -3997,7 +3998,7 @@ function getAgentInstructions() {
     "Prefer small, targeted edits. Explain changed files briefly after tool work is complete; do not paste whole modified files in chat.",
     "When request_proxy is available, use it for external HTTP resources that may be blocked by browser CORS.",
     "When SSH tools are available, they are only for SSH settings explicitly exposed to AI. When using execute_ssh_command, provide a clear reason, a commands array containing only every main command used by the shell command, and a high_risk boolean based on your risk assessment. List every SSH command you ran in your final answer. Main commands outside each setting's whitelist require user approval; high_risk=true requires approval even if whitelisted.",
-    "When using SFTP tools, local_path is always a path relative to the currently opened browser workspace, never an absolute path, URL, SSH path, or server path. For upload, local_path names the workspace file to read; remote_path names the destination path on the SSH server. For download, remote_path names the source file on the SSH server; local_path names the workspace-relative destination file. If you are unsure of the workspace path, use list_files or ask the user before starting the transfer.",
+    "When using SFTP tools, local_path is always a path relative to the currently opened browser workspace, never an absolute path, URL, SSH path, or server path. For upload, local_path names the workspace file to read; remote_path names the destination path on the SSH server. For download, remote_path names the source file on the SSH server; local_path names the workspace-relative destination file. SFTP upload/download tools return after the background task is submitted and visible in the task list. For very small files, you may briefly wait or check task completion; for larger files, just ensure submission returned without error unless the user explicitly asks to wait or the next step truly depends on completion. If you are unsure of the workspace path, use list_files or ask the user before starting the transfer.",
   ];
   const agentsMd = getRootAgentsMdContent();
   if (agentsMd) instructions.push(formatAgentsMdInstructions(agentsMd));
@@ -4203,10 +4204,10 @@ function getAiSshToolDefinitions() {
     { type: "function", name: "execute_ssh_command", description: "Execute a command on an active exposed SSH connection. The AI must provide a reason, commands array containing only every main command used by the shell command, and high_risk based on its own risk assessment. Main commands outside the whitelist require approval; high_risk=true always requires approval.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, command: { type: "string" }, commands: { type: "array", items: { type: "string" }, description: "Required list of main commands used by command, excluding arguments. Include every command in chains, pipes, and substitutions. Example: for 'ls -la && whoami', pass ['ls','whoami']." }, high_risk: { type: "boolean", description: "Required. AI-assessed risk flag. Set true if the command may modify files/system state, affect services, expose secrets, consume significant resources, or otherwise be risky." }, reason: { type: "string", description: "Required explanation of why this SSH command is needed." } }, required: ["connection", "command", "commands", "high_risk", "reason"] } },
   ], ["backend", "ssh_exposed"]);
   const sftpTools = addAiToolRequirements([
-    { type: "function", name: "sftp_upload_file", description: "Submit a background upload of one file from the current browser workspace to an exposed SSH server using SFTP. local_path must be relative to the current workspace, such as 'dist/app.zip' or 'src/main.js'; never pass '/home/...', 'C:\\...', URLs, or remote server paths as local_path. remote_path is the destination path on the SSH server. Missing remote parent directories are created automatically. When use_unsaved is true and the file is an open dirty text file, upload the unsaved editor content instead of disk content.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, local_path: { type: "string", description: "Workspace-relative local file path only." }, remote_path: { type: "string", description: "Destination file path on the SSH server." }, use_unsaved: { type: "boolean", description: "Upload unsaved dirty editor content when available. Defaults to true." } }, required: ["connection", "local_path", "remote_path"] } },
-    { type: "function", name: "sftp_download_file", description: "Submit a background download of one SSH server file into the current browser workspace using SFTP. remote_path is the source file path on the SSH server. local_path must be the destination path relative to the current workspace, such as 'downloads/app.zip'; never pass '/home/...', 'C:\\...', URLs, or remote server paths as local_path. Parent directories in the workspace are created automatically.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, remote_path: { type: "string", description: "Source file path on the SSH server." }, local_path: { type: "string", description: "Workspace-relative local destination path only." } }, required: ["connection", "remote_path", "local_path"] } },
+    { type: "function", name: "sftp_upload_file", description: "Submit one SFTP upload task and return its task_id.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, local_path: { type: "string", description: "Workspace-relative source file path only, for example 'dist/app.zip' or 'src/main.js'. Do not pass absolute paths, URLs, or SSH server paths." }, remote_path: { type: "string", description: "Destination file path on the SSH server. Missing parent directories are created automatically." }, use_unsaved: { type: "boolean", description: "Upload unsaved dirty editor content when available. Defaults to true." } }, required: ["connection", "local_path", "remote_path"] } },
+    { type: "function", name: "sftp_download_file", description: "Submit one SFTP download task and return its task_id.", parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, remote_path: { type: "string", description: "Source file path on the SSH server." }, local_path: { type: "string", description: "Workspace-relative destination file path only, for example 'downloads/app.zip'. Do not pass absolute paths, URLs, or SSH server paths. Parent directories are created automatically." } }, required: ["connection", "remote_path", "local_path"] } },
     { type: "function", name: "sftp_list_tasks", description: "List SFTP upload/download tasks submitted from the current page, including progress and status.", parameters: { type: "object", properties: { status: { type: "string", description: "Optional status filter: running, completed, failed, or cancelled." } } } },
-    { type: "function", name: "sftp_cancel_task", description: "Cancel a running SFTP upload/download task by task_id.", parameters: { type: "object", properties: { task_id: { type: "string", description: "Task id returned by sftp_upload_file, sftp_download_file, or sftp_list_tasks." } }, required: ["task_id"] } },
+    { type: "function", name: "sftp_cancel_task", description: "Cancel a running SFTP task.", parameters: { type: "object", properties: { task_id: { type: "string", description: "Task id returned by sftp_upload_file, sftp_download_file, or sftp_list_tasks." } }, required: ["task_id"] } },
   ], ["backend", "ssh_exposed", "workspace"]);
   return [...sshTools, ...sftpTools];
 }
@@ -5147,8 +5148,8 @@ function aiToolSftpCancelTask({ task_id: taskId } = {}) {
   const task = sftpTasks.find((item) => item.id === String(taskId || ""));
   if (!task) throw new Error(`SFTP task not found: ${taskId}`);
   if (!canCancelSftpTask(task)) return { ...formatSftpTaskForTool(task, "SFTP task is not running"), cancelled: false };
-  cancelSftpTask(task.id);
-  return { ...formatSftpTaskForTool(task, "SFTP task cancelled"), cancelled: true };
+  const cancelled = cancelSftpTask(task.id);
+  return { ...formatSftpTaskForTool(task, cancelled ? "SFTP task cancelled" : "SFTP task was not cancelled"), cancelled };
 }
 
 async function aiToolExecuteSshCommand({ connection, command, commands, high_risk: highRisk, reason } = {}) {
