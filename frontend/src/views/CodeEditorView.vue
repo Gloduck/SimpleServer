@@ -679,8 +679,15 @@ const messages = {
     "settings.minimap": "显示 Minimap",
     "settings.exportUrl": "导出设置 URL",
     "settings.copyExportUrl": "复制导出 URL",
-    "settings.exportUrlHint": "导出 URL 会包含完整设置 JSON，包括 API Key。只分享给可信对象。访问带 settings 参数的 URL 会覆盖本地设置。",
+    "settings.exportUrlHint": "导出 URL 会包含完整设置 JSON，包括 API Key。只分享给可信对象。访问带 settings 参数的 URL 时会询问是否覆盖本地设置。",
     "settings.exportUrlCopied": "导出 URL 已复制",
+    "settings.importTitle": "发现导入设置",
+    "settings.importConfirm": "当前 URL 包含 settings 参数。是否用 URL 中的配置覆盖本地配置？",
+    "settings.importApply": "覆盖配置",
+    "settings.importKeep": "保留本地配置",
+    "settings.importApplied": "已导入 URL 配置",
+    "settings.importSkipped": "已保留本地配置",
+    "settings.importInvalid": "URL 中的 settings 参数无法解析，已忽略。",
     "workspace.none": "未打开文件夹",
     "workspace.treeEmpty": "尚未载入文件树",
     "changes.none": "没有未保存的变更",
@@ -941,8 +948,15 @@ const messages = {
     "settings.minimap": "Show Minimap",
     "settings.exportUrl": "Export Settings URL",
     "settings.copyExportUrl": "Copy Export URL",
-    "settings.exportUrlHint": "The exported URL contains the full settings JSON, including API keys. Share it only with trusted recipients. Visiting a URL with the settings parameter overwrites local settings.",
+    "settings.exportUrlHint": "The exported URL contains the full settings JSON, including API keys. Share it only with trusted recipients. Visiting a URL with the settings parameter asks before overriding local settings.",
     "settings.exportUrlCopied": "Export URL copied",
+    "settings.importTitle": "Import Settings Found",
+    "settings.importConfirm": "The current URL contains a settings parameter. Override local settings with the URL settings?",
+    "settings.importApply": "Override Settings",
+    "settings.importKeep": "Keep Local Settings",
+    "settings.importApplied": "Imported URL settings",
+    "settings.importSkipped": "Kept local settings",
+    "settings.importInvalid": "The settings parameter in the URL could not be parsed and was ignored.",
     "workspace.none": "No Folder Opened",
     "workspace.treeEmpty": "No file tree loaded",
     "changes.none": "No unsaved changes",
@@ -1354,6 +1368,7 @@ onMounted(async () => {
     }
   });
   applyChromeTheme();
+  await promptImportSettingsFromUrl();
   monaco = await loadMonaco();
   registerFormatters();
   editor.value = markRaw(monaco.editor.create(editorHost.value, {
@@ -4113,27 +4128,62 @@ async function exportSettingsUrl() {
 
 function loadSettings() {
   try {
-    const imported = readSettingsFromUrl();
-    const saved = imported || JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    const savedSettings = { ...saved };
-    delete savedSettings.sidebarWidth;
-    delete savedSettings.previewWidth;
-    const shortcuts = { ...vscodeShortcuts, ...(savedSettings.shortcuts || {}) };
-    const ai = { ...defaultAiSettings, ...(savedSettings.ai || {}) };
-    const backend = { ...defaultBackendSettings, ...(savedSettings.backend || {}) };
-    const ssh = { ...defaultSshSettings, ...(savedSettings.ssh || {}) };
-    if (!aiReasoningEfforts.includes(ai.reasoningEffort)) ai.reasoningEffort = defaultAiSettings.reasoningEffort;
-    backend.enabled = Boolean(backend.enabled);
-    backend.baseUrl = normalizeBackendBaseUrlValue(backend.baseUrl) || defaultBackendSettings.baseUrl;
-    if (!sshTerminalThemes[ssh.terminalTheme]) ssh.terminalTheme = defaultSshSettings.terminalTheme;
-    ssh.whitelistTemplate = String(ssh.whitelistTemplate || DEFAULT_SSH_WHITELIST_TEMPLATE).trim();
-    ssh.connections = Array.isArray(ssh.connections) ? ssh.connections.map(normalizeStoredSshConfig).filter(Boolean) : [];
-    const loaded = { ...defaultSettings, ...savedSettings, shortcuts, ai, backend, ssh };
-    if (imported) localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
-    return loaded;
+    return normalizeSettings(JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"));
   } catch {
     return structuredClone(defaultSettings);
   }
+}
+
+async function promptImportSettingsFromUrl() {
+  if (!new URLSearchParams(window.location.search).has(SETTINGS_URL_PARAM)) return;
+  let imported;
+  try {
+    imported = normalizeSettings(readSettingsFromUrl());
+  } catch {
+    removeSettingsFromUrl();
+    await showAlert(tr("settings.importInvalid"), { title: tr("settings.importTitle"), tone: "danger" });
+    return;
+  }
+  const confirmed = await showConfirm(tr("settings.importConfirm"), {
+    title: tr("settings.importTitle"),
+    confirmLabel: tr("settings.importApply"),
+    cancelLabel: tr("settings.importKeep"),
+  });
+  if (confirmed) {
+    applySettingsSnapshot(imported);
+    persistSettings();
+    setStatus(tr("settings.importApplied"), SETTINGS_URL_PARAM);
+  } else {
+    setStatus(tr("settings.importSkipped"), SETTINGS_URL_PARAM);
+  }
+  removeSettingsFromUrl();
+}
+
+function normalizeSettings(value = {}) {
+  const savedSettings = { ...(value || {}) };
+  delete savedSettings.sidebarWidth;
+  delete savedSettings.previewWidth;
+  const shortcuts = { ...vscodeShortcuts, ...(savedSettings.shortcuts || {}) };
+  const ai = { ...defaultAiSettings, ...(savedSettings.ai || {}) };
+  const backend = { ...defaultBackendSettings, ...(savedSettings.backend || {}) };
+  const ssh = { ...defaultSshSettings, ...(savedSettings.ssh || {}) };
+  if (!aiReasoningEfforts.includes(ai.reasoningEffort)) ai.reasoningEffort = defaultAiSettings.reasoningEffort;
+  backend.enabled = Boolean(backend.enabled);
+  backend.baseUrl = normalizeBackendBaseUrlValue(backend.baseUrl) || defaultBackendSettings.baseUrl;
+  if (!sshTerminalThemes[ssh.terminalTheme]) ssh.terminalTheme = defaultSshSettings.terminalTheme;
+  ssh.whitelistTemplate = String(ssh.whitelistTemplate || DEFAULT_SSH_WHITELIST_TEMPLATE).trim();
+  ssh.connections = Array.isArray(ssh.connections) ? ssh.connections.map(normalizeStoredSshConfig).filter(Boolean) : [];
+  return { ...defaultSettings, ...savedSettings, shortcuts, ai, backend, ssh };
+}
+
+function applySettingsSnapshot(value) {
+  Object.keys(settings).forEach((key) => { delete settings[key]; });
+  Object.assign(settings, value);
+  document.documentElement.lang = settings.locale;
+  if (monaco) applyTheme();
+  applyEditorOptions();
+  applySshTerminalTheme();
+  if (monaco) registerKeybindings();
 }
 
 function normalizeStoredSshConfig(value) {
@@ -4146,6 +4196,12 @@ function readSettingsFromUrl() {
   const encoded = new URLSearchParams(window.location.search).get(SETTINGS_URL_PARAM);
   if (!encoded) return null;
   return JSON.parse(decodeSettingsFromUrl(encoded));
+}
+
+function removeSettingsFromUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(SETTINGS_URL_PARAM);
+  window.history.replaceState(window.history.state, "", url.toString());
 }
 
 function encodeSettingsForUrl(value) {
