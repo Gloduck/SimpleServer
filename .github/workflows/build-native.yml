@@ -6,27 +6,82 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      linux_x64:
+        description: Build linux-x64 package
+        type: boolean
+        default: true
+      windows_x64:
+        description: Build windows-x64 package
+        type: boolean
+        default: true
+      windows_arm64:
+        description: Build windows-arm64 package
+        type: boolean
+        default: true
 
 jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Prepare build matrix
+        id: matrix
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BUILD_LINUX_X64: ${{ inputs.linux_x64 }}
+          BUILD_WINDOWS_X64: ${{ inputs.windows_x64 }}
+          BUILD_WINDOWS_ARM64: ${{ inputs.windows_arm64 }}
+        run: |
+          python3 <<'PY' >> "${GITHUB_OUTPUT}"
+          import json
+          import os
+
+          all_platforms = [
+              {
+                  "os": "ubuntu-latest",
+                  "platform": "linux-x64",
+                  "node-architecture": "x64",
+                  "msvc-arch": "",
+              },
+              {
+                  "os": "windows-latest",
+                  "platform": "windows-x64",
+                  "node-architecture": "x64",
+                  "msvc-arch": "x64",
+              },
+              {
+                  "os": "windows-11-arm",
+                  "platform": "windows-arm64",
+                  "node-architecture": "arm64",
+                  "msvc-arch": "arm64",
+              },
+          ]
+
+          if os.environ["EVENT_NAME"] == "workflow_dispatch":
+              selected = {
+                  "linux-x64": os.environ["BUILD_LINUX_X64"] == "true",
+                  "windows-x64": os.environ["BUILD_WINDOWS_X64"] == "true",
+                  "windows-arm64": os.environ["BUILD_WINDOWS_ARM64"] == "true",
+              }
+              platforms = [platform for platform in all_platforms if selected[platform["platform"]]]
+          else:
+              platforms = all_platforms
+
+          if not platforms:
+              raise SystemExit("at least one platform must be selected")
+
+          print("matrix=" + json.dumps({"include": platforms}, separators=(",", ":")))
+          PY
+
   build:
+    needs: prepare-matrix
     name: Build native (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux-x64
-            node-architecture: x64
-            msvc-arch: ''
-          - os: windows-latest
-            platform: windows-x64
-            node-architecture: x64
-            msvc-arch: x64
-          - os: windows-11-arm
-            platform: windows-arm64
-            node-architecture: arm64
-            msvc-arch: arm64
+      matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
 
     defaults:
       run:
