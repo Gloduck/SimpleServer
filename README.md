@@ -141,6 +141,12 @@ bash script/remote-manage.sh push \
   --remoteDeployPath /opt/SimpleServer
 ```
 
+如需同时推送配置文件：
+
+```bash
+bash script/remote-manage.sh push --includeConfig
+```
+
 默认从项目根目录 `.env` 读取以下配置：
 
 ```env
@@ -153,7 +159,9 @@ remoteDeployPath=/opt/SimpleServer
 
 说明：
 
-- `push`：将本地 `target/` 下的发布文件直接推送到远程部署目录，不上传压缩包，也不会清空远程目录中的其他文件
+- 推送前建议先确认本地配置文件与远程配置文件是否一致，避免覆盖或遗漏必要配置
+- `push`：将本地 `target/` 下的发布文件直接推送到远程部署目录，不上传压缩包，默认不上传 `config.json`，也不会清空远程目录中的其他文件
+- `push --includeConfig`：推送时额外包含 `target/config.json`
 - `start|restart|stop|status`：通过远程调用部署目录中的 `manage.sh` 执行
 - 支持 SSH 密钥登录
 - 如果配置了 `remotePassword`，则通过 `sshpass` 走密码登录

@@ -14,6 +14,7 @@ REMOTE_USER=""
 REMOTE_PASSWORD=""
 REMOTE_DEPLOY_PATH=""
 SSH_TARGET=""
+INCLUDE_CONFIG="false"
 
 usage() {
   cat <<'EOF'
@@ -25,6 +26,7 @@ Options:
   --remoteUser <value>
   --remotePassword <value>
   --remoteDeployPath <value>
+  --includeConfig        Include target/config.json when pushing
   -h, --help
 
 Examples:
@@ -107,6 +109,10 @@ parse_args() {
         REMOTE_DEPLOY_PATH="$2"
         shift 2
         ;;
+      --includeConfig)
+        INCLUDE_CONFIG="true"
+        shift
+        ;;
       -h|--help)
         usage
         exit 0
@@ -118,6 +124,9 @@ parse_args() {
   done
 
   [[ -n "${ACTION}" ]] || fail "missing action: push, start, restart, stop, or status"
+  if [[ "${INCLUDE_CONFIG}" == "true" && "${ACTION}" != "push" ]]; then
+    fail "--includeConfig can only be used with push"
+  fi
 }
 
 validate_remote_config() {
@@ -184,6 +193,7 @@ collect_local_push_files() {
   for item in "${TARGET_DIR}"/*; do
     [[ -e "${item}" ]] || continue
     [[ "${item}" == *.tar.gz ]] && continue
+    [[ "${INCLUDE_CONFIG}" != "true" && "$(basename "${item}")" == "config.json" ]] && continue
     files+=("${item}")
   done
   shopt -u nullglob
