@@ -548,6 +548,7 @@ import "@xterm/xterm/css/xterm.css";
 import { CdnUtils } from "@/shared/cdn-utils.js";
 import { FileUtils } from "@/shared/file-utils.js";
 import { MarkdownUtils } from "@/shared/markdown-utils.js";
+import { enableEditorPwa } from "@/shared/pwa-install.js";
 
 const STORAGE_KEY = "browser-code-editor-settings";
 const SETTINGS_URL_PARAM = "settings";
@@ -1221,6 +1222,7 @@ const sshSessions = reactive(new Map());
 const activeSshTerminalId = ref("");
 const sshRevision = ref(0);
 const sshDialog = reactive({ visible: false, mode: "create", draft: createSshDraft() });
+let disableEditorPwa = null;
 let aiSessionSerial = 0;
 const aiSessions = reactive([createAiSession()]);
 const activeAiSessionId = ref(aiSessions[0].id);
@@ -1315,6 +1317,22 @@ watch(settings, persistSettings, { deep: true });
 
 onMounted(async () => {
   document.documentElement.lang = settings.locale;
+  const pageTitle = document.title;
+  const pageDescription = document.querySelector('meta[name="description"]')?.content || pageTitle;
+  disableEditorPwa = enableEditorPwa({
+    name: pageTitle,
+    shortName: pageTitle,
+    description: pageDescription,
+    startUrl: `${window.location.pathname}?source=pwa`,
+    icon: "/pwa-code-editor-icon.svg",
+    meta: {
+      "theme-color": "#0f172a",
+      "mobile-web-app-capable": "yes",
+      "apple-mobile-web-app-capable": "yes",
+      "apple-mobile-web-app-title": pageTitle,
+      "apple-mobile-web-app-status-bar-style": "black-translucent"
+    }
+  });
   applyChromeTheme();
   monaco = await loadMonaco();
   registerFormatters();
@@ -1358,6 +1376,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  disableEditorPwa?.();
   formatterDisposables.splice(0).forEach((disposable) => disposable.dispose());
   workspaceFileActionDisposables.splice(0).forEach((disposable) => disposable.dispose());
   referenceProviderDisposables.splice(0).forEach((disposable) => disposable.dispose());

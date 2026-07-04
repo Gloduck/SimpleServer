@@ -304,6 +304,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { CommonUtils } from '@/shared/common-utils.js';
 import { CommonComponents } from '@/shared/common-components.js';
 import { CdnUtils } from '@/shared/cdn-utils.js';
+import { enableEditorPwa } from '@/shared/pwa-install.js';
 
 const VDITOR_CDN_BASE = CdnUtils.vditor.base;
 
@@ -918,6 +919,7 @@ export default {
             const showNewFileModal = ref(false);
             const newFilePath = ref('');
             const toastRef = ref(null);
+            let disableEditorPwa = null;
 
             const showToast = (message, type = 'info') => {
                 if (toastRef.value) {
@@ -1426,6 +1428,22 @@ export default {
             };
 
             onMounted(async () => {
+                const pageTitle = document.title;
+                const pageDescription = document.querySelector('meta[name="description"]')?.content || pageTitle;
+                disableEditorPwa = enableEditorPwa({
+                    name: pageTitle,
+                    shortName: pageTitle,
+                    description: pageDescription,
+                    startUrl: `${window.location.pathname}?source=pwa`,
+                    icon: '/pwa-md-editor-icon.svg',
+                    meta: {
+                        'theme-color': '#111827',
+                        'mobile-web-app-capable': 'yes',
+                        'apple-mobile-web-app-capable': 'yes',
+                        'apple-mobile-web-app-title': pageTitle,
+                        'apple-mobile-web-app-status-bar-style': 'black-translucent'
+                    }
+                });
                 applyConfigFromUrl();
                 loadConfig();
                 try {
@@ -1438,6 +1456,7 @@ export default {
             });
 
             onBeforeUnmount(() => {
+                disableEditorPwa?.();
                 window.removeEventListener('keydown', handleKeyDown, {capture: true});
             });
 

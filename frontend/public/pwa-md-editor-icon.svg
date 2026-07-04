@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Markdown 编辑器</title>
+  <desc id="desc">Markdown 编辑器 PWA 图标</desc>
+  <defs>
+    <linearGradient id="bg" x1="64" y1="64" x2="448" y2="448" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111827"/>
+      <stop offset="1" stop-color="#16a34a"/>
+    </linearGradient>
+    <filter id="shadow" x="80" y="80" width="352" height="352" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#020617" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g filter="url(#shadow)">
+    <rect x="92" y="100" width="328" height="312" rx="48" fill="#f8fafc" opacity="0.96"/>
+    <path d="M144 164h224c13.25 0 24 10.75 24 24v136c0 13.25-10.75 24-24 24H144c-13.25 0-24-10.75-24-24V188c0-13.25 10.75-24 24-24Z" fill="#0f172a"/>
+    <path d="M158 300V212h34l32 42 32-42h34v88h-34v-39l-32 40-32-40v39h-34Z" fill="#e2e8f0"/>
+    <path d="M318 212h34v48h26l-43 48-43-48h26v-48Z" fill="#86efac"/>
+    <rect x="144" y="376" width="192" height="18" rx="9" fill="#22c55e"/>
+    <rect x="144" y="408" width="128" height="18" rx="9" fill="#86efac"/>
+  </g>
+</svg>
