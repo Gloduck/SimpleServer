@@ -118,13 +118,13 @@
       </section>
 
       <section v-show="activeView === 'ai'" class="panel-view active">
-        <header class="panel-header">
+        <header class="panel-header ai-panel-header">
           <div>
             <p class="eyebrow">Assistant</p>
             <h1>{{ tr('panel.ai') }}</h1>
+            <span class="ai-context-length">{{ tr('ai.contextLength', { count: aiContextLength }) }}</span>
           </div>
           <div class="ai-header-actions">
-            <span class="ai-context-length">{{ tr('ai.contextLength', { count: aiContextLength }) }}</span>
             <button type="button" class="small-button" :disabled="aiBusy || aiMessages.length === 0" @click="compressAiContext">{{ tr('ai.compressContext') }}</button>
             <button type="button" class="small-button" :disabled="aiBusy || !canResetAiConversation" @click="resetAiConversation">{{ tr('ai.resetConversation') }}</button>
             <button class="icon-button" :title="tr('ai.stop')" :aria-label="tr('ai.stop')" :disabled="!aiBusy" @click="stopAiTask">
@@ -733,7 +733,11 @@ const messages = {
     "ai.send": "发送",
     "ai.running": "运行中...",
     "ai.stop": "停止 AI 任务",
-    "ai.contextLength": "上下文 {count} 字符",
+    "ai.contextLength": "上次用量 {count}",
+    "ai.usageNotMeasured": "未统计",
+    "ai.usageMeasured": "输入 {input} / 输出 {output} / 合计 {total} tokens{cache}",
+    "ai.usageCache": " / 缓存 {cached} ({rate}%)",
+    "ai.usageCacheMiss": " / 缓存 未命中",
     "ai.compressContext": "压缩上下文",
     "ai.contextCompressed": "上下文已压缩",
     "ai.contextSummaryTitle": "上下文摘要",
@@ -991,7 +995,11 @@ const messages = {
     "ai.send": "Send",
     "ai.running": "Running...",
     "ai.stop": "Stop AI task",
-    "ai.contextLength": "Context {count} chars",
+    "ai.contextLength": "Last usage {count}",
+    "ai.usageNotMeasured": "not measured",
+    "ai.usageMeasured": "in {input} / out {output} / total {total} tokens{cache}",
+    "ai.usageCache": " / cached {cached} ({rate}%)",
+    "ai.usageCacheMiss": " / cache miss",
     "ai.compressContext": "Compress Context",
     "ai.contextCompressed": "Context compressed",
     "ai.contextSummaryTitle": "Context Summary",
@@ -1238,6 +1246,8 @@ const aiBusy = ref(false);
 const aiAbortController = shallowRef(null);
 const aiAvailableModels = ref([]);
 const aiModelsLoading = ref(false);
+const agentsMdContent = ref("");
+const aiContextUsage = shallowRef(null);
 const agentModelToAdd = ref("");
 const searchQuery = ref("");
 const searchReplaceText = ref("");
@@ -1251,7 +1261,7 @@ const aiAgentModelOptions = computed(() => {
   return uniqueStrings(configured.length ? configured : [settings.ai.agentModel, defaultAiSettings.agentModel]);
 });
 const aiModelOptions = computed(() => uniqueStrings([settings.ai.completionModel, ...aiAgentModelOptions.value, defaultAiSettings.completionModel, ...aiAvailableModels.value]));
-const aiContextLength = computed(() => formatRecentAiMessages({ includePendingUserMessage: true }).length);
+const aiContextLength = computed(() => formatAiUsage(aiContextUsage.value));
 const canResetAiConversation = computed(() => Boolean(aiPrompt.value.trim() || aiMessages.value.length || getAiTouchedFiles().length));
 const tree = computed(() => {
   dirtyRevision.value;
@@ -2124,6 +2134,7 @@ async function refreshTree(options = {}) {
   if (!rootHandle.value) return;
   try {
     diskTree.value = await readDirectory(rootHandle.value, "");
+    await refreshAgentsMdContext();
     pruneWorkspaceModels(diskTree.value);
     registerWorkspaceFileActions();
     if (options.collapseAll) {
@@ -3446,11 +3457,12 @@ async function compressAiContext() {
       input: `Workspace: ${rootName.value || "unknown"}\nAI-touched files: ${formatFileStateList(getAiTouchedFiles())}\nDirty files: ${formatFileStateList(dirtyFiles.value)}\n\nConversation to compress:\n${formatRecentAiMessages({ includePendingUserMessage: true })}`,
       max_output_tokens: 4096,
     }, controller.signal);
+    updateAiContextUsage(response);
     const summary = extractResponseText(response);
     if (!summary) throw new Error("Empty compressed context");
     aiMessages.value.splice(0, aiMessages.value.length, createAiMessage("assistant", `# ${tr("ai.contextSummaryTitle")}\n\n${summary}`));
     await nextTick();
-    setStatus(tr("ai.contextCompressed"), `${beforeLength} -> ${aiContextLength.value} chars`);
+    setStatus(tr("ai.contextCompressed"), `${beforeLength} -> ${aiContextLength.value}`);
   } catch (error) {
     if (error.name === "AbortError") {
       setStatus(tr("status.aiStopped"), "");
@@ -3466,11 +3478,12 @@ async function compressAiContext() {
 
 async function runAiAgent(prompt, signal, session = getActiveAiSession()) {
   const conversation = [{ role: "user", content: buildAgentPrompt(prompt, session) }];
-  const agentInstructions = await getAgentInstructions();
+  const agentInstructions = getAgentInstructions();
   for (let round = 0; round < AI_AGENT_MAX_TOOL_CALL_ROUNDS; round += 1) {
     const payload = { model: settings.ai.agentModel.trim(), instructions: agentInstructions, input: conversation, tools: getAiToolDefinitions() };
     if (settings.ai.reasoningEffort && settings.ai.reasoningEffort !== "default") payload.reasoning = { effort: settings.ai.reasoningEffort };
     const response = await callOpenAiResponses(payload, signal);
+    updateAiContextUsage(response);
     const text = extractResponseText(response);
     if (text) addAiMessage("assistant", text, {}, session);
     const toolCalls = extractFunctionCalls(response);
@@ -3519,7 +3532,7 @@ function buildImageInputMessage(images) {
   return { role: "user", content };
 }
 
-async function getAgentInstructions() {
+function getAgentInstructions() {
   const instructions = [
     "You are an autonomous coding assistant inside a browser-based Monaco editor.",
     "You run in a browser sandbox, not on the user's local machine. Do not claim you can directly run local shell commands, terminal commands, filesystem commands, package managers, git, or host tools unless an explicit tool listed below is available and you actually use it.",
@@ -3554,15 +3567,24 @@ async function getAgentInstructions() {
   } else {
     instructions.push("SSH tools are unavailable unless the backend server is enabled and at least one SSH setting is exposed to AI.");
   }
-  const agentsMd = await readRootAgentsMd();
+  const agentsMd = getRootAgentsMdContent();
   if (agentsMd) instructions.push(formatAgentsMdInstructions(agentsMd));
   return instructions.join(" ");
 }
 
-async function readRootAgentsMd() {
-  if (!rootHandle.value) return "";
+async function refreshAgentsMdContext() {
+  agentsMdContent.value = await readRootAgentsMdFromDisk();
+}
+
+function getRootAgentsMdContent() {
+  dirtyRevision.value;
   const opened = openFiles.get(AI_AGENTS_FILE_NAME);
   if (isTextFileState(opened)) return opened.model.getValue();
+  return agentsMdContent.value;
+}
+
+async function readRootAgentsMdFromDisk() {
+  if (!rootHandle.value) return "";
   try {
     const handle = await rootHandle.value.getFileHandle(AI_AGENTS_FILE_NAME);
     const file = await handle.getFile();
@@ -3620,6 +3642,40 @@ function formatRecentAiMessages(options = {}) {
   const history = options.includePendingUserMessage ? messages : messages.slice(0, -1);
   if (!history.length) return "none";
   return history.map((message) => `${message.role}: ${String(message.content || "")}`).join("\n---\n");
+}
+
+function updateAiContextUsage(response) {
+  const usage = normalizeAiUsage(response?.usage);
+  if (usage) aiContextUsage.value = usage;
+}
+
+function normalizeAiUsage(usage) {
+  if (!usage || typeof usage !== "object") return null;
+  const input = Number(usage.input_tokens ?? usage.prompt_tokens ?? 0);
+  const output = Number(usage.output_tokens ?? usage.completion_tokens ?? 0);
+  const total = Number(usage.total_tokens ?? input + output);
+  const rawCached = usage.input_tokens_details?.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? usage.cached_tokens;
+  const cached = Number(rawCached ?? 0);
+  if (![input, output, total].some((value) => Number.isFinite(value) && value > 0)) return null;
+  return {
+    input: Number.isFinite(input) ? input : 0,
+    output: Number.isFinite(output) ? output : 0,
+    total: Number.isFinite(total) ? total : 0,
+    cached: Number.isFinite(cached) ? cached : 0,
+    hasCache: rawCached != null,
+  };
+}
+
+function formatAiUsage(usage) {
+  if (!usage) return tr("ai.usageNotMeasured");
+  const cacheRate = usage.input > 0 && usage.cached > 0 ? Math.round((usage.cached / usage.input) * 100) : 0;
+  const cache = cacheRate ? tr("ai.usageCache", { cached: usage.cached, rate: cacheRate }) : (usage.hasCache ? tr("ai.usageCacheMiss") : "");
+  return tr("ai.usageMeasured", {
+    input: usage.input,
+    output: usage.output,
+    total: usage.total,
+    cache,
+  });
 }
 
 function getAiToolDefinitions() {
@@ -4834,8 +4890,9 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .panel-workspace-name { display: block; overflow: hidden; margin-top: 4px; color: var(--muted); font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .icon-button { width: 28px; height: 28px; padding: 0; }
 .code-editor-view .small-button { padding: 5px 8px; font-size: 12px; }
+.code-editor-view .ai-panel-header { align-items: flex-start; }
 .code-editor-view .ai-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
-.code-editor-view .ai-context-length { max-width: 110px; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.code-editor-view .ai-context-length { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .code-editor-view .panel-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 12px 12px; }
 .code-editor-view .panel-actions button:first-child { grid-column: 1 / -1; }
 .code-editor-view .panel-actions button,
