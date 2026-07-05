@@ -641,6 +641,10 @@ const AI_JAVASCRIPT_MAX_LOGS = 100;
 const AI_AGENTS_FILE_NAME = "AGENTS.md";
 const AI_AGENTS_MAX_CHARS = 30000;
 const AI_AGENT_MAX_TOOL_CALL_ROUNDS = 25;
+const AI_TOOL_OUTPUT_MIN_CHARS = 1000;
+const AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS = 5000;
+const AI_TOOL_OUTPUT_HARD_MAX_CHARS = 20000;
+const AI_TOOL_SEARCH_LINE_MAX_CHARS = 240;
 const SSH_OUTPUT_MAX_CHARS = 120000;
 const SSH_COMMAND_OUTPUT_WAIT_MS = 700;
 const SSH_CONNECT_TIMEOUT_MS = 15000;
@@ -3933,7 +3937,7 @@ async function runAiAgent(prompt, signal, session = getActiveAiSession()) {
     if (text) addAiMessage("assistant", text, {}, session);
     const toolCalls = extractFunctionCalls(response);
     if (!toolCalls.length) return;
-    conversation.push(...(response.output || []));
+    conversation.push(...getNonReasoningOutputItems(response));
     const imageInputs = [];
     for (const call of toolCalls) {
       const args = parseAiToolArguments(call);
@@ -3977,6 +3981,10 @@ function buildImageInputMessage(images) {
   return { role: "user", content };
 }
 
+function getNonReasoningOutputItems(response) {
+  return (response.output || []).filter((item) => item.type !== "reasoning");
+}
+
 function getAgentInstructions() {
   const instructions = [
     "You are an autonomous coding assistant inside a browser-based Monaco editor.",
@@ -3987,6 +3995,8 @@ function getAgentInstructions() {
     "Follow security best practices. Never introduce code that exposes, logs, or commits secrets, keys, or credentials.",
     "Do not add code comments unless they are needed to explain non-obvious behavior or the user asks for them.",
     "When multiple independent tool calls are needed and their inputs are already known, issue those tool calls together in the same response instead of one per round. Prefer batch tools when available to reduce latency and token usage.",
+    "Use tools only when they are necessary. If a tool result is sufficient to answer the request, stop calling more tools and answer from that result. Do not retry with alternate URLs, formats, or sources just to confirm information that is already clear.",
+    "When using tools, make focused calls, request the smallest output that can answer the user, and explicitly set available output limits for simple lookups or large-result tools.",
     "Never claim something changed unless you have confirmed it through the available context.",
     "Resolve references like 'the file you created' from Recent chat and AI-touched files before using the current editor file. If multiple files match, ask a short clarification instead of editing or deleting the current file by default.",
     "Prefer small, targeted edits. Explain changed files briefly; do not paste whole modified files in chat.",
@@ -4174,8 +4184,8 @@ function getAiAllToolDefinitions() {
     ), parameters: { type: "object", properties: { code: { type: "string", description: "JavaScript async function body. Example: return input.items.map(x => x * 2);" }, input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." }, timeout_ms: { type: "number", description: "Optional timeout in milliseconds. Defaults to 2000, max 5000." } }, required: ["code"] } },
     { type: "function", name: "list_files", requirements: ["workspace"], description: aiToolDescription("List workspace files and directories.", "Use path relative to workspace root. Use an empty path or '.' for the workspace root. By default only the first level is listed; set recursive to true for descendants. Use max_items to keep output concise."), parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root. '.' means workspace root." }, max_items: { type: "number", description: "Maximum items to return. Capped internally." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
     { type: "function", name: "refresh_tree", requirements: ["workspace"], description: aiToolDescription("Refresh the workspace file tree from disk.", "Use this before locating files that may have been created, deleted, renamed, downloaded, or externally changed."), parameters: { type: "object", properties: { collapse_all: { type: "boolean", description: "Whether to collapse all directories after refreshing. Defaults to false." } } } },
-    { type: "function", name: "read_file", requirements: ["workspace"], description: aiToolDescription("Read a workspace text file.", "Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads. This tool only reads text-like files; binary or unsupported files will fail."), parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "number", description: "Optional 1-based starting line number. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return." } }, required: ["path"] } },
-    { type: "function", name: "read_files", requirements: ["workspace"], description: aiToolDescription("Read multiple workspace text files in one call.", "Prefer this over repeated read_file calls when several files are known. Dirty in-memory content is returned when present. Offset and limit apply to each file."), parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, offset: { type: "number", description: "Optional 1-based starting line number applied to each file. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return per file." }, max_chars_per_file: { type: "number", description: "Maximum characters returned per file." } }, required: ["paths"] } },
+    { type: "function", name: "read_file", requirements: ["workspace"], description: aiToolDescription("Read a workspace text file.", "Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads. This tool only reads text-like files; binary or unsupported files will fail.", "Use max_chars to keep large files concise; default is intentionally limited."), parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "number", description: "Optional 1-based starting line number. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return." }, max_chars: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["path"] } },
+    { type: "function", name: "read_files", requirements: ["workspace"], description: aiToolDescription("Read multiple workspace text files in one call.", "Prefer this over repeated read_file calls when several files are known. Dirty in-memory content is returned when present. Offset and limit apply to each file.", "Use max_chars_per_file to keep large files concise; default is intentionally limited."), parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, offset: { type: "number", description: "Optional 1-based starting line number applied to each file. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return per file." }, max_chars_per_file: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["paths"] } },
     { type: "function", name: "read_image", requirements: ["workspace"], description: aiToolDescription("Read an image file and attach it to the next model turn for visual analysis.", "Use this for screenshots, diagrams, mockups, and other workspace image files. Do not use it for non-image files or oversized images."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "search_text", requirements: ["workspace"], description: aiToolDescription("Search exact text across workspace files.", "This is a simple substring search, not a regex search. Use path to limit the search scope and max_results to keep output concise."), parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string" }, max_results: { type: "number" } }, required: ["query"] } },
     { type: "function", name: "get_current_file", requirements: ["workspace"], description: aiToolDescription("Get the current editor file, cursor position, and selected text.", "Use this for editor context only; do not assume the current file is the user's intended target when recent chat or AI-touched files indicate another file."), parameters: { type: "object", properties: {} } },
@@ -4185,12 +4195,12 @@ function getAiAllToolDefinitions() {
     { type: "function", name: "delete_file", requirements: ["workspace"], description: aiToolDescription("Mark a workspace file for deletion in memory.", "Existing disk files are deleted only when the user saves the deletion. Unsaved new files are removed immediately from memory.", "Be careful resolving ambiguous references before deleting. Do not claim the file was deleted unless this tool reports success."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "open_file", requirements: ["workspace"], description: aiToolDescription("Open a workspace file in the editor.", "Use this when the user wants a file displayed or when visual editor context is useful."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "show_diff", requirements: ["workspace"], description: aiToolDescription("Show the diff for an in-memory changed file.", "Use this for files changed, created, or marked for deletion in the editor session."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
-    { type: "function", name: "request_proxy", requirements: ["backend"], description: aiToolDescription("Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits.", "Use this for external HTTP resources that browser fetch may block. It returns response status, headers, and truncated text body.", "Only http and https URLs are supported. GET and HEAD requests cannot include a body. Use max_chars to keep large responses concise."), parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, max_chars: { type: "number", description: "Maximum response body characters to return. Defaults to 20000." } }, required: ["url"] } },
+    { type: "function", name: "request_proxy", requirements: ["backend"], description: aiToolDescription("Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits.", "Use this for external HTTP resources that browser fetch may block. It returns response status, optional response headers, and truncated text body.", "Only http and https URLs are supported. GET and HEAD requests cannot include a body. Prefer compact API formats when available. If a successful response contains enough information, answer from it instead of making follow-up requests."), parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, include_headers: { type: "boolean", description: "Whether to include response headers in the tool result. Defaults to false; set true only when headers are needed." }, max_chars: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["url"] } },
     { type: "function", name: "get_ssh_connections", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Get SSH settings exposed to AI.", "Returns id, name, host, port, active state, and command whitelist. Secrets are never returned. Use this before opening or choosing an SSH connection when the target is ambiguous."), parameters: { type: "object", properties: {} } },
     { type: "function", name: "open_ssh_connection", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Open an exposed SSH connection by id, name, or host.", "The backend SSH WebSocket performs the actual SSH connection. Reuse active connections when possible instead of reconnecting."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "activate_ssh_terminal", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Switch the visible editor tab to an already active exposed SSH terminal.", "This does not execute any SSH command. It requires the connection to already be active."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "close_ssh_connection", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Close an active exposed SSH connection by id, name, or host.", "Use only when the user asks to disconnect or when cleanup is clearly part of the requested task."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
-    { type: "function", name: "read_ssh_output", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Read recent output from an active exposed SSH connection.", "This reads the SSH terminal transcript. Commands run through execute_ssh_command and commands manually typed by the user can both appear here, along with their outputs, prompts, and terminal control artifacts.", "Use this to inspect terminal context when needed. When the distinction matters, separate AI-run commands and results from user-run commands and results before drawing conclusions. Output may be truncated and may include ANSI terminal artifacts."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, max_chars: { type: "number", description: "Maximum output characters. Defaults to 20000." } }, required: ["connection"] } },
+    { type: "function", name: "read_ssh_output", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Read recent output from an active exposed SSH connection.", "This reads the SSH terminal transcript. Commands run through execute_ssh_command and commands manually typed by the user can both appear here, along with their outputs, prompts, and terminal control artifacts.", "Use this to inspect terminal context when needed. When the distinction matters, separate AI-run commands and results from user-run commands and results before drawing conclusions. Output may be truncated and may include ANSI terminal artifacts."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, max_chars: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["connection"] } },
     { type: "function", name: "execute_ssh_command", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Execute a command on an active exposed SSH connection.", "Prefer commands from the connection whitelist when they can complete the task, and choose concise commands or flags that produce short output when possible.", "You must provide a clear reason, commands array containing only every main command used by the shell command, and high_risk based on your own risk assessment. Main commands outside the whitelist require approval; high_risk=true always requires approval.", "If an SSH command approval is rejected, do not try alternate SSH commands for the same purpose unless the user explicitly asks you to continue or grants permission. List every SSH command you ran in your final answer."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, command: { type: "string" }, commands: { type: "array", items: { type: "string" }, description: "Required list of main commands used by command, excluding arguments. Include every command in chains, pipes, and substitutions. Example: for 'ls -la && whoami', pass ['ls','whoami']." }, high_risk: { type: "boolean", description: "Required. AI-assessed risk flag. Set true if the command may modify files/system state, affect services, expose secrets, consume significant resources, or otherwise be risky." }, reason: { type: "string", description: "Required explanation of why this SSH command is needed." } }, required: ["connection", "command", "commands", "high_risk", "reason"] } },
     { type: "function", name: "sftp_upload_file", requirements: ["backend", "ssh_exposed", "workspace"], description: aiToolDescription("Submit one SFTP upload task and return its task_id.", "local_path is a workspace-relative source file path only; remote_path is the destination file path on the SSH server. Missing remote parent directories are created automatically.", "Do not pass absolute local paths, URLs, or SSH server paths as local_path. Upload returns after task submission; only briefly wait or poll completion for likely-small files such as text files or roughly under 1MB. For larger or unknown-size files, report that the task was submitted unless the user explicitly asks to wait or a next step truly depends on completion."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, local_path: { type: "string", description: "Workspace-relative source file path only, for example 'dist/app.zip' or 'src/main.js'." }, remote_path: { type: "string", description: "Destination file path on the SSH server. Missing parent directories are created automatically." }, use_unsaved: { type: "boolean", description: "Upload unsaved dirty editor content when available. Defaults to true." } }, required: ["connection", "local_path", "remote_path"] } },
     { type: "function", name: "sftp_download_file", requirements: ["backend", "ssh_exposed", "workspace"], description: aiToolDescription("Submit one SFTP download task and return its task_id.", "remote_path is the source file path on the SSH server; local_path is a workspace-relative destination path. Parent directories are created automatically.", "Do not pass absolute local paths, URLs, or SSH server paths as local_path. Download returns after task submission; only briefly wait or poll completion for likely-small files such as text files or roughly under 1MB. For larger or unknown-size files, report that the task was submitted unless the user explicitly asks to wait or a next step truly depends on completion."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, remote_path: { type: "string", description: "Source file path on the SSH server." }, local_path: { type: "string", description: "Workspace-relative destination file path only, for example 'downloads/app.zip'." } }, required: ["connection", "remote_path", "local_path"] } },
@@ -4230,6 +4240,32 @@ function aiToolGetToolAvailability({ names } = {}) {
 
 function aiToolDescription(...parts) {
   return parts.filter(Boolean).join("\n\n");
+}
+
+function aiToolOutputLimitDescription() {
+  return `Maximum characters returned. Defaults to ${AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS}; capped at ${AI_TOOL_OUTPUT_HARD_MAX_CHARS}.`;
+}
+
+function clipAiToolText(value, maxChars) {
+  const text = String(value ?? "");
+  const limit = clampToolCharLimit(maxChars);
+  return {
+    text: text.slice(0, limit),
+    text_chars: text.length,
+    returned_chars: Math.min(text.length, limit),
+    truncated: text.length > limit,
+  };
+}
+
+function clipAiToolTailText(value, maxChars) {
+  const text = String(value ?? "");
+  const limit = clampToolCharLimit(maxChars);
+  return {
+    text: text.slice(-limit),
+    text_chars: text.length,
+    returned_chars: Math.min(text.length, limit),
+    truncated: text.length > limit,
+  };
 }
 
 function getAiToolAvailability(name) {
@@ -4777,10 +4813,10 @@ async function aiToolRefreshTree({ collapse_all: collapseAll = false } = {}) {
   return { summary: `Refreshed ${count} item(s)`, count };
 }
 
-async function aiToolReadFile({ path, offset, limit } = {}) {
+async function aiToolReadFile({ path, offset, limit, max_chars: maxChars } = {}) {
   const file = await ensureFileState(path, { closed: true });
   const content = file.model.getValue();
-  const maxLength = 120000;
+  const maxLength = clampToolCharLimit(maxChars);
   const partial = getLineBasedContentSlice(content, { offset, limit, maxChars: maxLength });
   return { path: file.path, language: file.language, dirty: file.dirty, deleted: Boolean(file.deleted), ...partial };
 }
@@ -4805,9 +4841,9 @@ async function aiToolReadImage(path) {
   return { path: normalized, mimeType, size: file.size, dataUrl };
 }
 
-async function aiToolReadFiles({ paths, offset, limit, max_chars_per_file: maxCharsPerFile = 60000 } = {}) {
+async function aiToolReadFiles({ paths, offset, limit, max_chars_per_file: maxCharsPerFile } = {}) {
   if (!Array.isArray(paths) || !paths.length) throw new Error("paths is required");
-  const maxChars = Math.max(1000, Math.min(Number(maxCharsPerFile) || 60000, 120000));
+  const maxChars = clampToolCharLimit(maxCharsPerFile);
   const files = [];
   for (const path of paths.slice(0, 20)) {
     const file = await ensureFileState(path, { closed: true });
@@ -4819,9 +4855,12 @@ async function aiToolReadFiles({ paths, offset, limit, max_chars_per_file: maxCh
 
 function getLineBasedContentSlice(content, { offset, limit, maxChars }) {
   const text = String(content ?? "");
-  const maxLength = Math.max(1, Math.min(Number(maxChars) || 120000, 120000));
+  const maxLength = clampToolCharLimit(maxChars);
   const hasLineRange = offset != null || limit != null;
-  if (!hasLineRange) return { truncated: text.length > maxLength, content: text.slice(0, maxLength) };
+  if (!hasLineRange) {
+    const clipped = clipAiToolText(text, maxLength);
+    return { content_chars: clipped.text_chars, returned_chars: clipped.returned_chars, truncated: clipped.truncated, content: clipped.text };
+  }
 
   const lines = text.split(/\r?\n/);
   const totalLines = lines.length;
@@ -4830,13 +4869,15 @@ function getLineBasedContentSlice(content, { offset, limit, maxChars }) {
   const maxLines = limit == null ? totalLines - startIndex : Math.max(1, Math.floor(Number(limit) || 1));
   const endIndex = Math.min(totalLines, startIndex + maxLines);
   const sliced = lines.slice(startIndex, endIndex).join("\n");
-  const truncatedByChars = sliced.length > maxLength;
+  const clipped = clipAiToolText(sliced, maxLength);
   return {
     start_line: startIndex < totalLines ? startIndex + 1 : totalLines + 1,
     end_line: endIndex,
     total_lines: totalLines,
-    truncated: startIndex > 0 || endIndex < totalLines || truncatedByChars,
-    content: sliced.slice(0, maxLength),
+    content_chars: sliced.length,
+    returned_chars: clipped.returned_chars,
+    truncated: startIndex > 0 || endIndex < totalLines || clipped.truncated,
+    content: clipped.text,
   };
 }
 
@@ -4852,7 +4893,9 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
       const file = await ensureFileState(item.path, { closed: true });
       const lines = file.model.getValue().split(/\r?\n/);
       lines.forEach((line, index) => {
-        if (results.length < limit && line.includes(query)) results.push({ path: file.path, line: index + 1, text: line.trim().slice(0, 240) });
+        if (results.length >= limit || !line.includes(query)) return;
+        const clipped = clipAiToolText(line.trim(), AI_TOOL_SEARCH_LINE_MAX_CHARS);
+        results.push({ path: file.path, line: index + 1, text_chars: clipped.text_chars, returned_chars: clipped.returned_chars, truncated: clipped.truncated, text: clipped.text });
       });
     } catch {
       // Ignore unreadable files during broad searches.
@@ -4920,7 +4963,7 @@ async function aiToolRunJavaScript({ code, input = {}, timeout_ms: timeoutMs } =
 function createAiJavaScriptWorkerSource() {
   return String.raw`
 const MAX_LOGS = ${AI_JAVASCRIPT_MAX_LOGS};
-const MAX_STRING_LENGTH = 8000;
+const MAX_STRING_LENGTH = ${AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS};
 const MAX_COLLECTION_ITEMS = 100;
 const MAX_DEPTH = 5;
 const nativePostMessage = self.postMessage.bind(self);
@@ -4932,7 +4975,7 @@ Object.defineProperty(self, "postMessage", {
 
 function clipString(value) {
   const text = String(value);
-  return text.length > MAX_STRING_LENGTH ? text.slice(0, MAX_STRING_LENGTH) + "... [truncated]" : text;
+  return { text: text.slice(0, MAX_STRING_LENGTH), text_chars: text.length, returned_chars: Math.min(text.length, MAX_STRING_LENGTH), truncated: text.length > MAX_STRING_LENGTH };
 }
 
 function safeValue(value, depth = 0, seen = []) {
@@ -4995,7 +5038,7 @@ self.onmessage = async (event) => {
 `;
 }
 
-async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, follow_redirect: followRedirect = true, enable_cors: enableCors = true, max_chars: maxChars = 20000 } = {}) {
+async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, follow_redirect: followRedirect = true, enable_cors: enableCors = true, include_headers: includeHeaders = false, max_chars: maxChars } = {}) {
   validateBackendEnabled();
   if (!url) throw new Error("url is required");
   const target = new URL(url);
@@ -5013,17 +5056,25 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, fol
     credentials: "omit",
   });
   const text = await response.text();
-  const limit = Math.max(1000, Math.min(Number(maxChars) || 20000, 120000));
-  return {
-    summary: `${requestMethod} ${target.href} -> ${response.status} (${Math.min(text.length, limit)} chars)`,
+  const clipped = clipAiToolText(text, maxChars);
+  const result = {
+    summary: `${requestMethod} ${target.href} -> ${response.status} (${clipped.returned_chars}/${clipped.text_chars} chars)`,
     url: target.href,
     status: response.status,
     status_text: response.statusText,
     http_ok: response.ok,
-    headers: Object.fromEntries(response.headers.entries()),
-    truncated: text.length > limit,
-    body: text.slice(0, limit),
+    content_type: response.headers.get("content-type") || "",
+    body_chars: clipped.text_chars,
+    returned_chars: clipped.returned_chars,
+    truncated: clipped.truncated,
+    body: clipped.text,
   };
+  if (includeHeaders) result.headers = Object.fromEntries(response.headers.entries());
+  return result;
+}
+
+function clampToolCharLimit(value, defaultValue = AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS, maxValue = AI_TOOL_OUTPUT_HARD_MAX_CHARS) {
+  return Math.max(AI_TOOL_OUTPUT_MIN_CHARS, Math.min(Number(value) || defaultValue, maxValue));
 }
 
 function buildRequestProxyUrl(target, enableCors, followRedirect) {
@@ -5096,12 +5147,11 @@ function aiToolCloseSshConnection(identifier) {
   return { summary: `Closed SSH connection ${config.name || config.host}`, connection: formatAiSshConnection(config, sshSessions.get(config.id)) };
 }
 
-function aiToolReadSshOutput({ connection, max_chars: maxChars = 20000 } = {}) {
+function aiToolReadSshOutput({ connection, max_chars: maxChars } = {}) {
   const config = getAiExposedSshConfig(connection);
   const session = getActiveSshSessionForConfig(config);
-  const limit = Math.max(1000, Math.min(Number(maxChars) || 20000, SSH_OUTPUT_MAX_CHARS));
-  const output = String(session.output || "");
-  return { summary: `Read ${Math.min(output.length, limit)} SSH output chars from ${config.name || config.host}`, connection: formatAiSshConnection(config, session), truncated: output.length > limit, output: output.slice(-limit) };
+  const clipped = clipAiToolTailText(session.output, maxChars);
+  return { summary: `Read ${clipped.returned_chars}/${clipped.text_chars} SSH output chars from ${config.name || config.host}`, connection: formatAiSshConnection(config, session), output_chars: clipped.text_chars, returned_chars: clipped.returned_chars, truncated: clipped.truncated, output: clipped.text };
 }
 
 async function aiToolSftpUploadFile({ connection, local_path: localPath, remote_path: remotePath, use_unsaved: useUnsaved = true } = {}) {
@@ -5144,8 +5194,8 @@ async function aiToolExecuteSshCommand({ connection, command, commands, high_ris
   const beforeLength = String(session.output || "").length;
   sendSshCommand(session, normalizedCommand);
   await delay(SSH_COMMAND_OUTPUT_WAIT_MS);
-  const output = String(session.output || "").slice(beforeLength).slice(-20000);
-  return { summary: tr("ssh.toolExecutedCommand", { command: normalizedCommand, reason: normalizedReason }), connection: formatAiSshConnection(config, session), command: normalizedCommand, commands: mainCommands, high_risk: highRisk, reason: normalizedReason, output };
+  const clipped = clipAiToolTailText(String(session.output || "").slice(beforeLength));
+  return { summary: tr("ssh.toolExecutedCommand", { command: normalizedCommand, reason: normalizedReason }), connection: formatAiSshConnection(config, session), command: normalizedCommand, commands: mainCommands, high_risk: highRisk, reason: normalizedReason, output_chars: clipped.text_chars, returned_chars: clipped.returned_chars, truncated: clipped.truncated, output: clipped.text };
 }
 
 function getAiExposedSshConfig(identifier) {
@@ -5198,7 +5248,8 @@ function aiToolGetCurrentFile() {
   if (!file) return { summary: "No active file" };
   const selection = editor.value?.getSelection();
   const selectedText = selection && isTextFileState(file) ? file.model.getValueInRange(selection) : "";
-  return { path: file.path, language: file.language, file_type: file.fileType, dirty: file.dirty, deleted: Boolean(file.deleted), position: isTextFileState(file) ? editor.value?.getPosition() : null, selection: selectedText.slice(0, 8000) };
+  const clipped = clipAiToolText(selectedText);
+  return { path: file.path, language: file.language, file_type: file.fileType, dirty: file.dirty, deleted: Boolean(file.deleted), position: isTextFileState(file) ? editor.value?.getPosition() : null, selection_chars: clipped.text_chars, returned_chars: clipped.returned_chars, truncated: clipped.truncated, selection: clipped.text };
 }
 
 async function aiToolReplaceInFile({ path, old_text: oldText, new_text: newText }, session = getActiveAiSession()) {
