@@ -4268,6 +4268,17 @@ function clipAiToolTailText(value, maxChars) {
   };
 }
 
+function sanitizeAiTerminalOutput(value) {
+  return String(value ?? "")
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, "")
+    .replace(/\x1B[PX^_][\s\S]*?\x1B\\/g, "")
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1B[()][A-Za-z0-9]/g, "")
+    .replace(/\x1B[=>]/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+}
+
 function getAiToolAvailability(name) {
   const tool = typeof name === "string" ? getAiToolDefinitionByName(name) : name;
   if (!tool) return { found: false, available: false, reason: "Unknown tool" };
@@ -5150,7 +5161,7 @@ function aiToolCloseSshConnection(identifier) {
 function aiToolReadSshOutput({ connection, max_chars: maxChars } = {}) {
   const config = getAiExposedSshConfig(connection);
   const session = getActiveSshSessionForConfig(config);
-  const clipped = clipAiToolTailText(session.output, maxChars);
+  const clipped = clipAiToolTailText(sanitizeAiTerminalOutput(session.output), maxChars);
   return { summary: `Read ${clipped.returned_chars}/${clipped.text_chars} SSH output chars from ${config.name || config.host}`, connection: formatAiSshConnection(config, session), output_chars: clipped.text_chars, returned_chars: clipped.returned_chars, truncated: clipped.truncated, output: clipped.text };
 }
 
@@ -5194,7 +5205,7 @@ async function aiToolExecuteSshCommand({ connection, command, commands, high_ris
   const beforeLength = String(session.output || "").length;
   sendSshCommand(session, normalizedCommand);
   await delay(SSH_COMMAND_OUTPUT_WAIT_MS);
-  const clipped = clipAiToolTailText(String(session.output || "").slice(beforeLength));
+  const clipped = clipAiToolTailText(sanitizeAiTerminalOutput(String(session.output || "").slice(beforeLength)));
   return { summary: tr("ssh.toolExecutedCommand", { command: normalizedCommand, reason: normalizedReason }), connection: formatAiSshConnection(config, session), command: normalizedCommand, commands: mainCommands, high_risk: highRisk, reason: normalizedReason, output_chars: clipped.text_chars, returned_chars: clipped.returned_chars, truncated: clipped.truncated, output: clipped.text };
 }
 
