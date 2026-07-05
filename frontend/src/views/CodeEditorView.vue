@@ -4195,7 +4195,7 @@ function getAiAllToolDefinitions() {
     { type: "function", name: "delete_file", requirements: ["workspace"], description: aiToolDescription("Mark a workspace file for deletion in memory.", "Existing disk files are deleted only when the user saves the deletion. Unsaved new files are removed immediately from memory.", "Be careful resolving ambiguous references before deleting. Do not claim the file was deleted unless this tool reports success."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "open_file", requirements: ["workspace"], description: aiToolDescription("Open a workspace file in the editor.", "Use this when the user wants a file displayed or when visual editor context is useful."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "show_diff", requirements: ["workspace"], description: aiToolDescription("Show the diff for an in-memory changed file.", "Use this for files changed, created, or marked for deletion in the editor session."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
-    { type: "function", name: "request_proxy", requirements: ["backend"], description: aiToolDescription("Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits.", "Use this for external HTTP resources that browser fetch may block. It returns response status, optional response headers, and truncated text body.", "Only http and https URLs are supported. GET and HEAD requests cannot include a body. Prefer compact API formats when available. If a successful response contains enough information, answer from it instead of making follow-up requests."), parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, include_headers: { type: "boolean", description: "Whether to include response headers in the tool result. Defaults to false; set true only when headers are needed." }, max_chars: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["url"] } },
+    { type: "function", name: "request_proxy", requirements: ["backend"], description: aiToolDescription("Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits.", "Use this for external HTTP resources that browser fetch may block. It returns response status, optional response headers, and truncated text body.", "Only http and https URLs are supported. GET and HEAD requests cannot include a body. Prefer compact API formats when available. If a successful response contains enough information, answer from it instead of making follow-up requests.", "Use filter_script to reduce large response bodies at the source of the tool result: it runs after the request in an isolated Worker and the tool body becomes the script return value."), parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, include_headers: { type: "boolean", description: "Whether to include response headers in the tool result. Defaults to false; set true only when headers are needed." }, filter_script: { type: "string", description: "Optional JavaScript async function body used to filter only the response body before returning it. input is the response body string. Return a string. No DOM, network, editor, or filesystem access is available. Example: const data = JSON.parse(input); return data.items.map(x => x.title).join('\\n');" }, max_chars: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["url"] } },
     { type: "function", name: "get_ssh_connections", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Get SSH settings exposed to AI.", "Returns id, name, host, port, active state, and command whitelist. Secrets are never returned. Use this before opening or choosing an SSH connection when the target is ambiguous."), parameters: { type: "object", properties: {} } },
     { type: "function", name: "open_ssh_connection", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Open an exposed SSH connection by id, name, or host.", "The backend SSH WebSocket performs the actual SSH connection. Reuse active connections when possible instead of reconnecting."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "activate_ssh_terminal", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Switch the visible editor tab to an already active exposed SSH terminal.", "This does not execute any SSH command. It requires the connection to already be active."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
@@ -4915,7 +4915,7 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
   return { summary: `${results.length} match(es)`, results };
 }
 
-async function aiToolRunJavaScript({ code, input = {}, timeout_ms: timeoutMs } = {}) {
+async function aiToolRunJavaScript({ code, input = {}, timeout_ms: timeoutMs, result_mode: resultMode, max_output_chars: maxOutputChars } = {}) {
   const script = String(code || "");
   if (!script.trim()) return { ok: false, summary: "JavaScript code is required" };
   if (script.length > AI_JAVASCRIPT_MAX_CODE_CHARS) return { ok: false, summary: `JavaScript code is too large: ${script.length} chars` };
@@ -4964,7 +4964,7 @@ async function aiToolRunJavaScript({ code, input = {}, timeout_ms: timeoutMs } =
       timer = window.setTimeout(() => {
         finish({ ok: false, summary: `JavaScript timed out after ${timeout}ms`, error: { message: `Timed out after ${timeout}ms` } });
       }, timeout);
-      worker.postMessage({ code: script, input });
+      worker.postMessage({ code: script, input, result_mode: resultMode, max_output_chars: maxOutputChars });
     } catch (error) {
       finish({ ok: false, summary: error.message || String(error), error: { message: error.message || String(error) } });
     }
@@ -4975,6 +4975,7 @@ function createAiJavaScriptWorkerSource() {
   return String.raw`
 const MAX_LOGS = ${AI_JAVASCRIPT_MAX_LOGS};
 const MAX_STRING_LENGTH = ${AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS};
+const MAX_OUTPUT_STRING_LENGTH = ${AI_TOOL_OUTPUT_HARD_MAX_CHARS};
 const MAX_COLLECTION_ITEMS = 100;
 const MAX_DEPTH = 5;
 const nativePostMessage = self.postMessage.bind(self);
@@ -4984,9 +4985,21 @@ Object.defineProperty(self, "postMessage", {
   configurable: false,
 });
 
-function clipString(value) {
+function clipString(value, maxLength = MAX_STRING_LENGTH) {
   const text = String(value);
-  return { text: text.slice(0, MAX_STRING_LENGTH), text_chars: text.length, returned_chars: Math.min(text.length, MAX_STRING_LENGTH), truncated: text.length > MAX_STRING_LENGTH };
+  const limit = Math.max(1, Math.min(Number(maxLength) || MAX_STRING_LENGTH, MAX_OUTPUT_STRING_LENGTH));
+  return { text: text.slice(0, limit), text_chars: text.length, returned_chars: Math.min(text.length, limit), truncated: text.length > limit };
+}
+
+function formatTextResult(value) {
+  if (value === undefined) return "";
+  if (typeof value === "string") return value;
+  try {
+    const json = JSON.stringify(value, null, 2);
+    return json === undefined ? String(value) : json;
+  } catch {
+    return String(value);
+  }
 }
 
 function safeValue(value, depth = 0, seen = []) {
@@ -5041,6 +5054,10 @@ self.onmessage = async (event) => {
     const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
     const run = new AsyncFunction("input", "\"use strict\";\n" + String(payload.code || ""));
     const result = await run(payload.input);
+    if (payload.result_mode === "text") {
+      nativePostMessage({ type: "done", ok: true, result: clipString(formatTextResult(result), payload.max_output_chars), elapsed_ms: Math.round(performance.now() - startedAt) });
+      return;
+    }
     nativePostMessage({ type: "done", ok: true, result: safeValue(result), elapsed_ms: Math.round(performance.now() - startedAt) });
   } catch (error) {
     nativePostMessage({ type: "done", ok: false, error: safeValue(error), elapsed_ms: Math.round(performance.now() - startedAt) });
@@ -5049,7 +5066,7 @@ self.onmessage = async (event) => {
 `;
 }
 
-async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, follow_redirect: followRedirect = true, enable_cors: enableCors = true, include_headers: includeHeaders = false, max_chars: maxChars } = {}) {
+async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, follow_redirect: followRedirect = true, enable_cors: enableCors = true, include_headers: includeHeaders = false, filter_script: filterScript, max_chars: maxChars } = {}) {
   validateBackendEnabled();
   if (!url) throw new Error("url is required");
   const target = new URL(url);
@@ -5057,6 +5074,7 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, fol
   const requestMethod = String(method || "GET").trim().toUpperCase();
   if ((requestMethod === "GET" || requestMethod === "HEAD") && body != null) throw new Error(`${requestMethod} requests cannot include a body`);
 
+  const outputLimit = clampToolCharLimit(maxChars);
   const requestHeaders = buildProxyRequestHeaders(headers);
   const proxyUrl = buildRequestProxyUrl(target, enableCors, followRedirect);
 
@@ -5067,21 +5085,56 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, fol
     credentials: "omit",
   });
   const text = await response.text();
-  const clipped = clipAiToolText(text, maxChars);
+  const responseHeaders = Object.fromEntries(response.headers.entries());
+  const contentType = response.headers.get("content-type") || "";
+  const filterScriptText = String(filterScript || "").trim();
+  const filtered = Boolean(filterScriptText);
+  let clipped = clipAiToolText(text, outputLimit);
+  let filterElapsedMs = 0;
+
+  if (filtered) {
+    const filterResult = await aiToolRunJavaScript({
+      code: filterScriptText,
+      input: text,
+      result_mode: "text",
+      max_output_chars: outputLimit,
+    });
+    if (!filterResult.ok) throw new Error(`filter_script failed: ${filterResult.summary || "Unknown error"}`);
+    clipped = normalizeAiJavaScriptTextResult(filterResult.result, outputLimit);
+    filterElapsedMs = filterResult.elapsed_ms || 0;
+  }
+
   const result = {
-    summary: `${requestMethod} ${target.href} -> ${response.status} (${clipped.returned_chars}/${clipped.text_chars} chars)`,
+    summary: `${requestMethod} ${target.href} -> ${response.status} (${clipped.returned_chars}/${clipped.text_chars} chars${filtered ? `, filtered from ${text.length} chars` : ""})`,
     url: target.href,
     status: response.status,
     status_text: response.statusText,
     http_ok: response.ok,
-    content_type: response.headers.get("content-type") || "",
+    content_type: contentType,
+    filtered,
     body_chars: clipped.text_chars,
     returned_chars: clipped.returned_chars,
     truncated: clipped.truncated,
     body: clipped.text,
   };
-  if (includeHeaders) result.headers = Object.fromEntries(response.headers.entries());
+  if (filtered) {
+    result.source_body_chars = text.length;
+    result.filter_elapsed_ms = filterElapsedMs;
+  }
+  if (includeHeaders) result.headers = responseHeaders;
   return result;
+}
+
+function normalizeAiJavaScriptTextResult(result, maxChars) {
+  if (result && typeof result === "object" && Object.prototype.hasOwnProperty.call(result, "text")) {
+    return {
+      text: String(result.text ?? ""),
+      text_chars: Number(result.text_chars) || String(result.text ?? "").length,
+      returned_chars: Number(result.returned_chars) || String(result.text ?? "").length,
+      truncated: Boolean(result.truncated),
+    };
+  }
+  return clipAiToolText(result, maxChars);
 }
 
 function clampToolCharLimit(value, defaultValue = AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS, maxValue = AI_TOOL_OUTPUT_HARD_MAX_CHARS) {
