@@ -3996,7 +3996,7 @@ function getAgentInstructions() {
     "Do not add code comments unless they are needed to explain non-obvious behavior or the user asks for them.",
     "When multiple independent tool calls are needed and their inputs are already known, issue those tool calls together in the same response instead of one per round. Prefer batch tools when available to reduce latency and token usage.",
     "Use tools only when they are necessary. If a tool result is sufficient to answer the request, stop calling more tools and answer from that result. Do not retry with alternate URLs, formats, or sources just to confirm information that is already clear.",
-    "When using tools, make focused calls, request the smallest output that can answer the user, and explicitly set available output limits for simple lookups or large-result tools.",
+    "When using tools, make focused calls, request the smallest output that can answer the user, and explicitly set available output limits for simple lookups or large-result tools. Keep output limits as small as possible while still completing the task to avoid bloating context.",
     "Never claim something changed unless you have confirmed it through the available context.",
     "Resolve references like 'the file you created' from Recent chat and AI-touched files before using the current editor file. If multiple files match, ask a short clarification instead of editing or deleting the current file by default.",
     "Prefer small, targeted edits. Explain changed files briefly; do not paste whole modified files in chat.",
