@@ -5540,6 +5540,12 @@ function getTreeIconClass(node, collapsed = false) {
   --folder-icon: #dcb67a;
   --file-icon: #c5c5c5;
   --preview-pane-size: min(var(--preview-pane-width, 480px), calc(100% - 160px));
+  --scrollbar-size: 10px;
+  --scrollbar-track: #1e1e1e;
+  --scrollbar-thumb: #4a4a4a;
+  --scrollbar-thumb-hover: #6a6a6a;
+  --scrollbar-thumb-active: var(--accent);
+  --scrollbar-radius: 999px;
   display: grid;
   grid-template-columns: 48px minmax(0, var(--side-panel-width, 300px)) minmax(0, 1fr);
   width: 100vw;
@@ -5576,6 +5582,10 @@ function getTreeIconClass(node, collapsed = false) {
   --shadow: rgb(0 0 0 / 18%);
   --folder-icon: #c18401;
   --file-icon: #424242;
+  --scrollbar-track: #f3f3f3;
+  --scrollbar-thumb: #c8c8c8;
+  --scrollbar-thumb-hover: #9f9f9f;
+  --scrollbar-thumb-active: var(--accent);
 }
 
 .code-editor-view.theme-hc-black {
@@ -5604,11 +5614,29 @@ function getTreeIconClass(node, collapsed = false) {
   --shadow: rgb(255 255 255 / 24%);
   --folder-icon: #ffff00;
   --file-icon: #ffffff;
+  --scrollbar-track: #000000;
+  --scrollbar-thumb: #6fc3df;
+  --scrollbar-thumb-hover: #ffff00;
+  --scrollbar-thumb-active: #ffff00;
 }
 
 .code-editor-view *,
 .code-editor-view *::before,
 .code-editor-view *::after { box-sizing: border-box; }
+.code-editor-view,
+.code-editor-view * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
+.code-editor-view::-webkit-scrollbar,
+.code-editor-view *::-webkit-scrollbar { width: var(--scrollbar-size); height: var(--scrollbar-size); }
+.code-editor-view::-webkit-scrollbar-track,
+.code-editor-view *::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+.code-editor-view::-webkit-scrollbar-thumb,
+.code-editor-view *::-webkit-scrollbar-thumb { min-height: 36px; border: 2px solid var(--scrollbar-track); border-radius: var(--scrollbar-radius); background-color: var(--scrollbar-thumb); }
+.code-editor-view::-webkit-scrollbar-thumb:hover,
+.code-editor-view *::-webkit-scrollbar-thumb:hover { background-color: var(--scrollbar-thumb-hover); }
+.code-editor-view::-webkit-scrollbar-thumb:active,
+.code-editor-view *::-webkit-scrollbar-thumb:active { background-color: var(--scrollbar-thumb-active); }
+.code-editor-view::-webkit-scrollbar-corner,
+.code-editor-view *::-webkit-scrollbar-corner { background: transparent; }
 .code-editor-view button,
 .code-editor-view input,
 .code-editor-view select,
@@ -5780,7 +5808,7 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .setting-hint { color: var(--muted); line-height: 1.45; }
 .code-editor-view .checkbox-row { display: flex; align-items: center; gap: 8px; }
 .code-editor-view .checkbox-row input { width: auto; }
-.code-editor-view .editor-shell { display: grid; grid-template-rows: 40px 36px minmax(0, 1fr) 26px; min-width: 0; min-height: 0; background: var(--editor); }
+.code-editor-view .editor-shell { display: grid; grid-template-rows: 40px 46px minmax(0, 1fr) 26px; min-width: 0; min-height: 0; background: var(--editor); }
 .code-editor-view .command-bar { display: flex; align-items: center; justify-content: center; min-width: 0; gap: 8px; padding: 5px 12px; border-bottom: 1px solid var(--border); background: var(--panel); }
 .code-editor-view .command-center { display: grid; grid-template-columns: auto minmax(120px, 420px) auto; align-items: center; width: min(520px, 100%); height: 29px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--input); color: var(--muted); text-align: left; box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%); }
 .code-editor-view .command-center:hover,
@@ -5792,7 +5820,7 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .command-icon-button:hover:not(:disabled),
 .code-editor-view .command-icon-button:focus-visible { border-color: var(--accent-strong); background: var(--input); color: var(--text); outline: none; }
 .code-editor-view .command-icon-button.active { border-color: var(--accent-strong); background: var(--context-hover); color: var(--text); }
-.code-editor-view .tabs { display: flex; min-width: 0; overflow-x: auto; overflow-y: hidden; background: var(--panel); border-bottom: 1px solid var(--border); }
+.code-editor-view .tabs { display: flex; align-items: flex-start; min-width: 0; --scrollbar-size: 8px; overflow-x: auto; overflow-y: hidden; background: var(--panel); border-bottom: 1px solid var(--border); }
 .code-editor-view .tab { display: flex; align-items: center; gap: 8px; min-width: 120px; max-width: 240px; height: 35px; padding: 0 8px 0 12px; border: 0; border-right: 1px solid var(--border); border-radius: 0; background: var(--tab); color: var(--muted); }
 .code-editor-view .tab.active { background: var(--tab-active); color: var(--text); }
 .code-editor-view .tab-name { overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
