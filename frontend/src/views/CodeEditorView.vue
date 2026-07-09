@@ -5550,6 +5550,7 @@ function getTreeIconClass(node, collapsed = false) {
   grid-template-columns: 48px minmax(0, var(--side-panel-width, 300px)) minmax(0, 1fr);
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: var(--editor);
   color: var(--text);
@@ -5827,14 +5828,14 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .dirty-dot { color: #ffffff; font-size: 16px; line-height: 1; }
 .code-editor-view .tab-close { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 3px; }
 .code-editor-view .tab-close:hover { background: var(--button-hover); }
-.code-editor-view .editor-stage { position: relative; min-width: 0; min-height: 0; }
+.code-editor-view .editor-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 .code-editor-view .monaco-host { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
 .code-editor-view .monaco-host.visible { opacity: 1; pointer-events: auto; }
-.code-editor-view .ssh-terminal { position: absolute; inset: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); min-width: 0; min-height: 0; background: var(--editor); }
+.code-editor-view .ssh-terminal { position: absolute; inset: 0; display: grid; grid-template-rows: 34px minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; background: var(--editor); }
 .code-editor-view .ssh-terminal-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 12px; font-weight: 600; }
 .code-editor-view .ssh-terminal-header small { color: var(--muted); font-weight: 500; }
-.code-editor-view .ssh-terminal-host { min-width: 0; min-height: 0; overflow: hidden; padding: 8px; }
-.code-editor-view .ssh-terminal-host .terminal { height: 100%; }
+.code-editor-view .ssh-terminal-host { min-width: 0; min-height: 0; overflow: hidden; }
+.code-editor-view .ssh-terminal-host .terminal { width: 100%; height: 100%; }
 .code-editor-view .ssh-terminal-fallback { min-width: 0; min-height: 0; margin: 0; overflow: auto; padding: 10px 12px; background: var(--editor); color: var(--text); font-family: Consolas, 'Courier New', monospace; font-size: 13px; line-height: 1.45; white-space: pre-wrap; }
 .code-editor-view .editor-stage.preview-open .monaco-host.visible,
 .code-editor-view .editor-stage.preview-open .unsupported-preview { right: var(--preview-pane-size); }
