@@ -26,7 +26,7 @@ public class NativeReflectionRegistration implements Feature {
         };
 
         for (String scanPackage : scanPackages) {
-            registerPackageClasses(scanPackage);
+            registerPackageClasses(access, scanPackage);
         }
 
         String[] resourceDirs = {
@@ -38,9 +38,13 @@ public class NativeReflectionRegistration implements Feature {
         }
     }
 
-    private void registerPackageClasses(String packageName) {
+    private void registerPackageClasses(BeforeAnalysisAccess access, String packageName) {
         int count = 0;
+        // Quarkus native 构建会隔离 hosted 与应用 ClassLoader：classpath 决定扫描位置，
+        // application ClassLoader 确保扫描结果通过 ClassInfo.loadClass() 从应用环境加载。
         try (ScanResult scan = new ClassGraph()
+                .overrideClassLoaders(access.getApplicationClassLoader())
+                .overrideClasspath(access.getApplicationClassPath())
                 .enableClassInfo()
                 .acceptPackages(packageName)
                 .scan()) {
