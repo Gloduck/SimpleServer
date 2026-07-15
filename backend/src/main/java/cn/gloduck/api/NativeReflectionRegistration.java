@@ -1,8 +1,5 @@
 package cn.gloduck.api;
 
-import io.github.classgraph.ClassGraph;
-import io.github.classgraph.ClassInfo;
-import io.github.classgraph.ScanResult;
 import org.graalvm.nativeimage.hosted.Feature;
 import org.graalvm.nativeimage.hosted.RuntimeReflection;
 import org.graalvm.nativeimage.hosted.RuntimeResourceAccess;
@@ -16,6 +13,10 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.jar.JarFile;
+import java.util.stream.Stream;
 
 public class NativeReflectionRegistration implements Feature {
     @Override
@@ -39,21 +40,54 @@ public class NativeReflectionRegistration implements Feature {
     }
 
     private void registerPackageClasses(BeforeAnalysisAccess access, String packageName) {
-        int count = 0;
-        // Quarkus native 构建会隔离 hosted 与应用 ClassLoader：classpath 决定扫描位置，
-        // application ClassLoader 确保扫描结果通过 ClassInfo.loadClass() 从应用环境加载。
-        try (ScanResult scan = new ClassGraph()
-                .overrideClassLoaders(access.getApplicationClassLoader())
-                .overrideClasspath(access.getApplicationClassPath())
-                .enableClassInfo()
-                .acceptPackages(packageName)
-                .scan()) {
-            for (ClassInfo ci : scan.getAllClasses()) {
-                Class<?> cls = ci.loadClass();
-                registerClass(cls);
-                count++;
-                System.out.println("[GraalVM] Registered class: " + cls.getName());
+        String packagePath = packageName.replace('.', '/') + "/";
+        Set<String> classNames = new TreeSet<>();
+
+        // Quarkus native 构建会隔离 hosted 与应用 classpath，直接扫描 GraalVM 提供的应用输入。
+        for (Path classpathEntry : access.getApplicationClassPath()) {
+            try {
+                if (Files.isDirectory(classpathEntry)) {
+                    Path packageDir = classpathEntry.resolve(packagePath);
+                    if (!Files.isDirectory(packageDir)) {
+                        continue;
+                    }
+                    try (Stream<Path> files = Files.walk(packageDir)) {
+                        files.filter(Files::isRegularFile)
+                                .map(classpathEntry::relativize)
+                                .map(Path::toString)
+                                .filter(path -> path.endsWith(".class"))
+                                .map(path -> path.substring(0, path.length() - ".class".length())
+                                        .replace('\\', '.')
+                                        .replace('/', '.'))
+                                .forEach(classNames::add);
+                    }
+                } else if (Files.isRegularFile(classpathEntry) && classpathEntry.toString().endsWith(".jar")) {
+                    try (JarFile jar = new JarFile(classpathEntry.toFile())) {
+                        jar.stream()
+                                .map(entry -> entry.getName())
+                                .filter(path -> path.startsWith(packagePath) && path.endsWith(".class"))
+                                .map(path -> path.substring(0, path.length() - ".class".length())
+                                        .replace('/', '.'))
+                                .forEach(classNames::add);
+                    }
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to scan application classpath: " + classpathEntry, e);
             }
+        }
+
+        int count = 0;
+        for (String className : classNames) {
+            if (className.endsWith("package-info") || className.endsWith("module-info")) {
+                continue;
+            }
+            Class<?> cls = access.findClassByName(className);
+            if (cls == null) {
+                throw new IllegalStateException("Failed to load application class: " + className);
+            }
+            registerClass(cls);
+            count++;
+            System.out.println("[GraalVM] Registered class: " + cls.getName());
         }
         System.out.printf("[GraalVM] Registered %d classes from package: %s%n", count, packageName);
     }
