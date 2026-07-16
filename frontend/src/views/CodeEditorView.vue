@@ -136,7 +136,7 @@
           <label class="ai-session-select">
             <span>{{ tr('ai.session') }}</span>
             <select v-model="activeAiSessionId">
-              <option v-for="session in aiSessions" :key="session.id" :value="session.id">{{ session.title }} · {{ session.messages.length }}</option>
+              <option v-for="session in aiSessions" :key="session.id" :value="session.id">{{ session.title }} · {{ session.messages.length }}{{ session.busy ? ` · ${tr('ai.running')}` : '' }}</option>
             </select>
           </label>
           <button type="button" class="small-button" @click="createAiSessionAndActivate">{{ tr('ai.newSession') }}</button>
@@ -1378,12 +1378,10 @@ const aiPrompt = computed({
   get: () => activeAiSession.value?.prompt || "",
   set: (value) => { getActiveAiSession().prompt = value; },
 });
-const aiBusy = ref(false);
-const aiAbortController = shallowRef(null);
+const aiBusy = computed(() => Boolean(activeAiSession.value?.busy));
 const aiAvailableModels = ref([]);
 const aiModelsLoading = ref(false);
 const agentsMdContent = ref("");
-const aiContextUsage = shallowRef(null);
 const agentModelToAdd = ref("");
 const searchQuery = ref("");
 const searchReplaceText = ref("");
@@ -1397,7 +1395,7 @@ const aiAgentModelOptions = computed(() => {
   return uniqueStrings(configured.length ? configured : [settings.ai.agentModel, defaultAiSettings.agentModel]);
 });
 const aiModelOptions = computed(() => uniqueStrings([settings.ai.completionModel, ...aiAgentModelOptions.value, defaultAiSettings.completionModel, ...aiAvailableModels.value]));
-const aiContextLength = computed(() => formatAiUsage(aiContextUsage.value));
+const aiContextLength = computed(() => formatAiUsage(activeAiSession.value?.contextUsage));
 const canResetAiConversation = computed(() => Boolean(aiPrompt.value.trim() || aiMessages.value.length || getAiTouchedFiles().length));
 const tree = computed(() => {
   dirtyRevision.value;
@@ -1532,7 +1530,7 @@ onBeforeUnmount(() => {
   keybindingDisposables.splice(0).forEach((disposable) => disposable.dispose());
   inlineCompletionDisposables.splice(0).forEach((disposable) => disposable.dispose());
   abortAiCompletionRequest();
-  aiAbortController.value?.abort();
+  aiSessions.forEach((session) => session.abortController?.abort());
   closeAllSshSessions({ disposeTerminal: true });
   openFiles.forEach((file) => disposeFileModels(file, { force: true }));
   disposeWorkspaceModels({ force: true });
@@ -3643,7 +3641,16 @@ function extractFunctionCalls(response) {
 
 function createAiSession() {
   aiSessionSerial += 1;
-  return { id: `ai-session-${Date.now()}-${aiSessionSerial}`, title: tr("ai.defaultSessionTitle", { count: aiSessionSerial }), prompt: "", messages: [], touchedPaths: new Set() };
+  return {
+    id: `ai-session-${Date.now()}-${aiSessionSerial}`,
+    title: tr("ai.defaultSessionTitle", { count: aiSessionSerial }),
+    prompt: "",
+    messages: [],
+    touchedPaths: new Set(),
+    busy: false,
+    abortController: null,
+    contextUsage: null,
+  };
 }
 
 function getActiveAiSession() {
@@ -3860,22 +3867,24 @@ async function requestAiCompletion(file, model, position, signal) {
 
 async function sendAiPrompt() {
   const session = getActiveAiSession();
-  const prompt = aiPrompt.value.trim();
-  if (!prompt || aiBusy.value) return;
+  const prompt = session.prompt.trim();
+  if (!prompt || session.busy) return;
+  const model = settings.ai.agentModel.trim();
+  const reasoningEffort = settings.ai.reasoningEffort;
   try {
-    validateAiConfig(settings.ai.agentModel.trim());
+    validateAiConfig(model);
   } catch (error) {
     addAiMessage("assistant", error.message, {}, session);
     return;
   }
-  aiPrompt.value = "";
-  aiBusy.value = true;
+  session.prompt = "";
+  session.busy = true;
   addAiMessage("user", prompt, {}, session);
-  const controller = new AbortController();
-  aiAbortController.value = controller;
+  const controller = markRaw(new AbortController());
+  session.abortController = controller;
   try {
-    await runAiAgent(prompt, controller.signal, session);
-    setStatus(tr("status.aiCompleted"), settings.ai.agentModel.trim());
+    await runAiAgent(prompt, controller.signal, session, { model, reasoningEffort });
+    setStatus(tr("status.aiCompleted"), model);
   } catch (error) {
     if (error.name === "AbortError") {
       addAiMessage("assistant", tr("status.aiStopped"), {}, session);
@@ -3885,13 +3894,15 @@ async function sendAiPrompt() {
       setStatus("AI Error", error.message || String(error));
     }
   } finally {
-    aiBusy.value = false;
-    if (aiAbortController.value === controller) aiAbortController.value = null;
+    if (session.abortController === controller) {
+      session.busy = false;
+      session.abortController = null;
+    }
   }
 }
 
 function stopAiTask() {
-  aiAbortController.value?.abort();
+  activeAiSession.value?.abortController?.abort();
 }
 
 function resetAiConversation() {
@@ -3900,6 +3911,7 @@ function resetAiConversation() {
   aiPrompt.value = "";
   session.messages.splice(0, session.messages.length);
   session.touchedPaths.clear();
+  session.contextUsage = null;
   session.title = tr("ai.defaultSessionTitle", { count: aiSessions.indexOf(session) + 1 });
   refreshAiTouchedFlags();
   touchDirtyState();
@@ -3907,52 +3919,59 @@ function resetAiConversation() {
 }
 
 async function compressAiContext() {
-  if (aiBusy.value || !aiMessages.value.length) return;
+  const session = getActiveAiSession();
+  if (session.busy || !session.messages.length) return;
+  const model = settings.ai.agentModel.trim();
   try {
-    validateAiConfig(settings.ai.agentModel.trim());
+    validateAiConfig(model);
   } catch (error) {
-    addAiMessage("assistant", error.message);
+    addAiMessage("assistant", error.message, {}, session);
     return;
   }
-  const controller = new AbortController();
-  aiAbortController.value = controller;
-  aiBusy.value = true;
-  const beforeLength = aiContextLength.value;
+  const controller = markRaw(new AbortController());
+  session.abortController = controller;
+  session.busy = true;
+  const beforeLength = formatAiUsage(session.contextUsage);
+  const touchedPaths = getActiveAiTouchedPaths(session);
   try {
     const response = await callOpenAiResponses({
-      model: settings.ai.agentModel.trim(),
+      model,
       store: false,
       instructions: "Compress the provided AI assistant conversation into a concise but complete context summary for future coding-agent turns. Preserve user goals, decisions, file paths, tool results, pending unsaved changes, AI-created files, deleted/pending-delete files, and unresolved issues. Do not add markdown fences.",
-      input: `Workspace: ${rootName.value || "unknown"}\nAI-touched files: ${formatFileStateList(getAiTouchedFiles())}\nDirty files: ${formatFileStateList(dirtyFiles.value)}\n\nConversation to compress:\n${formatRecentAiMessages({ includePendingUserMessage: true })}`,
+      input: `Workspace: ${rootName.value || "unknown"}\nAI-touched files: ${formatFileStateList(getAiTouchedFiles(session), { touchedPaths })}\nDirty files: ${formatFileStateList(dirtyFiles.value, { touchedPaths })}\n\nConversation to compress:\n${formatRecentAiMessages({ includePendingUserMessage: true, session })}`,
       max_output_tokens: 4096,
     }, controller.signal);
-    updateAiContextUsage(response);
+    updateAiContextUsage(response, session);
     const summary = extractResponseText(response);
     if (!summary) throw new Error("Empty compressed context");
-    aiMessages.value.splice(0, aiMessages.value.length, createAiMessage("assistant", `# ${tr("ai.contextSummaryTitle")}\n\n${summary}`));
+    session.messages.splice(0, session.messages.length, createAiMessage("assistant", `# ${tr("ai.contextSummaryTitle")}\n\n${summary}`));
     await nextTick();
-    setStatus(tr("ai.contextCompressed"), `${beforeLength} -> ${aiContextLength.value}`);
+    setStatus(tr("ai.contextCompressed"), `${beforeLength} -> ${formatAiUsage(session.contextUsage)}`);
   } catch (error) {
     if (error.name === "AbortError") {
       setStatus(tr("status.aiStopped"), "");
     } else {
-      addAiMessage("assistant", error.message || String(error));
+      addAiMessage("assistant", error.message || String(error), {}, session);
       setStatus("AI Error", error.message || String(error));
     }
   } finally {
-    aiBusy.value = false;
-    if (aiAbortController.value === controller) aiAbortController.value = null;
+    if (session.abortController === controller) {
+      session.busy = false;
+      session.abortController = null;
+    }
   }
 }
 
-async function runAiAgent(prompt, signal, session = getActiveAiSession()) {
+async function runAiAgent(prompt, signal, session = getActiveAiSession(), runConfig = {}) {
   const conversation = buildAgentInputMessages(prompt, session);
   const agentInstructions = getAgentInstructions();
+  const model = runConfig.model || settings.ai.agentModel.trim();
+  const reasoningEffort = runConfig.reasoningEffort || settings.ai.reasoningEffort;
   for (let round = 0; round < AI_AGENT_MAX_TOOL_CALL_ROUNDS; round += 1) {
-    const payload = { model: settings.ai.agentModel.trim(), instructions: agentInstructions, input: conversation, tools: getAiToolDefinitions() };
-    if (settings.ai.reasoningEffort && settings.ai.reasoningEffort !== "default") payload.reasoning = { effort: settings.ai.reasoningEffort };
+    const payload = { model, instructions: agentInstructions, input: conversation, tools: getAiToolDefinitions() };
+    if (reasoningEffort && reasoningEffort !== "default") payload.reasoning = { effort: reasoningEffort };
     const response = await callOpenAiResponses(payload, signal);
-    updateAiContextUsage(response);
+    updateAiContextUsage(response, session);
     const text = extractResponseText(response);
     if (text) addAiMessage("assistant", text, {}, session);
     const toolCalls = extractFunctionCalls(response);
@@ -4150,9 +4169,9 @@ function getRecentAiHistoryMessages(options = {}) {
   return options.includePendingUserMessage ? messages : messages.slice(0, -1);
 }
 
-function updateAiContextUsage(response) {
+function updateAiContextUsage(response, session = getActiveAiSession()) {
   const usage = normalizeAiUsage(response?.usage);
-  if (usage) aiContextUsage.value = usage;
+  if (usage) session.contextUsage = usage;
 }
 
 function normalizeAiUsage(usage) {
