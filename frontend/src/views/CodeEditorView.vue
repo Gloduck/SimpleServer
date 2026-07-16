@@ -4574,7 +4574,8 @@ function isSshSessionActive(session) {
 
 async function exportSettingsUrl() {
   const url = new URL(window.location.href);
-  url.searchParams.set(SETTINGS_URL_PARAM, encodeSettingsForUrl(settings));
+  url.searchParams.delete(SETTINGS_URL_PARAM);
+  url.hash = `${SETTINGS_URL_PARAM}=${await encodeSettingsForUrl(settings)}`;
   const value = url.toString();
   try {
     await navigator.clipboard.writeText(value);
@@ -4593,10 +4594,10 @@ function loadSettings() {
 }
 
 async function promptImportSettingsFromUrl() {
-  if (!new URLSearchParams(window.location.search).has(SETTINGS_URL_PARAM)) return;
+  if (!readSettingsUrlValue()) return;
   let imported;
   try {
-    imported = normalizeSettings(readSettingsFromUrl());
+    imported = normalizeSettings(await readSettingsFromUrl());
   } catch {
     removeSettingsFromUrl();
     await showAlert(tr("settings.importInvalid"), { title: tr("settings.importTitle"), tone: "danger" });
@@ -4653,31 +4654,51 @@ function normalizeStoredSshConfig(value) {
   return config.name || config.host ? config : null;
 }
 
-function readSettingsFromUrl() {
-  const encoded = new URLSearchParams(window.location.search).get(SETTINGS_URL_PARAM);
+function readSettingsUrlValue() {
+  return new URLSearchParams(window.location.hash.replace(/^#/, "")).get(SETTINGS_URL_PARAM);
+}
+
+async function readSettingsFromUrl() {
+  const encoded = readSettingsUrlValue();
   if (!encoded) return null;
-  return JSON.parse(decodeSettingsFromUrl(encoded));
+  return JSON.parse(await decodeSettingsFromUrl(encoded));
 }
 
 function removeSettingsFromUrl() {
   const url = new URL(window.location.href);
-  url.searchParams.delete(SETTINGS_URL_PARAM);
+  const hashParams = new URLSearchParams(url.hash.replace(/^#/, ""));
+  hashParams.delete(SETTINGS_URL_PARAM);
+  url.hash = hashParams.toString();
   window.history.replaceState(window.history.state, "", url.toString());
 }
 
-function encodeSettingsForUrl(value) {
+async function encodeSettingsForUrl(value) {
   const json = JSON.stringify(JSON.parse(JSON.stringify(value)));
-  const bytes = new TextEncoder().encode(json);
+  const bytes = await transformSettingsBytes(new TextEncoder().encode(json), new CompressionStream("deflate-raw"));
+  return encodeBase64Url(bytes);
+}
+
+async function decodeSettingsFromUrl(value) {
+  const compressed = decodeBase64Url(value);
+  const bytes = await transformSettingsBytes(compressed, new DecompressionStream("deflate-raw"));
+  return new TextDecoder().decode(bytes);
+}
+
+async function transformSettingsBytes(bytes, transform) {
+  const stream = new Blob([bytes]).stream().pipeThrough(transform);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function encodeBase64Url(bytes) {
   let binary = "";
   for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function decodeSettingsFromUrl(value) {
+function decodeBase64Url(value) {
   const base64 = String(value).replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(String(value).length / 4) * 4, "=");
   const binary = atob(base64);
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
 function persistSettings() {
