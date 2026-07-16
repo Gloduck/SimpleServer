@@ -15,6 +15,7 @@ const CROPPER_BASE = `${NPM_MIRROR_BASE}/cropperjs/${CROPPER_VERSION}/files`;
 const XTERM_BASE = `${NPM_MIRROR_BASE}/@xterm/xterm/${XTERM_VERSION}/files`;
 const XTERM_FIT_ADDON_BASE = `${NPM_MIRROR_BASE}/@xterm/addon-fit/${XTERM_FIT_ADDON_VERSION}/files`;
 const resourceLoadPromises = new Map();
+let nonAmdScriptLoadChain = Promise.resolve();
 
 const CdnUtils = {
     npmMirrorBase: NPM_MIRROR_BASE,
@@ -64,22 +65,25 @@ const CdnUtils = {
         const existing = getGlobal?.();
         if (existing) return Promise.resolve(existing);
         if (!resourceLoadPromises.has(src)) {
-            resourceLoadPromises.set(src, new Promise((resolve, reject) => {
+            const loadPromise = nonAmdScriptLoadChain.then(() => new Promise((resolve, reject) => {
                 const previousDefine = window.define;
                 const script = document.createElement('script');
                 script.src = src;
+                const restoreDefine = () => { window.define = previousDefine; };
                 script.onload = () => {
-                    window.define = previousDefine;
+                    restoreDefine();
                     const value = getGlobal?.();
                     value ? resolve(value) : reject(new Error(`${label} did not expose expected global`));
                 };
                 script.onerror = () => {
-                    window.define = previousDefine;
+                    restoreDefine();
                     reject(new Error(`Failed to load ${label}`));
                 };
                 window.define = undefined;
                 document.head.append(script);
-            }).catch((error) => {
+            }));
+            nonAmdScriptLoadChain = loadPromise.catch(() => undefined);
+            resourceLoadPromises.set(src, loadPromise.catch((error) => {
                 resourceLoadPromises.delete(src);
                 throw error;
             }));
@@ -155,11 +159,11 @@ const CdnUtils = {
     },
 
     loadPrettierStandalone() {
-        return this.loadScript(this.prettier.standalone, () => window.prettier, 'Prettier standalone');
+        return this.loadScriptWithoutAmd(this.prettier.standalone, () => window.prettier, 'Prettier standalone');
     },
 
     loadPrettierPlugin(name) {
-        return this.loadScript(this.prettier.plugin(name), () => window.prettierPlugins?.[name], `Prettier plugin ${name}`);
+        return this.loadScriptWithoutAmd(this.prettier.plugin(name), () => window.prettierPlugins?.[name], `Prettier plugin ${name}`);
     },
 
     loadCropper() {

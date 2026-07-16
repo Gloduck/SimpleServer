@@ -790,8 +790,6 @@ const messages = {
     "status.diff": "正在对比 {path}",
     "status.shortcutInvalid": "快捷键无效：{shortcut}",
     "status.shortcutUpdated": "快捷键已更新",
-    "status.formatted": "已格式化 {language}",
-    "status.formatUnavailable": "当前语言没有可用格式化器",
     "status.aiCompleted": "AI 任务完成",
     "status.aiStopped": "AI 任务已停止",
     "status.aiChangedFile": "AI 已修改 {path}",
@@ -946,7 +944,6 @@ const messages = {
     "error.openFile": "打开文件失败",
     "error.saveFile": "保存文件失败",
     "error.delete": "删除失败",
-    "error.format": "格式化失败",
     "error.invalidPath": "路径不合法",
     "error.invalidName": "名称不合法",
     "error.unsupportedFile": "不支持打开该文件类型",
@@ -1083,8 +1080,6 @@ const messages = {
     "status.diff": "Comparing {path}",
     "status.shortcutInvalid": "Invalid shortcut: {shortcut}",
     "status.shortcutUpdated": "Shortcuts updated",
-    "status.formatted": "Formatted {language}",
-    "status.formatUnavailable": "No formatter is available for this language",
     "status.aiCompleted": "AI task completed",
     "status.aiStopped": "AI task stopped",
     "status.aiChangedFile": "AI changed {path}",
@@ -1239,7 +1234,6 @@ const messages = {
     "error.openFile": "Failed to open file",
     "error.saveFile": "Failed to save file",
     "error.delete": "Failed to delete",
-    "error.format": "Failed to format",
     "error.invalidPath": "Invalid path",
     "error.invalidName": "Invalid name",
     "error.unsupportedFile": "Unsupported file type",
@@ -3430,7 +3424,7 @@ function registerKeybindings() {
   const targetEditors = [editor.value, diffEditor.value?.getOriginalEditor(), diffEditor.value?.getModifiedEditor()].filter(Boolean);
   const actions = [
     { id: "browser-editor-save", label: tr("action.save"), shortcut: settings.shortcuts.save, run: saveActiveFile },
-    { id: "browser-editor-format", label: tr("action.format"), shortcut: settings.shortcuts.format, run: formatActiveFile },
+    { id: "browser-editor-format", label: tr("action.format"), shortcut: settings.shortcuts.format, command: "editor.action.formatDocument" },
     { id: "browser-editor-command-palette", label: tr("commandCenter.title"), shortcut: settings.shortcuts.commandPalette, run: openCommandPalette },
     { id: "browser-editor-search", label: tr("panel.search"), shortcut: settings.shortcuts.search, run: () => showPanel("search") },
     { id: "browser-editor-find-references", label: tr("action.findReferences"), shortcut: settings.shortcuts.findReferences, run: triggerFindReferences },
@@ -3438,20 +3432,29 @@ function registerKeybindings() {
     { id: "browser-editor-toggle-sidebar", label: tr("action.toggleSidebar"), shortcut: settings.shortcuts.toggleSidebar, run: toggleSidePanel },
     { id: "browser-editor-ai-complete", label: tr("action.aiComplete"), shortcut: settings.shortcuts.aiComplete, run: triggerAiCompletion },
   ];
-  actions.forEach((action, index) => {
-    const keybinding = parseShortcut(action.shortcut);
-    if (!keybinding) {
+  const validActions = actions.map((action) => ({ ...action, keybinding: parseShortcut(action.shortcut) })).filter((action) => {
+    if (!action.keybinding) {
       setStatus(tr("status.shortcutInvalid", { shortcut: action.shortcut }), action.label);
-      return;
+      return false;
     }
-    targetEditors.forEach((targetEditor, editorIndex) => {
-      keybindingDisposables.push(targetEditor.addAction({
-        id: `${action.id}-${index}-${editorIndex}-${Date.now()}`,
-        label: action.label,
-        keybindings: [keybinding],
-        run: action.run,
-      }));
-    });
+    return true;
+  });
+  validActions.filter((action) => action.command).forEach((action) => {
+    keybindingDisposables.push(monaco.editor.addKeybindingRules([
+      { keybinding: 0, command: `-${action.command}` },
+      { keybinding: action.keybinding, command: action.command },
+    ]));
+  });
+  const customActions = validActions.filter((action) => !action.command);
+  targetEditors.forEach((targetEditor) => {
+    keybindingDisposables.push(targetEditor.onKeyDown((event) => {
+      if (event.browserEvent.isComposing) return;
+      const action = customActions.find((item) => event.equals(item.keybinding));
+      if (!action) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void action.run();
+    }));
   });
 }
 
@@ -4357,26 +4360,6 @@ async function runAiToolCall(call, args = {}, session = getActiveAiSession()) {
 
 function okTool(result) {
   return { ok: true, ...result };
-}
-
-async function formatActiveFile() {
-  const file = activeFile.value;
-  if (!file) return;
-
-  try {
-    const formatted = await formatCode(file.model.getValue(), file.language);
-    if (formatted == null) {
-      await editor.value?.getAction("editor.action.formatDocument")?.run();
-      setStatus(tr("status.formatUnavailable"), getLanguageLabel(file.language));
-      return;
-    }
-
-    file.model.pushEditOperations([], [{ range: file.model.getFullModelRange(), text: formatted }], () => null);
-    setStatus(tr("status.formatted", { language: getLanguageLabel(file.language) }), file.path);
-  } catch (error) {
-    console.error(tr("error.format"), error);
-    setStatus(tr("error.format"), error.message || "");
-  }
 }
 
 const formatterDisposables = [];
