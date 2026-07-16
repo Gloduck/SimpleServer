@@ -609,7 +609,9 @@ const SFTP_UPLOAD_PATH = "/api/ssh/sftp/upload";
 const SFTP_DOWNLOAD_PATH = "/api/ssh/sftp/download";
 CdnUtils.loadCodicons().catch((error) => console.error("Failed to load codicons:", error));
 const LEGACY_AI_COMPLETE_SHORTCUT = "Ctrl+Shift+Enter";
-const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", preview: "Ctrl+Shift+V", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Alt+Enter" };
+const LEGACY_FOLD_ALL_SHORTCUT = "Ctrl+K Ctrl+0";
+const LEGACY_UNFOLD_ALL_SHORTCUT = "Ctrl+K Ctrl+J";
+const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", preview: "Ctrl+Shift+V", toggleSidebar: "Ctrl+B", fold: "Ctrl+Shift+[", unfold: "Ctrl+Shift+]", foldAll: "Ctrl+Alt+[", unfoldAll: "Ctrl+Alt+]", aiComplete: "Ctrl+Alt+Enter" };
 const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
 const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
 const DEFAULT_SSH_WHITELIST_TEMPLATE = [
@@ -953,6 +955,10 @@ const messages = {
     "shortcut.findReferences": "查找引用",
     "shortcut.preview": "预览",
     "shortcut.toggleSidebar": "切换侧边栏",
+    "shortcut.fold": "折叠当前区域",
+    "shortcut.unfold": "展开当前区域",
+    "shortcut.foldAll": "折叠全部",
+    "shortcut.unfoldAll": "展开全部",
     "shortcut.aiComplete": "AI 代码补全",
   },
   "en-US": {
@@ -1243,6 +1249,10 @@ const messages = {
     "shortcut.findReferences": "Find References",
     "shortcut.preview": "Preview",
     "shortcut.toggleSidebar": "Toggle Sidebar",
+    "shortcut.fold": "Fold Current Region",
+    "shortcut.unfold": "Unfold Current Region",
+    "shortcut.foldAll": "Fold All",
+    "shortcut.unfoldAll": "Unfold All",
     "shortcut.aiComplete": "AI Code Completion",
   },
 };
@@ -1276,6 +1286,10 @@ const shortcutItems = [
   { key: "findReferences", labelKey: "shortcut.findReferences" },
   { key: "preview", labelKey: "shortcut.preview" },
   { key: "toggleSidebar", labelKey: "shortcut.toggleSidebar" },
+  { key: "fold", labelKey: "shortcut.fold" },
+  { key: "unfold", labelKey: "shortcut.unfold" },
+  { key: "foldAll", labelKey: "shortcut.foldAll" },
+  { key: "unfoldAll", labelKey: "shortcut.unfoldAll" },
   { key: "aiComplete", labelKey: "shortcut.aiComplete" },
 ];
 
@@ -2632,7 +2646,9 @@ function handleGlobalCommandPaletteShortcut(event) {
 }
 
 function isShortcutEvent(value, event) {
-  const parts = String(value || "").split("+").map((part) => part.trim()).filter(Boolean);
+  const shortcut = String(value || "").trim();
+  if (shortcut.split(/\s+/).length > 1) return false;
+  const parts = shortcut.split("+").map((part) => part.trim()).filter(Boolean);
   if (!parts.length) return false;
   const key = parts.pop();
   const modifiers = new Set(parts.map((part) => part.toLowerCase()));
@@ -3428,6 +3444,10 @@ function registerKeybindings() {
     { id: "browser-editor-find-references", label: tr("action.findReferences"), shortcut: settings.shortcuts.findReferences, command: "editor.action.goToReferences" },
     { id: "browser-editor-preview", label: tr("action.preview"), shortcut: settings.shortcuts.preview, run: togglePreview },
     { id: "browser-editor-toggle-sidebar", label: tr("action.toggleSidebar"), shortcut: settings.shortcuts.toggleSidebar, run: toggleSidePanel },
+    { id: "browser-editor-fold", label: tr("shortcut.fold"), shortcut: settings.shortcuts.fold, command: "editor.fold" },
+    { id: "browser-editor-unfold", label: tr("shortcut.unfold"), shortcut: settings.shortcuts.unfold, command: "editor.unfold" },
+    { id: "browser-editor-fold-all", label: tr("shortcut.foldAll"), shortcut: settings.shortcuts.foldAll, command: "editor.foldAll" },
+    { id: "browser-editor-unfold-all", label: tr("shortcut.unfoldAll"), shortcut: settings.shortcuts.unfoldAll, command: "editor.unfoldAll" },
     { id: "browser-editor-ai-complete", label: tr("action.aiComplete"), shortcut: settings.shortcuts.aiComplete, command: "editor.action.inlineSuggest.trigger" },
   ];
   const validActions = actions.map((action) => ({ ...action, keybinding: parseShortcut(action.shortcut) })).filter((action) => {
@@ -3454,7 +3474,9 @@ function registerKeybindings() {
 }
 
 function parseShortcut(value) {
-  const parts = String(value || "").split("+").map((part) => part.trim()).filter(Boolean);
+  const shortcut = String(value || "").trim();
+  if (!shortcut || /\s/.test(shortcut)) return null;
+  const parts = shortcut.split("+").map((part) => part.trim()).filter(Boolean);
   if (!parts.length) return null;
   let code = 0;
   const key = parts.pop();
@@ -3473,7 +3495,7 @@ function getMonacoKeyCode(key) {
   if (/^[a-z]$/i.test(normalized)) return monaco.KeyCode[`Key${normalized.toUpperCase()}`];
   if (/^[0-9]$/.test(normalized)) return monaco.KeyCode[`Digit${normalized}`];
   if (/^F([1-9]|1[0-9]|2[0-4])$/i.test(normalized)) return monaco.KeyCode[normalized.toUpperCase()];
-  const aliases = { Enter: "Enter", Esc: "Escape", Escape: "Escape", Space: "Space", Tab: "Tab", Backspace: "Backspace", Delete: "Delete", Del: "Delete", Up: "UpArrow", Down: "DownArrow", Left: "LeftArrow", Right: "RightArrow" };
+  const aliases = { Enter: "Enter", Esc: "Escape", Escape: "Escape", Space: "Space", Tab: "Tab", Backspace: "Backspace", Delete: "Delete", Del: "Delete", Up: "UpArrow", Down: "DownArrow", Left: "LeftArrow", Right: "RightArrow", "[": "BracketLeft", "]": "BracketRight" };
   return monaco.KeyCode[aliases[normalized] || normalized];
 }
 
@@ -4601,6 +4623,8 @@ function normalizeSettings(value = {}) {
   delete savedSettings.previewWidth;
   const shortcuts = { ...vscodeShortcuts, ...(savedSettings.shortcuts || {}) };
   if (shortcuts.aiComplete === LEGACY_AI_COMPLETE_SHORTCUT) shortcuts.aiComplete = vscodeShortcuts.aiComplete;
+  if (shortcuts.foldAll === LEGACY_FOLD_ALL_SHORTCUT) shortcuts.foldAll = vscodeShortcuts.foldAll;
+  if (shortcuts.unfoldAll === LEGACY_UNFOLD_ALL_SHORTCUT) shortcuts.unfoldAll = vscodeShortcuts.unfoldAll;
   const ai = { ...defaultAiSettings, ...(savedSettings.ai || {}) };
   const backend = { ...defaultBackendSettings, ...(savedSettings.backend || {}) };
   const ssh = { ...defaultSshSettings, ...(savedSettings.ssh || {}) };
