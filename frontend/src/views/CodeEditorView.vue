@@ -608,7 +608,8 @@ const SSH_WEBSOCKET_PATH = "/api/ssh/ws";
 const SFTP_UPLOAD_PATH = "/api/ssh/sftp/upload";
 const SFTP_DOWNLOAD_PATH = "/api/ssh/sftp/download";
 CdnUtils.loadCodicons().catch((error) => console.error("Failed to load codicons:", error));
-const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", preview: "Ctrl+Shift+V", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Shift+Enter" };
+const LEGACY_AI_COMPLETE_SHORTCUT = "Ctrl+Shift+Enter";
+const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", preview: "Ctrl+Shift+V", toggleSidebar: "Ctrl+B", aiComplete: "Ctrl+Alt+Enter" };
 const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
 const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
 const DEFAULT_SSH_WHITELIST_TEMPLATE = [
@@ -629,7 +630,6 @@ const PREVIEW_MIN_WIDTH = 280;
 const PREVIEW_MAX_WIDTH = 900;
 const DEFAULT_PREVIEW_WIDTH = 480;
 const defaultSettings = { theme: "vs-dark", locale: "zh-CN", fontSize: 14, wordWrap: false, minimap: true, shortcuts: { ...vscodeShortcuts }, ai: { ...defaultAiSettings }, backend: { ...defaultBackendSettings }, ssh: { ...defaultSshSettings } };
-const AI_COMPLETION_MANUAL_TRIGGER_WINDOW_MS = 2000;
 const AI_COMPLETION_MANUAL_PREFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_SUFFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_MAX_OUTPUT_TOKENS = 512;
@@ -659,7 +659,6 @@ let prettierStandalonePromise = null;
 const prettierPluginPromises = new Map();
 let aiCompletionRequestSerial = 0;
 let aiCompletionInFlight = false;
-let aiCompletionManualUntil = 0;
 let aiCompletionAbortController = null;
 let monacoLanguageIndex = null;
 
@@ -3421,16 +3420,15 @@ function updateKeybindings() {
 
 function registerKeybindings() {
   keybindingDisposables.splice(0).forEach((disposable) => disposable.dispose());
-  const targetEditors = [editor.value, diffEditor.value?.getOriginalEditor(), diffEditor.value?.getModifiedEditor()].filter(Boolean);
   const actions = [
     { id: "browser-editor-save", label: tr("action.save"), shortcut: settings.shortcuts.save, run: saveActiveFile },
     { id: "browser-editor-format", label: tr("action.format"), shortcut: settings.shortcuts.format, command: "editor.action.formatDocument" },
-    { id: "browser-editor-command-palette", label: tr("commandCenter.title"), shortcut: settings.shortcuts.commandPalette, run: openCommandPalette },
+    { id: "browser-editor-command-palette", label: tr("commandCenter.title"), shortcut: settings.shortcuts.commandPalette, command: "editor.action.quickCommand" },
     { id: "browser-editor-search", label: tr("panel.search"), shortcut: settings.shortcuts.search, run: () => showPanel("search") },
-    { id: "browser-editor-find-references", label: tr("action.findReferences"), shortcut: settings.shortcuts.findReferences, run: triggerFindReferences },
+    { id: "browser-editor-find-references", label: tr("action.findReferences"), shortcut: settings.shortcuts.findReferences, command: "editor.action.goToReferences" },
     { id: "browser-editor-preview", label: tr("action.preview"), shortcut: settings.shortcuts.preview, run: togglePreview },
     { id: "browser-editor-toggle-sidebar", label: tr("action.toggleSidebar"), shortcut: settings.shortcuts.toggleSidebar, run: toggleSidePanel },
-    { id: "browser-editor-ai-complete", label: tr("action.aiComplete"), shortcut: settings.shortcuts.aiComplete, run: triggerAiCompletion },
+    { id: "browser-editor-ai-complete", label: tr("action.aiComplete"), shortcut: settings.shortcuts.aiComplete, command: "editor.action.inlineSuggest.trigger" },
   ];
   const validActions = actions.map((action) => ({ ...action, keybinding: parseShortcut(action.shortcut) })).filter((action) => {
     if (!action.keybinding) {
@@ -3445,15 +3443,12 @@ function registerKeybindings() {
       { keybinding: action.keybinding, command: action.command },
     ]));
   });
-  const customActions = validActions.filter((action) => !action.command);
-  targetEditors.forEach((targetEditor) => {
-    keybindingDisposables.push(targetEditor.onKeyDown((event) => {
-      if (event.browserEvent.isComposing) return;
-      const action = customActions.find((item) => event.equals(item.keybinding));
-      if (!action) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void action.run();
+  validActions.filter((action) => !action.command).forEach((action) => {
+    keybindingDisposables.push(monaco.editor.addEditorAction({
+      id: action.id,
+      label: action.label,
+      keybindings: [action.keybinding],
+      run: action.run,
     }));
   });
 }
@@ -3712,8 +3707,8 @@ function registerInlineCompletions() {
         if (!settings.ai.apiKey.trim() || !settings.ai.completionModel.trim()) return { items: [] };
         const file = getFileByModel(model);
         if (!file) return { items: [] };
-        const manual = Date.now() < aiCompletionManualUntil;
-        if (!manual) return { items: [] };
+        if (context.triggerKind !== monaco.languages.InlineCompletionTriggerKind.Explicit) return { items: [] };
+        abortAiCompletionRequest();
         const snapshot = getAiCompletionSnapshot(model, position);
         const requestId = ++aiCompletionRequestSerial;
         if (token?.isCancellationRequested || requestId !== aiCompletionRequestSerial || !isAiCompletionSnapshotCurrent(snapshot)) return { items: [] };
@@ -3794,7 +3789,6 @@ function registerCompletionInvalidation() {
 
 function invalidateAiCompletionRequest() {
   aiCompletionRequestSerial += 1;
-  aiCompletionManualUntil = 0;
   abortAiCompletionRequest();
 }
 
@@ -4501,19 +4495,11 @@ function clampPreviewWidth(value) {
   return Math.max(PREVIEW_MIN_WIDTH, Math.min(PREVIEW_MAX_WIDTH, Math.round(Number(value) || DEFAULT_PREVIEW_WIDTH)));
 }
 
-async function triggerAiCompletion() {
-  if (!activeFile.value) return;
-  abortAiCompletionRequest();
-  aiCompletionManualUntil = Date.now() + AI_COMPLETION_MANUAL_TRIGGER_WINDOW_MS;
-  aiCompletionRequestSerial += 1;
-  await editor.value?.getAction("editor.action.inlineSuggest.trigger")?.run();
-}
-
 async function triggerFindReferences() {
   if (!activeFile.value) return;
   const targetEditor = activeDiffPath.value ? diffEditor.value?.getModifiedEditor?.() : editor.value;
   targetEditor?.focus?.();
-  await targetEditor?.getAction("editor.action.referenceSearch.trigger")?.run();
+  await targetEditor?.getAction("editor.action.goToReferences")?.run();
 }
 
 function setStatus(left, right) {
@@ -4614,6 +4600,7 @@ function normalizeSettings(value = {}) {
   delete savedSettings.sidebarWidth;
   delete savedSettings.previewWidth;
   const shortcuts = { ...vscodeShortcuts, ...(savedSettings.shortcuts || {}) };
+  if (shortcuts.aiComplete === LEGACY_AI_COMPLETE_SHORTCUT) shortcuts.aiComplete = vscodeShortcuts.aiComplete;
   const ai = { ...defaultAiSettings, ...(savedSettings.ai || {}) };
   const backend = { ...defaultBackendSettings, ...(savedSettings.backend || {}) };
   const ssh = { ...defaultSshSettings, ...(savedSettings.ssh || {}) };
