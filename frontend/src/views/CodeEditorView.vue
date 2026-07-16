@@ -481,7 +481,7 @@
       <button type="button" role="menuitem" class="danger" @click="runChangesContextAction('revert')">{{ tr('action.revert') }}</button>
     </div>
 
-    <div v-if="dialogState.visible" class="editor-dialog-backdrop" role="presentation" @click.self="cancelDialog">
+    <div v-if="dialogState.visible" class="editor-dialog-backdrop" role="presentation" @click.self="dialogState.closeOnBackdrop && cancelDialog()">
       <form class="editor-dialog" role="dialog" aria-modal="true" aria-labelledby="editor-dialog-title" @submit.prevent="confirmDialog" @keydown.esc.prevent.stop="cancelDialog" @click.stop>
         <div class="editor-dialog-header">
           <span class="codicon" :class="dialogIconClass" aria-hidden="true"></span>
@@ -1359,7 +1359,7 @@ const contextMenu = reactive({ visible: false, x: 0, y: 0, node: null });
 const changesContextMenu = reactive({ visible: false, x: 0, y: 0, file: null });
 const dialogInput = ref(null);
 const dialogPrimaryButton = ref(null);
-const dialogState = reactive({ visible: false, mode: "alert", title: "", message: "", value: "", placeholder: "", confirmLabel: "", cancelLabel: "", tone: "default", selectOnFocus: false });
+const dialogState = reactive({ visible: false, mode: "alert", title: "", message: "", value: "", placeholder: "", confirmLabel: "", cancelLabel: "", tone: "default", selectOnFocus: false, closeOnBackdrop: true });
 const settings = reactive(loadSettings());
 const sshSessions = reactive(new Map());
 const activeSshTerminalId = ref("");
@@ -1695,15 +1695,15 @@ const dialogQueue = [];
 let activeDialogResolve = null;
 
 function showAlert(message, options = {}) {
-  return showDialog({ mode: "alert", message, title: options.title || tr("dialog.alertTitle"), tone: options.tone, confirmLabel: options.confirmLabel || tr("dialog.ok") });
+  return showDialog({ mode: "alert", message, title: options.title || tr("dialog.alertTitle"), tone: options.tone, confirmLabel: options.confirmLabel || tr("dialog.ok"), closeOnBackdrop: options.closeOnBackdrop });
 }
 
 function showConfirm(message, options = {}) {
-  return showDialog({ mode: "confirm", message, title: options.title || tr("dialog.confirmTitle"), tone: options.tone, confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel") });
+  return showDialog({ mode: "confirm", message, title: options.title || tr("dialog.confirmTitle"), tone: options.tone, confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), closeOnBackdrop: options.closeOnBackdrop });
 }
 
 function showPrompt(message, defaultValue = "", options = {}) {
-  return showDialog({ mode: "prompt", message, value: defaultValue, title: options.title || tr("dialog.promptTitle"), placeholder: options.placeholder || "", confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), selectOnFocus: options.selectOnFocus });
+  return showDialog({ mode: "prompt", message, value: defaultValue, title: options.title || tr("dialog.promptTitle"), placeholder: options.placeholder || "", confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), selectOnFocus: options.selectOnFocus, closeOnBackdrop: options.closeOnBackdrop });
 }
 
 function showDialog(options) {
@@ -1728,6 +1728,7 @@ function openNextDialog() {
     cancelLabel: nextDialog.options.cancelLabel || tr("dialog.cancel"),
     tone: nextDialog.options.tone || "default",
     selectOnFocus: Boolean(nextDialog.options.selectOnFocus),
+    closeOnBackdrop: nextDialog.options.closeOnBackdrop !== false,
   });
   nextTick(() => {
     if (dialogState.mode === "prompt") {
@@ -5298,7 +5299,7 @@ async function authorizeAiSshCommand(config, command, mainCommands, highRisk, re
   const whitelisted = areSshMainCommandsWhitelisted(config, mainCommands);
   if (!highRisk && whitelisted) return;
   const messageKey = highRisk ? "ssh.confirmHighRiskCommand" : "ssh.confirmUnauthorizedCommand";
-  const approved = await showConfirm(tr(messageKey, { name: config.name || config.host, command, commands: mainCommands.join(", "), reason }), { title: tr("ssh.run"), tone: "danger" });
+  const approved = await showConfirm(tr(messageKey, { name: config.name || config.host, command, commands: mainCommands.join(", "), reason }), { title: tr("ssh.run"), tone: "danger", closeOnBackdrop: false });
   if (!approved) throw new Error(tr("ssh.error.commandRejected"));
 }
 
