@@ -3585,13 +3585,48 @@ async function callOpenAiResponses(payload, signal) {
   const response = await fetch(`${getAiBaseUrl()}/responses`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${settings.ai.apiKey.trim()}` },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, stream: true }),
     signal,
   });
-  const raw = await response.text();
-  const data = raw ? JSON.parse(raw) : {};
-  Object.defineProperty(data, "__meta", { value: { ms: Math.round(performance.now() - startedAt), bytes: raw.length }, enumerable: false });
-  if (!response.ok) throw new Error(data.error?.message || data.message || response.statusText);
+  if (!response.ok || !response.headers.get("content-type")?.includes("text/event-stream")) {
+    const raw = await response.text();
+    const data = raw ? JSON.parse(raw) : {};
+    Object.defineProperty(data, "__meta", { value: { ms: Math.round(performance.now() - startedAt), bytes: raw.length }, enumerable: false });
+    if (!response.ok) throw new Error(data.error?.message || data.message || response.statusText);
+    return data;
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Streaming response body is unavailable");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let bytes = 0;
+  let completedResponse = null;
+  const processEvent = (block) => {
+    const eventData = block.split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n");
+    if (!eventData || eventData === "[DONE]") return;
+    const event = JSON.parse(eventData);
+    if (event.type === "response.completed" || event.type === "response.incomplete") completedResponse = event.response;
+    if (event.type === "response.failed") throw new Error(event.response?.error?.message || "AI response failed");
+    if (event.type === "error") throw new Error(event.message || event.error?.message || "AI streaming response failed");
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() || "";
+    blocks.forEach(processEvent);
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) processEvent(buffer);
+  if (!completedResponse) throw new Error("AI streaming response ended before completion");
+  const data = completedResponse;
+  Object.defineProperty(data, "__meta", { value: { ms: Math.round(performance.now() - startedAt), bytes }, enumerable: false });
   return data;
 }
 
@@ -4843,9 +4878,10 @@ function createVirtualFileState(path, options = {}) {
 }
 
 async function aiToolListFiles({ path = "", max_items: maxItems = 200, recursive = false } = {}) {
-  const normalizedPath = String(path || "").trim() === "." ? "" : normalizeWorkspacePath(path);
+  const rawPath = String(path || "").trim();
+  const normalizedPath = !rawPath || rawPath === "." ? "" : normalizeWorkspacePath(rawPath);
   const nodes = normalizedPath ? [findNodeByPath(tree.value, normalizedPath)].filter(Boolean) : tree.value;
-  if (!nodes.length) throw new Error(path ? `Path not found: ${path}` : "No files loaded");
+  if (normalizedPath && !nodes.length) throw new Error(`Path not found: ${path}`);
   const limit = Math.max(1, Math.min(Number(maxItems) || 200, 1000));
   const sourceNodes = normalizedPath && nodes[0]?.kind === "directory" ? nodes[0].children || [] : nodes;
   const items = recursive ? flattenTree(nodes, limit) : listTreeLevel(sourceNodes, limit);
