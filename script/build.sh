@@ -54,7 +54,28 @@ require_command() {
   if [[ "${NATIVE_FILE_EXTENSION}" == ".exe" ]] && command -v "$1.cmd" >/dev/null 2>&1; then
     return
   fi
-  fail "missing required command: $1"
+  local hint="${2:-}"
+  fail "missing required command: $1${hint:+; ${hint}}"
+}
+
+check_native_toolchain() {
+  require_command native-image "install GraalVM Native Image"
+
+  if [[ "$(uname -s 2>/dev/null || printf '')" != "Linux" ]]; then
+    return
+  fi
+
+  require_command gcc "install build-essential"
+  require_command objcopy "install binutils"
+
+  local check_dir
+  check_dir="$(mktemp -d)"
+  if ! printf '#include <zlib.h>\nint main(void) { return zlibVersion() == 0; }\n' \
+    | gcc -x c - -lz -o "${check_dir}/zlib-check" >/dev/null 2>&1; then
+    rm -rf "${check_dir}"
+    fail "zlib development files are required for native builds; install zlib1g-dev"
+  fi
+  rm -rf "${check_dir}"
 }
 
 parse_args() {
@@ -127,7 +148,6 @@ build_backend_jar() {
 
 build_backend_native() {
   printf '==> Building backend native image\n'
-  require_command native-image
   mvn -f "${BACKEND_DIR}/pom.xml" clean package -Dquarkus.native.enabled=true -Dquarkus.native.native-image-xmx=2g -DskipTests
   JAVA_ARTIFACT="$(find "${BACKEND_TARGET_DIR}" -maxdepth 1 -type f \( -name "${APP_NAME}*-runner" -o -name "${APP_NAME}*-runner.exe" \) | sort | tail -n 1)"
   [[ -f "${JAVA_ARTIFACT}" ]] || fail "native artifact not found: ${JAVA_ARTIFACT}"
@@ -172,6 +192,10 @@ run_build() {
   require_command java
   require_command mvn
   require_command tar
+
+  if [[ "${BUILD_TARGET}" == "native" ]]; then
+    check_native_toolchain
+  fi
 
   prepare_output_dir
   build_frontend

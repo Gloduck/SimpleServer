@@ -43,7 +43,8 @@ fail() {
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    fail "missing required command: $1"
+    local hint="${2:-}"
+    fail "missing required command: $1${hint:+; ${hint}}"
   fi
 }
 
@@ -174,13 +175,13 @@ scp_remote() {
 }
 
 require_remote_tools() {
-  require_command ssh
+  require_command ssh "install openssh-client"
   if [[ -n "${REMOTE_PASSWORD}" ]]; then
-    require_command sshpass
+    require_command sshpass "install sshpass"
   fi
 
   if [[ "${ACTION}" == "push" ]]; then
-    require_command scp
+    require_command scp "install openssh-client"
   fi
 }
 
