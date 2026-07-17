@@ -443,9 +443,14 @@
           <div class="preview-pane-resizer" role="separator" aria-orientation="vertical" :aria-valuenow="previewWidth" :aria-valuemin="PREVIEW_MIN_WIDTH" :aria-valuemax="PREVIEW_MAX_WIDTH" @pointerdown="startPreviewResize"></div>
           <header class="preview-header">
             <span>{{ tr(previewMode === 'markdown' ? 'preview.markdown' : 'preview.html') }}</span>
-            <button type="button" class="icon-button" :title="tr('action.close')" :aria-label="tr('action.close')" @click="closePreview">
-              <span class="codicon codicon-close" aria-hidden="true"></span>
-            </button>
+            <div class="preview-header-actions">
+              <a v-if="previewPageUrl" class="icon-button preview-external-link" :href="previewPageUrl" target="_blank" rel="noopener noreferrer" :title="tr('preview.openNewTab')" :aria-label="tr('preview.openNewTab')">
+                <span class="codicon codicon-link-external" aria-hidden="true"></span>
+              </a>
+              <button type="button" class="icon-button" :title="tr('action.close')" :aria-label="tr('action.close')" @click="closePreview">
+                <span class="codicon codicon-close" aria-hidden="true"></span>
+              </button>
+            </div>
           </header>
           <div v-if="previewMode === 'markdown'" class="preview-content markdown-preview" v-html="previewContent"></div>
           <iframe v-else :key="previewFrameKey" class="preview-frame" sandbox="allow-forms allow-modals allow-popups allow-scripts" :srcdoc="previewContent"></iframe>
@@ -948,6 +953,7 @@ const messages = {
     "preview.aria": "文件预览",
     "preview.html": "HTML 预览",
     "preview.markdown": "Markdown 预览",
+    "preview.openNewTab": "在新页签中打开",
     "prompt.newFile": "输入新文件路径",
     "prompt.newFolder": "输入新文件夹路径",
     "error.unsupportedBrowser": "当前浏览器不支持 File System Access API。请使用 Chrome、Edge 或 Arc，并通过 localhost 或 HTTPS 打开页面。",
@@ -1255,6 +1261,7 @@ const messages = {
     "preview.aria": "File Preview",
     "preview.html": "HTML Preview",
     "preview.markdown": "Markdown Preview",
+    "preview.openNewTab": "Open in New Tab",
     "prompt.newFile": "Enter new file path",
     "prompt.newFolder": "Enter new folder path",
     "error.unsupportedBrowser": "This browser does not support the File System Access API. Use Chrome, Edge, or Arc, and open the page from localhost or HTTPS.",
@@ -1371,6 +1378,7 @@ const activePath = ref("");
 const activeDiffPath = ref("");
 const previewVisible = ref(false);
 const previewContent = ref("");
+const previewPageUrl = ref("");
 const previewFrameKey = ref(0);
 const dirtyRevision = ref(0);
 const activeView = ref("explorer");
@@ -1565,6 +1573,9 @@ onBeforeUnmount(() => {
   closeAllSshSessions({ disposeTerminal: true });
   openFiles.forEach((file) => disposeFileModels(file, { force: true }));
   disposeWorkspaceModels({ force: true });
+  previewBroadcastChannel?.close();
+  previewBroadcastChannel = null;
+  revokePreviewPageUrl();
   revokePreviewResourceUrls();
   editor.value?.dispose();
   diffEditor.value?.dispose();
@@ -1608,7 +1619,13 @@ function openPreview() {
 function closePreview() {
   previewRenderSerial += 1;
   previewVisible.value = false;
+  if (standalonePreviewClients.size) return;
+  clearPreviewContent();
+}
+
+function clearPreviewContent() {
   previewContent.value = "";
+  revokePreviewPageUrl();
   replacePreviewResourceUrls(new Map());
 }
 
@@ -1619,12 +1636,16 @@ function layoutVisibleEditors() {
 
 let previewRenderSerial = 0;
 let previewResourceObjectUrls = new Map();
+let previewPageObjectUrl = "";
+const previewBroadcastChannelName = `simple-server-preview-${crypto.randomUUID()}`;
+const standalonePreviewClients = new Set();
+let previewBroadcastChannel = null;
 
 async function updatePreviewContent({ remountFrame = false } = {}) {
   const serial = ++previewRenderSerial;
   const file = activeTextFile.value;
-  if (!previewVisible.value) return;
-  if (!previewPaneVisible.value || !file) return;
+  if (!previewPaneVisible.value && !standalonePreviewClients.size) return;
+  if (!file || !getPreviewMode(file)) return;
 
   const objectUrls = new Map();
   const raw = file.model.getValue();
@@ -1635,8 +1656,115 @@ async function updatePreviewContent({ remountFrame = false } = {}) {
     return;
   }
   previewContent.value = resolved;
+  const title = file.name || tr("action.preview");
+  const frameContent = createPreviewFrameContent(resolved, title, previewMode.value);
+  replacePreviewPageUrl(createPreviewPageUrl(frameContent, title));
+  broadcastPreviewUpdate(frameContent, title);
   if (remountFrame && previewMode.value === "html") previewFrameKey.value += 1;
   replacePreviewResourceUrls(objectUrls);
+}
+
+function createPreviewFrameContent(content, title, mode) {
+  return mode === "markdown" ? createMarkdownPreviewDocument(content, title) : String(content || "");
+}
+
+function createPreviewPageUrl(frameContent, title) {
+  const documentContent = `<!doctype html>
+<html lang="${escapePreviewAttribute(settings.locale)}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapePreviewHtml(title)}</title>
+  <style>html,body,iframe{width:100%;height:100%;margin:0;border:0}body{overflow:hidden;background:#fff}iframe{display:block}</style>
+</head>
+<body>
+  <iframe title="${escapePreviewAttribute(title)}" sandbox="allow-forms allow-modals allow-popups allow-scripts" srcdoc="${escapePreviewAttribute(frameContent)}"></iframe>
+  <script>
+    (() => {
+      const frame = document.querySelector("iframe");
+      const channel = new BroadcastChannel(${JSON.stringify(previewBroadcastChannelName)});
+      const clientId = crypto.randomUUID();
+      channel.addEventListener("message", (event) => {
+        const update = event.data;
+        if (!update || update.type !== "preview:update" || typeof update.content !== "string") return;
+        const title = typeof update.title === "string" ? update.title : document.title;
+        document.title = title;
+        frame.title = title;
+        frame.srcdoc = update.content;
+      });
+      channel.postMessage({ type: "preview:subscribe", clientId });
+      window.addEventListener("pagehide", () => {
+        channel.postMessage({ type: "preview:unsubscribe", clientId });
+        channel.close();
+      }, { once: true });
+    })();
+  ${"</scr" + "ipt>"}
+</body>
+</html>`;
+  return URL.createObjectURL(new Blob([documentContent], { type: "text/html;charset=utf-8" }));
+}
+
+function broadcastPreviewUpdate(content, title) {
+  getPreviewBroadcastChannel()?.postMessage({ type: "preview:update", content, title });
+}
+
+function getPreviewBroadcastChannel() {
+  if (!("BroadcastChannel" in window)) return null;
+  if (previewBroadcastChannel) return previewBroadcastChannel;
+  previewBroadcastChannel = new BroadcastChannel(previewBroadcastChannelName);
+  previewBroadcastChannel.addEventListener("message", handlePreviewBroadcastMessage);
+  return previewBroadcastChannel;
+}
+
+function handlePreviewBroadcastMessage(event) {
+  const message = event.data;
+  if (!message?.clientId) return;
+  if (message.type === "preview:subscribe") {
+    standalonePreviewClients.add(message.clientId);
+    return;
+  }
+  if (message.type !== "preview:unsubscribe") return;
+  standalonePreviewClients.delete(message.clientId);
+  if (!previewPaneVisible.value && !standalonePreviewClients.size) clearPreviewContent();
+}
+
+function createMarkdownPreviewDocument(content, title) {
+  return `<!doctype html>
+<html lang="${escapePreviewAttribute(settings.locale)}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapePreviewHtml(title)}</title>
+  <style>
+    :root{color-scheme:light dark;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.6}
+    body{max-width:960px;margin:0 auto;padding:32px;color:CanvasText;background:Canvas;overflow-wrap:anywhere}
+    img,video{max-width:100%;height:auto}pre{overflow:auto;padding:16px;border-radius:6px;background:color-mix(in srgb,CanvasText 8%,Canvas)}
+    code{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}blockquote{margin-left:0;padding-left:16px;border-left:4px solid color-mix(in srgb,CanvasText 24%,Canvas)}
+    table{border-collapse:collapse}th,td{padding:6px 12px;border:1px solid color-mix(in srgb,CanvasText 24%,Canvas)}a{color:LinkText}
+    @media(max-width:640px){body{padding:20px}}
+  </style>
+</head>
+<body>${content}</body>
+</html>`;
+}
+
+function escapePreviewHtml(value) {
+  return String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+function escapePreviewAttribute(value) {
+  return escapePreviewHtml(value).replaceAll('"', "&quot;");
+}
+
+function replacePreviewPageUrl(nextUrl) {
+  const previousUrl = previewPageObjectUrl;
+  previewPageObjectUrl = nextUrl;
+  previewPageUrl.value = nextUrl;
+  if (previousUrl) URL.revokeObjectURL(previousUrl);
+}
+
+function revokePreviewPageUrl() {
+  replacePreviewPageUrl("");
 }
 
 async function rewritePreviewResourceAttributes(html, file, objectUrls) {
@@ -6117,6 +6245,10 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view.preview-resizing .preview-pane-resizer { background: var(--accent); opacity: 0.35; }
 .code-editor-view.preview-resizing .preview-frame { pointer-events: none; }
 .code-editor-view .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 12px; font-weight: 600; }
+.code-editor-view .preview-header-actions { display: flex; align-items: center; gap: 4px; }
+.code-editor-view .preview-external-link { display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: 4px; background: var(--button); color: var(--text); text-decoration: none; }
+.code-editor-view .preview-external-link:hover,
+.code-editor-view .preview-external-link:focus-visible { border-color: var(--button-hover-border); background: var(--button-hover); outline: none; }
 .code-editor-view .preview-content { min-height: 0; overflow: auto; padding: 18px; background: var(--editor); color: var(--text); }
 .code-editor-view .markdown-preview { font-size: 14px; line-height: 1.55; }
 .code-editor-view .preview-frame { width: 100%; height: 100%; border: 0; background: #ffffff; color-scheme: light; }
