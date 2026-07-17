@@ -34,7 +34,9 @@
           </button>
         </header>
         <div class="panel-actions">
-          <button @click="openFolder">{{ tr('action.openFolder') }}</button>
+          <button :title="tr('action.openFolder')" @click="openFolder">{{ tr('action.openFolder') }}</button>
+          <button :title="tr('action.openBrowserFolder')" @click="openBrowserFolder">{{ tr('action.openBrowserFolder') }}</button>
+          <button class="danger" :title="tr('action.clearBrowserFolder')" :disabled="rootKind !== 'opfs'" @click="clearBrowserFolder">{{ tr('action.clearBrowserFolder') }}</button>
         </div>
         <nav class="file-tree" :aria-label="tr('panel.files')" @contextmenu.prevent="showContextMenu($event, null)">
           <div v-if="!rootHandle" class="workspace-card">{{ tr('workspace.treeEmpty') }}</div>
@@ -469,6 +471,8 @@
       <button type="button" role="menuitem" @click="runContextAction('new-folder')">{{ tr('action.newFolder') }}</button>
       <button type="button" role="menuitem" @click="runContextAction('new-file-pending')">{{ tr('action.newFilePending') }}</button>
       <div class="context-separator" aria-hidden="true"></div>
+      <button type="button" role="menuitem" :disabled="!contextMenu.node || contextMenu.node.deleted" @click="runContextAction('save-as')">{{ tr('action.saveAs') }}</button>
+      <div class="context-separator" aria-hidden="true"></div>
       <button type="button" role="menuitem" class="danger" :disabled="!contextMenu.node" @click="runContextAction('delete')">{{ tr('action.delete') }}</button>
       <button type="button" role="menuitem" class="danger" :disabled="!contextMenu.node || contextMenu.node.kind !== 'file'" @click="runContextAction('delete-pending')">{{ tr('action.deletePending') }}</button>
       <div class="context-separator" aria-hidden="true"></div>
@@ -684,6 +688,9 @@ const messages = {
     "commandCenter.placeholder": "搜索命令或文件...",
     "commandCenter.title": "打开命令面板",
     "action.openFolder": "打开文件夹",
+    "action.openBrowserFolder": "打开浏览器文件夹",
+    "action.clearBrowserFolder": "清空浏览器文件夹",
+    "action.saveAs": "另存为",
     "action.newFile": "新建文件",
     "action.newFolder": "新建文件夹",
     "action.newFilePending": "新建文件（待保存）",
@@ -769,7 +776,7 @@ const messages = {
     "search.results": "{count} 个结果",
     "search.replaced": "已替换 {count} 处",
     "empty.title": "打开一个目录，然后选择文件",
-    "empty.description": "此编辑器使用 Monaco Editor 和浏览器 File System Access API 直接读写本地文件。",
+    "empty.description": "此编辑器使用 Monaco Editor，并可通过 File System Access API 或 OPFS 读写文件。",
     "editor.aria": "代码编辑器",
     "diff.aria": "变更对比编辑器",
     "status.ready": "Ready",
@@ -780,6 +787,10 @@ const messages = {
     "status.saveButton": "保存 {shortcut}",
     "status.openedFolder": "已打开 {name}",
     "status.permissionGranted": "读写权限已授予",
+    "status.browserStorage": "浏览器私有存储",
+    "status.browserFolderCleared": "已清空浏览器文件夹",
+    "status.packagingFolder": "正在打包 {name}",
+    "status.savedAs": "已另存为 {name}",
     "status.refreshed": "已刷新 {name}",
     "status.itemCount": "{count} 项",
     "status.openedFile": "已打开 {name}",
@@ -922,6 +933,8 @@ const messages = {
     "confirm.deleteDirtyHint": "\n\n包含 {count} 个未保存标签，删除后这些修改会丢失。",
     "confirm.revert": "确定回滚“{path}”的未保存修改吗？",
     "confirm.revertSelected": "确定回滚所选 {count} 个未保存变更吗？",
+    "confirm.clearBrowserFolder": "确定清空浏览器文件夹（OPFS）吗？其中的全部文件和文件夹都会被永久删除。",
+    "confirm.mergeSaveFolder": "目标位置已存在文件夹“{name}”。继续后会覆盖同名文件，但不会删除目标文件夹中多余的文件。",
     "confirm.deleteAiSession": "确定删除当前 AI 会话吗？此操作不会回滚文件修改。",
     "confirm.leaveWithSsh": "当前存在未保存内容、活跃 SSH 连接或正在进行的文件传输，离开后 SSH 连接和文件传输会被中断。确定离开吗？",
     "imagePreview.aria": "图片预览",
@@ -938,6 +951,10 @@ const messages = {
     "prompt.newFile": "输入新文件路径",
     "prompt.newFolder": "输入新文件夹路径",
     "error.unsupportedBrowser": "当前浏览器不支持 File System Access API。请使用 Chrome、Edge 或 Arc，并通过 localhost 或 HTTPS 打开页面。",
+    "error.opfsUnsupported": "当前环境不支持 OPFS。OPFS 需要支持该 API 的浏览器，并通过 localhost 或 HTTPS 等安全上下文打开页面。",
+    "error.clearBrowserFolder": "清空浏览器文件夹失败",
+    "error.saveAs": "另存为失败",
+    "error.destinationInsideSource": "不能把文件夹另存到它自身或其子文件夹中。",
     "error.createFile": "新建文件失败",
     "error.createFolder": "新建文件夹失败",
     "error.openFolder": "打开文件夹失败",
@@ -978,6 +995,9 @@ const messages = {
     "commandCenter.placeholder": "Search commands or files...",
     "commandCenter.title": "Open Command Palette",
     "action.openFolder": "Open Folder",
+    "action.openBrowserFolder": "Open Browser Folder",
+    "action.clearBrowserFolder": "Clear Browser Folder",
+    "action.saveAs": "Save As",
     "action.newFile": "New File",
     "action.newFolder": "New Folder",
     "action.newFilePending": "New File (Pending Save)",
@@ -1063,7 +1083,7 @@ const messages = {
     "search.results": "{count} results",
     "search.replaced": "Replaced {count} occurrence(s)",
     "empty.title": "Open a folder, then choose a file",
-    "empty.description": "This editor uses Monaco Editor and the browser File System Access API to read and write local files.",
+    "empty.description": "This editor uses Monaco Editor with the File System Access API or OPFS to read and write files.",
     "editor.aria": "Code editor",
     "diff.aria": "Diff editor",
     "status.ready": "Ready",
@@ -1074,6 +1094,10 @@ const messages = {
     "status.saveButton": "Save {shortcut}",
     "status.openedFolder": "Opened {name}",
     "status.permissionGranted": "Read/write permission granted",
+    "status.browserStorage": "Browser private storage",
+    "status.browserFolderCleared": "Browser folder cleared",
+    "status.packagingFolder": "Packaging {name}",
+    "status.savedAs": "Saved {name} as a local copy",
     "status.refreshed": "Refreshed {name}",
     "status.itemCount": "{count} items",
     "status.openedFile": "Opened {name}",
@@ -1216,6 +1240,8 @@ const messages = {
     "confirm.deleteDirtyHint": "\n\nIt contains {count} unsaved tab(s). Those changes will be lost.",
     "confirm.revert": "Revert unsaved changes in “{path}”?",
     "confirm.revertSelected": "Revert {count} selected unsaved change(s)?",
+    "confirm.clearBrowserFolder": "Clear the browser folder (OPFS)? All files and folders in it will be permanently deleted.",
+    "confirm.mergeSaveFolder": "A folder named “{name}” already exists at the destination. Continuing will overwrite files with matching names but will not remove extra destination files.",
     "confirm.deleteAiSession": "Delete the current AI session? This will not revert file changes.",
     "confirm.leaveWithSsh": "There are unsaved changes, active SSH connections, or running file transfers. SSH connections and file transfers will be interrupted if you leave. Leave this page?",
     "imagePreview.aria": "Image Preview",
@@ -1232,6 +1258,10 @@ const messages = {
     "prompt.newFile": "Enter new file path",
     "prompt.newFolder": "Enter new folder path",
     "error.unsupportedBrowser": "This browser does not support the File System Access API. Use Chrome, Edge, or Arc, and open the page from localhost or HTTPS.",
+    "error.opfsUnsupported": "OPFS is unavailable in this environment. Use a browser that supports it and open the page in a secure context such as localhost or HTTPS.",
+    "error.clearBrowserFolder": "Failed to clear browser folder",
+    "error.saveAs": "Failed to save as",
+    "error.destinationInsideSource": "A folder cannot be saved inside itself or one of its subfolders.",
     "error.createFile": "Failed to create file",
     "error.createFolder": "Failed to create folder",
     "error.openFolder": "Failed to open folder",
@@ -1332,6 +1362,7 @@ const editor = shallowRef(null);
 const diffEditor = shallowRef(null);
 const rootHandle = shallowRef(null);
 const rootName = ref("");
+const rootKind = ref("");
 const diskTree = shallowRef([]);
 const collapsedPaths = reactive(new Set());
 const openFiles = reactive(new Map());
@@ -2568,21 +2599,72 @@ async function openFolder() {
   }
   try {
     const handle = markRaw(await window.showDirectoryPicker({ mode: "readwrite" }));
-    rootHandle.value = handle;
-    rootName.value = handle.name;
-    openFiles.forEach((file) => disposeFileModels(file, { force: true }));
-    openFiles.clear();
-    disposeWorkspaceModels({ force: true });
-    registerWorkspaceFileActions();
-    activePath.value = "";
-    activeDiffPath.value = "";
-    activeSshTerminalId.value = "";
-    collapsedPaths.clear();
-    await refreshTree({ collapseAll: true });
+    await activateWorkspace(handle, handle.name, "local");
     setStatus(tr("status.openedFolder", { name: handle.name }), tr("status.permissionGranted"));
   } catch (error) {
     if (error.name !== "AbortError") reportError("error.openFolder", error);
   }
+}
+
+async function openBrowserFolder() {
+  if (!window.isSecureContext || !navigator.storage?.getDirectory) {
+    setStatus(tr("error.opfsUnsupported"), "");
+    await showAlert(tr("error.opfsUnsupported"));
+    return;
+  }
+  try {
+    const handle = markRaw(await navigator.storage.getDirectory());
+    await activateWorkspace(handle, "OPFS", "opfs");
+    setStatus(tr("status.openedFolder", { name: "OPFS" }), tr("status.browserStorage"));
+  } catch (error) {
+    reportError("error.openFolder", error);
+  }
+}
+
+async function clearBrowserFolder() {
+  if (rootKind.value !== "opfs") return;
+  if (!window.isSecureContext || !navigator.storage?.getDirectory) {
+    setStatus(tr("error.opfsUnsupported"), "");
+    await showAlert(tr("error.opfsUnsupported"));
+    return;
+  }
+  if (!await showConfirm(tr("confirm.clearBrowserFolder"), { title: tr("action.clearBrowserFolder"), tone: "danger" })) return;
+  try {
+    const handle = await navigator.storage.getDirectory();
+    const entries = [];
+    for await (const entry of handle.entries()) entries.push(entry);
+    for (const [name, entry] of entries) {
+      await handle.removeEntry(name, { recursive: entry.kind === "directory" });
+    }
+    if (rootKind.value === "opfs") {
+      resetWorkspaceEditorState();
+      await refreshTree({ collapseAll: true });
+    }
+    setStatus(tr("status.browserFolderCleared"), "OPFS");
+  } catch (error) {
+    reportError("error.clearBrowserFolder", error);
+  }
+}
+
+async function activateWorkspace(handle, name, kind) {
+  rootHandle.value = handle;
+  rootName.value = name;
+  rootKind.value = kind;
+  resetWorkspaceEditorState();
+  await refreshTree({ collapseAll: true });
+}
+
+function resetWorkspaceEditorState() {
+  openFiles.forEach((file) => disposeFileModels(file, { force: true }));
+  openFiles.clear();
+  disposeWorkspaceModels({ force: true });
+  diskTree.value = [];
+  registerWorkspaceFileActions();
+  activePath.value = "";
+  activeDiffPath.value = "";
+  activeSshTerminalId.value = "";
+  collapsedPaths.clear();
+  touchDirtyState();
 }
 
 async function refreshTree(options = {}) {
@@ -3231,7 +3313,7 @@ function showContextMenu(event, node) {
   contextMenu.visible = true;
   nextTick(() => {
     const width = 190;
-    const height = 220;
+    const height = 270;
     contextMenu.x = Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8));
     contextMenu.y = Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8));
   });
@@ -3252,6 +3334,7 @@ async function runContextAction(action) {
   if (action === "new-file") await createFileFromContext(node);
   if (action === "new-folder") await createFolderFromContext(node);
   if (action === "new-file-pending") await createPendingFileFromContext(node);
+  if (action === "save-as") await saveNodeAs(node);
   if (action === "delete") await deleteNode(node);
   if (action === "delete-pending") await markNodeDeleted(node);
   if (action === "refresh") await refreshTree();
@@ -3270,6 +3353,123 @@ function getDirectoryPath(path) {
   const normalized = normalizeWorkspacePath(path);
   const index = normalized.lastIndexOf("/");
   return index === -1 ? "" : normalized.slice(0, index);
+}
+
+async function saveNodeAs(node) {
+  if (!node || node.deleted) return;
+  try {
+    if (node.kind === "file") {
+      const file = await getNodeExportFile(node);
+      if (!window.showSaveFilePicker) {
+        downloadFile(file, node.name);
+      } else {
+        const destination = await window.showSaveFilePicker({ suggestedName: node.name });
+        await writeFileHandle(destination, file);
+      }
+      setStatus(tr("status.savedAs", { name: node.name }), node.path);
+      return;
+    }
+    if (!window.showDirectoryPicker) {
+      const archiveName = `${node.name}.zip`;
+      setStatus(tr("status.packagingFolder", { name: node.name }), archiveName);
+      downloadFile(await createFolderZip(node), archiveName);
+      setStatus(tr("status.savedAs", { name: archiveName }), node.path);
+      return;
+    }
+    const destinationParent = markRaw(await window.showDirectoryPicker({ mode: "readwrite" }));
+    if (await isDirectoryInside(node.handle, destinationParent)) throw new Error(tr("error.destinationInsideSource"));
+    const existing = await getExistingDirectory(destinationParent, node.name);
+    if (existing && await isDirectoryInside(node.handle, existing)) throw new Error(tr("error.destinationInsideSource"));
+    if (existing && !await showConfirm(tr("confirm.mergeSaveFolder", { name: node.name }), { title: tr("action.saveAs") })) return;
+    const destination = existing || await destinationParent.getDirectoryHandle(node.name, { create: true });
+    await copyTreeNodes(node.children || [], destination);
+    setStatus(tr("status.savedAs", { name: node.name }), node.path);
+  } catch (error) {
+    if (error.name !== "AbortError") reportError("error.saveAs", error);
+  }
+}
+
+async function getNodeExportFile(node) {
+  const fileState = openFiles.get(node.path);
+  if (fileState?.deleted) throw new Error(`File is marked for deletion: ${node.path}`);
+  if (isTextFileState(fileState)) return new File([fileState.model.getValue()], node.name, { type: "text/plain;charset=utf-8" });
+  const handle = fileState?.handle || node.handle;
+  if (!handle) throw new Error(`File handle is unavailable: ${node.path}`);
+  return handle.getFile();
+}
+
+async function copyTreeNodes(nodes, destination) {
+  for (const node of nodes) {
+    if (node.deleted) continue;
+    if (node.kind === "directory") {
+      const childDestination = await destination.getDirectoryHandle(node.name, { create: true });
+      await copyTreeNodes(node.children || [], childDestination);
+      continue;
+    }
+    const fileHandle = await destination.getFileHandle(node.name, { create: true });
+    await writeFileHandle(fileHandle, await getNodeExportFile(node));
+  }
+}
+
+async function createFolderZip(node) {
+  const { zip } = await import("fflate");
+  const archive = Object.create(null);
+  archive[node.name] = await buildZipTree(node.children || []);
+  const data = await new Promise((resolve, reject) => {
+    zip(archive, { level: 6 }, (error, result) => error ? reject(error) : resolve(result));
+  });
+  return new Blob([data], { type: "application/zip" });
+}
+
+async function buildZipTree(nodes) {
+  const entries = Object.create(null);
+  for (const node of nodes) {
+    if (node.deleted) continue;
+    if (node.kind === "directory") {
+      entries[node.name] = await buildZipTree(node.children || []);
+      continue;
+    }
+    entries[node.name] = new Uint8Array(await (await getNodeExportFile(node)).arrayBuffer());
+  }
+  return entries;
+}
+
+async function writeFileHandle(handle, file) {
+  const writable = await handle.createWritable();
+  try {
+    await writable.write(file);
+    await writable.close();
+  } catch (error) {
+    if (writable.abort) await writable.abort().catch(() => {});
+    throw error;
+  }
+}
+
+function downloadFile(file, name) {
+  const url = URL.createObjectURL(file);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function isDirectoryInside(source, possibleDescendant) {
+  if (!source || typeof source.resolve !== "function") return false;
+  try {
+    return Array.isArray(await source.resolve(possibleDescendant));
+  } catch {
+    return false;
+  }
+}
+
+async function getExistingDirectory(parent, name) {
+  try {
+    return await parent.getDirectoryHandle(name);
+  } catch (error) {
+    if (error.name === "NotFoundError") return null;
+    throw error;
+  }
 }
 
 async function createFileFromContext(node) {
@@ -5740,10 +5940,11 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .ai-header-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .code-editor-view .ai-header-actions button { flex: 0 0 auto; }
 .code-editor-view .ai-context-length { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
-.code-editor-view .panel-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 12px 12px; }
-.code-editor-view .panel-actions button:first-child { grid-column: 1 / -1; }
+.code-editor-view .panel-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 0 12px 12px; }
 .code-editor-view .panel-actions button,
 .code-editor-view .empty-state button { padding: 7px 10px; }
+.code-editor-view .panel-actions button { min-width: 0; padding-inline: 3px; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.code-editor-view .panel-actions button.danger { color: #ffb3b3; }
 .code-editor-view .workspace-card { display: grid; gap: 3px; margin: 0 12px 8px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-soft); }
 .code-editor-view .workspace-name { overflow: hidden; font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .workspace-card small { color: var(--muted); }
@@ -5973,8 +6174,6 @@ function getTreeIconClass(node, collapsed = false) {
   .code-editor-view.side-panel-hidden .side-panel { display: none; }
   .code-editor-view .side-panel-resizer { display: none; }
   .code-editor-view .activity-button { width: 44px; height: 44px; }
-  .code-editor-view .panel-actions { grid-template-columns: 1fr; }
-  .code-editor-view .panel-actions button:first-child { grid-column: auto; }
   .code-editor-view .shortcut-row { grid-template-columns: 1fr; }
   .code-editor-view .command-center-shortcut { display: none; }
   .code-editor-view .status-right-group { display: none; }
