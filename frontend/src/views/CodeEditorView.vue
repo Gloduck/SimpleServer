@@ -386,7 +386,7 @@
         <button type="button" class="command-icon-button" :title="tr('action.findReferences')" :aria-label="tr('action.findReferences')" :disabled="!activeFile" @click="triggerFindReferences">
           <span class="codicon codicon-references" aria-hidden="true"></span>
         </button>
-        <button type="button" class="command-icon-button" :class="{ active: previewVisible }" :title="tr('action.preview')" :aria-label="tr('action.preview')" :disabled="!canPreviewActiveFile" @click="togglePreview">
+        <button type="button" class="command-icon-button" :class="{ active: previewVisible }" :title="tr('action.preview')" :aria-label="tr('action.preview')" :disabled="!previewVisible && !canPreviewActiveFile" @click="togglePreview">
           <span class="codicon codicon-open-preview" aria-hidden="true"></span>
         </button>
       </div>
@@ -442,7 +442,7 @@
         <aside v-if="previewPaneVisible && !activeSshTerminal" class="preview-pane" :aria-label="tr('preview.aria')">
           <div class="preview-pane-resizer" role="separator" aria-orientation="vertical" :aria-valuenow="previewWidth" :aria-valuemin="PREVIEW_MIN_WIDTH" :aria-valuemax="PREVIEW_MAX_WIDTH" @pointerdown="startPreviewResize"></div>
           <header class="preview-header">
-            <span>{{ tr(previewMode === 'markdown' ? 'preview.markdown' : 'preview.html') }}</span>
+            <span>{{ tr(previewLabelKey) }}</span>
             <div class="preview-header-actions">
               <a v-if="previewPageUrl" class="icon-button preview-external-link" :href="previewPageUrl" target="_blank" rel="noopener noreferrer" :title="tr('preview.openNewTab')" :aria-label="tr('preview.openNewTab')">
                 <span class="codicon codicon-link-external" aria-hidden="true"></span>
@@ -452,8 +452,7 @@
               </button>
             </div>
           </header>
-          <div v-if="previewMode === 'markdown'" class="preview-content markdown-preview" v-html="previewContent"></div>
-          <iframe v-else :key="previewFrameKey" class="preview-frame" sandbox="allow-forms allow-modals allow-popups allow-scripts" :srcdoc="previewContent"></iframe>
+          <iframe ref="previewFrame" :key="previewFrameKey" class="preview-frame" :sandbox="PREVIEW_FRAME_SANDBOX" :srcdoc="previewContent"></iframe>
         </aside>
       </section>
 
@@ -1300,6 +1299,76 @@ const languageOptions = [
 
 const aiReasoningEfforts = ["default", "low", "medium", "high", "xhigh"];
 const renderMarkdown = MarkdownUtils.renderMarkdown;
+const PREVIEW_FRAME_SANDBOX = "allow-forms allow-modals allow-popups allow-scripts";
+const PREVIEW_TYPES = Object.freeze({
+  html: Object.freeze({ languages: Object.freeze(["html"]), labelKey: "preview.html" }),
+  markdown: Object.freeze({ languages: Object.freeze(["markdown", "mdx"]), labelKey: "preview.markdown" }),
+});
+const PREVIEW_SOURCE_RENDERERS = Object.freeze({
+  html: (content) => String(content || ""),
+  markdown: (content, title) => createMarkdownPreviewDocument(renderMarkdown(content), title),
+});
+
+function getPreviewType(file) {
+  if (!file?.model && typeof file?.content !== "string") return "";
+  return Object.entries(PREVIEW_TYPES).find(([, definition]) => definition.languages.includes(file.language))?.[0] || "";
+}
+
+function getPreviewTypeDefinition(type) {
+  return PREVIEW_TYPES[type] || null;
+}
+
+function resolveWorkspacePreviewUrl(url, currentPath) {
+  const value = String(url || "").trim();
+  if (!value || value.startsWith("#") || value.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(value)) return null;
+
+  const parts = splitPreviewUrlSuffix(value);
+  const decodedPath = decodePreviewPath(parts.path);
+  if (decodedPath == null) return null;
+  const rawPath = decodedPath.replace(/\\/g, "/");
+  if (!rawPath) {
+    const path = String(currentPath || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    return path ? { path, suffix: parts.suffix, hash: parts.hash } : null;
+  }
+  const segments = rawPath.startsWith("/") ? [] : getPreviewDirectorySegments(currentPath);
+  for (const segment of rawPath.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (!segments.length) return null;
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  if (!segments.length) return null;
+  return { path: segments.join("/"), suffix: parts.suffix, hash: parts.hash };
+}
+
+function splitPreviewUrlSuffix(url) {
+  const value = String(url || "");
+  const hashIndex = value.indexOf("#");
+  const queryIndex = value.indexOf("?");
+  const indexes = [hashIndex, queryIndex].filter((index) => index >= 0);
+  if (!indexes.length) return { path: value, suffix: "", hash: "" };
+  const splitIndex = Math.min(...indexes);
+  return { path: value.slice(0, splitIndex), suffix: value.slice(splitIndex), hash: hashIndex >= 0 ? value.slice(hashIndex) : "" };
+}
+
+function getPreviewDirectorySegments(path) {
+  const normalized = String(path || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (!normalized) return [];
+  const segments = normalized.split("/");
+  segments.pop();
+  return segments;
+}
+
+function decodePreviewPath(path) {
+  try {
+    return decodeURIComponent(String(path || ""));
+  } catch {
+    return null;
+  }
+}
 
 const sshTerminalThemes = {
   dark: { background: "#1e1e1e", foreground: "#cccccc", cursor: "#ffffff", selectionBackground: "#264f78" },
@@ -1363,6 +1432,7 @@ function isDirtyTreeNode(node, dirtyPaths) {
 
 const editorHost = ref(null);
 const diffHost = ref(null);
+const previewFrame = ref(null);
 const aiMessagesEl = ref(null);
 const sshTerminalHost = ref(null);
 const editor = shallowRef(null);
@@ -1380,6 +1450,9 @@ const previewVisible = ref(false);
 const previewContent = ref("");
 const previewPageUrl = ref("");
 const previewFrameKey = ref(0);
+const previewPath = ref("");
+const previewUrlSuffix = ref("");
+const previewType = ref("");
 const dirtyRevision = ref(0);
 const activeView = ref("explorer");
 const sidePanelVisible = ref(true);
@@ -1471,9 +1544,10 @@ const activeDiffFile = computed(() => {
 });
 const activeDiffUnsupportedFile = computed(() => activeDiffFile.value && !isTextFileState(activeDiffFile.value) ? activeDiffFile.value : null);
 const activeLanguage = computed({ get: () => activeFile.value?.language || "plaintext", set: (value) => { if (activeFile.value) activeFile.value.language = value; } });
-const previewMode = computed(() => getPreviewMode(activeTextFile.value));
-const canPreviewActiveFile = computed(() => Boolean(previewMode.value));
-const previewPaneVisible = computed(() => Boolean(previewVisible.value && canPreviewActiveFile.value && !activeSshTerminal.value));
+const activePreviewType = computed(() => getPreviewType(activeTextFile.value));
+const canPreviewActiveFile = computed(() => Boolean(activePreviewType.value));
+const previewLabelKey = computed(() => getPreviewTypeDefinition(previewType.value)?.labelKey || "action.preview");
+const previewPaneVisible = computed(() => Boolean(previewVisible.value && previewPath.value && previewType.value && !activeSshTerminal.value));
 const sshFeatureEnabled = computed(() => isBackendEnabled());
 const sshTerminalTabs = computed(() => {
   sshRevision.value;
@@ -1497,7 +1571,7 @@ watch(activeAiSessionId, () => { nextTick(scrollAiMessagesToBottom); });
 watch(searchMatchCase, () => { if (searchSearched.value && searchQuery.value.trim()) runGlobalSearch(); });
 watch(() => dirtyFiles.value.map((file) => file.path).join("\0"), pruneSelectedChangePaths);
 watch(previewPaneVisible, () => { nextTick(layoutVisibleEditors); });
-watch([previewPaneVisible, activePath, dirtyRevision, () => settings.locale], () => { void updatePreviewContent(); });
+watch([previewPaneVisible, previewPath, previewUrlSuffix, dirtyRevision, () => settings.locale], () => { void updatePreviewContent(); });
 watch(settings, persistSettings, { deep: true });
 
 onMounted(async () => {
@@ -1559,6 +1633,7 @@ onMounted(async () => {
   window.addEventListener("resize", scheduleActiveSshTerminalFit);
   window.addEventListener("beforeunload", beforeUnload);
   window.addEventListener("pagehide", handlePageHide);
+  window.addEventListener("message", handlePreviewWindowMessage);
 });
 
 onBeforeUnmount(() => {
@@ -1585,6 +1660,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", scheduleActiveSshTerminalFit);
   window.removeEventListener("beforeunload", beforeUnload);
   window.removeEventListener("pagehide", handlePageHide);
+  window.removeEventListener("message", handlePreviewWindowMessage);
 });
 
 function tr(key, params = {}) {
@@ -1594,15 +1670,7 @@ function tr(key, params = {}) {
   return value;
 }
 
-function getPreviewMode(file) {
-  if (!isTextFileState(file)) return "";
-  if (["markdown", "mdx"].includes(file.language)) return "markdown";
-  if (file.language === "html") return "html";
-  return "";
-}
-
 function togglePreview() {
-  if (!canPreviewActiveFile.value) return;
   if (previewVisible.value) {
     closePreview();
   } else {
@@ -1611,7 +1679,12 @@ function togglePreview() {
 }
 
 function openPreview() {
-  if (!canPreviewActiveFile.value) return;
+  const file = activeTextFile.value;
+  const type = getPreviewType(file);
+  if (!file || !type) return;
+  previewPath.value = file.path;
+  previewUrlSuffix.value = "";
+  previewType.value = type;
   previewVisible.value = true;
   void nextTick(() => updatePreviewContent({ remountFrame: true }));
 }
@@ -1625,8 +1698,20 @@ function closePreview() {
 
 function clearPreviewContent() {
   previewContent.value = "";
+  lastPreviewUpdate = null;
   revokePreviewPageUrl();
   replacePreviewResourceUrls(new Map());
+}
+
+function resetPreviewState() {
+  previewRenderSerial += 1;
+  previewNavigationSerial += 1;
+  previewVisible.value = false;
+  previewPath.value = "";
+  previewUrlSuffix.value = "";
+  previewType.value = "";
+  previewBroadcastChannel?.postMessage({ type: "preview:update", content: "", title: tr("action.preview"), path: "", suffix: "", previewType: "", revision: ++previewUpdateRevision });
+  clearPreviewContent();
 }
 
 function layoutVisibleEditors() {
@@ -1640,35 +1725,56 @@ let previewPageObjectUrl = "";
 const previewBroadcastChannelName = `simple-server-preview-${crypto.randomUUID()}`;
 const standalonePreviewClients = new Set();
 let previewBroadcastChannel = null;
+let lastPreviewUpdate = null;
+let previewNavigationSerial = 0;
+let previewUpdateRevision = 0;
 
 async function updatePreviewContent({ remountFrame = false } = {}) {
   const serial = ++previewRenderSerial;
-  const file = activeTextFile.value;
+  const path = previewPath.value;
+  const suffix = previewUrlSuffix.value;
   if (!previewPaneVisible.value && !standalonePreviewClients.size) return;
-  if (!file || !getPreviewMode(file)) return;
+  if (!path) return;
 
   const objectUrls = new Map();
-  const raw = file.model.getValue();
-  const rendered = previewMode.value === "markdown" ? renderMarkdown(raw) : String(raw || "");
-  const resolved = await rewritePreviewResourceAttributes(rendered, file, objectUrls);
+  let file;
+  let type;
+  let resolved;
+  try {
+    file = await readPreviewFile(path);
+    type = getPreviewType(file);
+    if (!type) throw new Error(`File is not previewable: ${path}`);
+    const title = file.name || tr("action.preview");
+    const sourceDocument = createPreviewSourceDocument(getPreviewFileContent(file), title, type);
+    resolved = await rewritePreviewDocument(sourceDocument, file, objectUrls, suffix);
+  } catch (error) {
+    revokeObjectUrlMap(objectUrls);
+    if (serial === previewRenderSerial) reportError("error.openFile", error);
+    return;
+  }
   if (serial !== previewRenderSerial) {
     revokeObjectUrlMap(objectUrls);
     return;
   }
+  previewType.value = type;
   previewContent.value = resolved;
   const title = file.name || tr("action.preview");
-  const frameContent = createPreviewFrameContent(resolved, title, previewMode.value);
-  replacePreviewPageUrl(createPreviewPageUrl(frameContent, title));
-  broadcastPreviewUpdate(frameContent, title);
-  if (remountFrame && previewMode.value === "html") previewFrameKey.value += 1;
+  const update = { type: "preview:update", content: resolved, title, path, suffix, previewType: type, revision: ++previewUpdateRevision };
+  replacePreviewPageUrl(createPreviewPageUrl(update));
+  broadcastPreviewUpdate(update);
+  if (remountFrame) previewFrameKey.value += 1;
   replacePreviewResourceUrls(objectUrls);
 }
 
-function createPreviewFrameContent(content, title, mode) {
-  return mode === "markdown" ? createMarkdownPreviewDocument(content, title) : String(content || "");
+function createPreviewSourceDocument(source, title, type) {
+  const renderer = PREVIEW_SOURCE_RENDERERS[type];
+  if (!renderer) throw new Error(`Unsupported preview type: ${type}`);
+  return renderer(source, title);
 }
 
-function createPreviewPageUrl(frameContent, title) {
+function createPreviewPageUrl(initialUpdate) {
+  const frameContent = initialUpdate.content;
+  const title = initialUpdate.title;
   const documentContent = `<!doctype html>
 <html lang="${escapePreviewAttribute(settings.locale)}">
 <head>
@@ -1678,19 +1784,29 @@ function createPreviewPageUrl(frameContent, title) {
   <style>html,body,iframe{width:100%;height:100%;margin:0;border:0}body{overflow:hidden;background:#fff}iframe{display:block}</style>
 </head>
 <body>
-  <iframe title="${escapePreviewAttribute(title)}" sandbox="allow-forms allow-modals allow-popups allow-scripts" srcdoc="${escapePreviewAttribute(frameContent)}"></iframe>
+  <iframe title="${escapePreviewAttribute(title)}" sandbox="${PREVIEW_FRAME_SANDBOX}" srcdoc="${escapePreviewAttribute(frameContent)}"></iframe>
   <script>
     (() => {
       const frame = document.querySelector("iframe");
+      if (!("BroadcastChannel" in window)) return;
       const channel = new BroadcastChannel(${JSON.stringify(previewBroadcastChannelName)});
       const clientId = crypto.randomUUID();
+      let revision = ${Number(initialUpdate.revision) || 0};
       channel.addEventListener("message", (event) => {
         const update = event.data;
         if (!update || update.type !== "preview:update" || typeof update.content !== "string") return;
+        if (update.targetClientId && update.targetClientId !== clientId) return;
+        if (Number(update.revision) <= revision) return;
+        revision = Number(update.revision) || revision;
         const title = typeof update.title === "string" ? update.title : document.title;
         document.title = title;
         frame.title = title;
         frame.srcdoc = update.content;
+      });
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (event.source !== frame.contentWindow || message?.type !== "simple-server-preview:navigate") return;
+        channel.postMessage({ ...message, type: "preview:navigate", clientId });
       });
       channel.postMessage({ type: "preview:subscribe", clientId });
       window.addEventListener("pagehide", () => {
@@ -1704,8 +1820,9 @@ function createPreviewPageUrl(frameContent, title) {
   return URL.createObjectURL(new Blob([documentContent], { type: "text/html;charset=utf-8" }));
 }
 
-function broadcastPreviewUpdate(content, title) {
-  getPreviewBroadcastChannel()?.postMessage({ type: "preview:update", content, title });
+function broadcastPreviewUpdate(update, targetClientId = "") {
+  if (!targetClientId) lastPreviewUpdate = { ...update };
+  getPreviewBroadcastChannel()?.postMessage(targetClientId ? { ...update, targetClientId } : update);
 }
 
 function getPreviewBroadcastChannel() {
@@ -1721,11 +1838,43 @@ function handlePreviewBroadcastMessage(event) {
   if (!message?.clientId) return;
   if (message.type === "preview:subscribe") {
     standalonePreviewClients.add(message.clientId);
+    if (lastPreviewUpdate) broadcastPreviewUpdate(lastPreviewUpdate, message.clientId);
+    return;
+  }
+  if (message.type === "preview:navigate") {
+    void navigatePreviewDocument(message.path, message.suffix);
     return;
   }
   if (message.type !== "preview:unsubscribe") return;
   standalonePreviewClients.delete(message.clientId);
   if (!previewPaneVisible.value && !standalonePreviewClients.size) clearPreviewContent();
+}
+
+function handlePreviewWindowMessage(event) {
+  const message = event.data;
+  if (event.source !== previewFrame.value?.contentWindow || message?.type !== "simple-server-preview:navigate") return;
+  void navigatePreviewDocument(message.path, message.suffix);
+}
+
+async function navigatePreviewDocument(path, suffix = "") {
+  const serial = ++previewNavigationSerial;
+  const workspace = rootHandle.value;
+  let normalized;
+  try {
+    normalized = normalizePreviewFilePath(path);
+    const file = await readPreviewFile(normalized);
+    if (serial !== previewNavigationSerial || workspace !== rootHandle.value) return;
+    const type = getPreviewType(file);
+    if (!type) throw new Error(`File is not previewable: ${normalized}`);
+    const normalizedSuffix = /^[?#]/.test(String(suffix || "")) ? String(suffix) : "";
+    const unchanged = previewPath.value === normalized && previewUrlSuffix.value === normalizedSuffix && previewType.value === type;
+    previewPath.value = normalized;
+    previewUrlSuffix.value = normalizedSuffix;
+    previewType.value = type;
+    if (unchanged) void updatePreviewContent({ remountFrame: true });
+  } catch (error) {
+    if (serial === previewNavigationSerial && workspace === rootHandle.value) reportError("error.openFile", error);
+  }
 }
 
 function createMarkdownPreviewDocument(content, title) {
@@ -1767,48 +1916,126 @@ function revokePreviewPageUrl() {
   replacePreviewPageUrl("");
 }
 
-async function rewritePreviewResourceAttributes(html, file, objectUrls) {
-  const source = String(html || "");
-  const matches = Array.from(source.matchAll(/\b(src|href)\s*=\s*(["'])([^"']+)\2/gi));
-  if (!matches.length) return source;
-  let output = "";
-  let cursor = 0;
-  for (const match of matches) {
-    const [fullMatch, attribute, quote, value] = match;
-    const resolved = await getPreviewResourceUrl(value, file, objectUrls);
-    output += source.slice(cursor, match.index);
-    output += resolved === value ? fullMatch : `${attribute}=${quote}${resolved}${quote}`;
-    cursor = match.index + fullMatch.length;
+async function rewritePreviewDocument(html, file, objectUrls, suffix) {
+  const documentNode = new DOMParser().parseFromString(String(html || ""), "text/html");
+  const elements = Array.from(documentNode.querySelectorAll("[src], [href]"));
+  for (const element of elements) {
+    if (element.hasAttribute("src")) {
+      element.setAttribute("src", await getPreviewResourceUrl(element.getAttribute("src"), file, objectUrls));
+    }
+    if (!element.hasAttribute("href")) continue;
+    if (element.tagName.toLowerCase() === "a") {
+      await rewritePreviewAnchor(element, file, objectUrls);
+    } else {
+      element.setAttribute("href", await getPreviewResourceUrl(element.getAttribute("href"), file, objectUrls));
+    }
   }
-  return output + source.slice(cursor);
+  installPreviewNavigationBridge(documentNode, suffix);
+  return `<!doctype html>\n${documentNode.documentElement.outerHTML}`;
+}
+
+async function rewritePreviewAnchor(anchor, file, objectUrls) {
+  const href = anchor.getAttribute("href") || "";
+  const resolved = resolveWorkspacePreviewUrl(href, file.path);
+  if (!resolved) return;
+  try {
+    const target = await readPreviewFile(resolved.path);
+    if (getPreviewType(target)) {
+      anchor.dataset.simpleServerPreviewPath = resolved.path;
+      anchor.dataset.simpleServerPreviewSuffix = resolved.suffix;
+      anchor.removeAttribute("target");
+      return;
+    }
+  } catch {
+    return;
+  }
+  anchor.setAttribute("href", await getPreviewResourceUrl(href, file, objectUrls));
+}
+
+function installPreviewNavigationBridge(documentNode, suffix) {
+  const script = documentNode.createElement("script");
+  const initialHash = getPreviewHash(suffix);
+  script.dataset.simpleServerPreviewBridge = "";
+  script.textContent = `(() => {
+    const initialHash = ${serializePreviewScriptValue(initialHash)};
+    document.addEventListener("click", (event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+      const anchor = target?.closest("a[data-simple-server-preview-path]");
+      if (!anchor || anchor.hasAttribute("download")) return;
+      event.preventDefault();
+      window.parent.postMessage({
+        type: "simple-server-preview:navigate",
+        path: anchor.dataset.simpleServerPreviewPath || "",
+        suffix: anchor.dataset.simpleServerPreviewSuffix || ""
+      }, "*");
+    }, true);
+    const scrollToInitialHash = () => {
+      if (!initialHash) return;
+      let name = initialHash.slice(1);
+      try { name = decodeURIComponent(name); } catch {}
+      const target = document.getElementById(name) || document.getElementsByName(name)[0];
+      target?.scrollIntoView();
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", scrollToInitialHash, { once: true });
+    else scrollToInitialHash();
+  })();`;
+  documentNode.head.prepend(script);
+}
+
+function serializePreviewScriptValue(value) {
+  return JSON.stringify(String(value || "")).replaceAll("<", "\\u003c");
+}
+
+function getPreviewHash(suffix) {
+  const value = String(suffix || "");
+  const index = value.indexOf("#");
+  return index >= 0 ? value.slice(index) : "";
 }
 
 async function getPreviewResourceUrl(value, file, objectUrls) {
   const url = String(value || "").trim();
-  if (!url || url.startsWith("#") || url.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(url)) return value;
-  const [pathPart] = splitPreviewUrlSuffix(url);
-  if (!pathPart) return value;
-  let resourcePath;
-  try {
-    resourcePath = normalizeWorkspacePath(pathPart.startsWith("/") ? pathPart : joinWorkspacePath(getDirectoryPath(file.path), pathPart));
-  } catch {
-    return value;
-  }
+  const resolved = resolveWorkspacePreviewUrl(url, file.path);
+  if (!resolved) return value;
   let resource;
   try {
-    resource = await ensureAnyFileState(resourcePath, { closed: true });
+    resource = await readPreviewFile(resolved.path);
   } catch {
     return value;
   }
-  if (isTextFileState(resource)) return getTextDataUrl(resource);
-  if (resource.fileType === "image" && resource.objectUrl) return resource.objectUrl;
-  if (resource.handle) return getPreviewBlobUrl(resource, objectUrls);
+  if (resource.fileType === "text") return `${getTextDataUrl(resource)}${resolved.hash}`;
+  if (resource.diskFile || resource.handle) return `${await getPreviewBlobUrl(resource, objectUrls)}${resolved.hash}`;
   return value;
+}
+
+async function readPreviewFile(path) {
+  const normalized = normalizePreviewFilePath(path);
+  const existing = openFiles.get(normalized);
+  if (existing) {
+    if (existing.deleted) throw new Error(`File not found: ${normalized}`);
+    return existing;
+  }
+  const node = findNodeByPath(tree.value, normalized);
+  if (!node || node.kind !== "file") throw new Error(`File not found: ${normalized}`);
+  const diskFile = await node.handle.getFile();
+  if (FileUtils.isImageFile(diskFile)) return { name: node.name, path: node.path, fileType: "image", diskFile, handle: node.handle };
+  if (!isReadableTextFile(diskFile)) return { name: node.name, path: node.path, fileType: "unsupported", diskFile, handle: node.handle };
+  return { name: node.name, path: node.path, fileType: "text", language: getLanguageId(node.name), content: await diskFile.text(), diskFile, handle: node.handle };
+}
+
+function normalizePreviewFilePath(path) {
+  const normalized = String(path || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/");
+  if (!normalized || normalized.split("/").some((part) => !part || part === "." || part === "..")) throw new Error(tr("error.invalidPath"));
+  return normalized;
+}
+
+function getPreviewFileContent(file) {
+  return file.model?.getValue() ?? String(file.content || "");
 }
 
 async function getPreviewBlobUrl(file, objectUrls) {
   if (objectUrls.has(file.path)) return objectUrls.get(file.path);
-  const diskFile = await file.handle.getFile();
+  const diskFile = file.diskFile || await file.handle.getFile();
   const objectUrl = URL.createObjectURL(diskFile);
   objectUrls.set(file.path, objectUrl);
   return objectUrl;
@@ -1829,18 +2056,9 @@ function revokeObjectUrlMap(urls) {
   urls.clear();
 }
 
-function splitPreviewUrlSuffix(url) {
-  const hashIndex = url.indexOf("#");
-  const queryIndex = url.indexOf("?");
-  const indexes = [hashIndex, queryIndex].filter((index) => index >= 0);
-  if (!indexes.length) return [url, ""];
-  const splitIndex = Math.min(...indexes);
-  return [url.slice(0, splitIndex), url.slice(splitIndex)];
-}
-
 function getTextDataUrl(file) {
   const mimeType = getPreviewMimeType(file);
-  return `data:${mimeType};charset=utf-8,${encodeURIComponent(file.model.getValue())}`;
+  return `data:${mimeType};charset=utf-8,${encodeURIComponent(getPreviewFileContent(file))}`;
 }
 
 function getPreviewMimeType(file) {
@@ -2783,6 +3001,7 @@ async function activateWorkspace(handle, name, kind) {
 }
 
 function resetWorkspaceEditorState() {
+  resetPreviewState();
   openFiles.forEach((file) => disposeFileModels(file, { force: true }));
   openFiles.clear();
   disposeWorkspaceModels({ force: true });
@@ -2843,7 +3062,7 @@ function handleGlobalCommandPaletteShortcut(event) {
     openCommandPalette();
     return;
   }
-  if (canPreviewActiveFile.value && isShortcutEvent(settings.shortcuts.preview, event)) {
+  if ((previewVisible.value || canPreviewActiveFile.value) && isShortcutEvent(settings.shortcuts.preview, event)) {
     event.preventDefault();
     togglePreview();
     return;
@@ -3368,6 +3587,15 @@ function changeActiveLanguage() {
   activeFile.value.monacoLanguage = getMonacoLanguageId(activeFile.value.language);
   monaco.editor.setModelLanguage(activeFile.value.model, activeFile.value.monacoLanguage);
   if (activeFile.value.originalModel) monaco.editor.setModelLanguage(activeFile.value.originalModel, activeFile.value.monacoLanguage);
+  if (previewPath.value === activeFile.value.path) {
+    const type = getPreviewType(activeFile.value);
+    if (type) {
+      previewType.value = type;
+      void updatePreviewContent({ remountFrame: true });
+    } else {
+      resetPreviewState();
+    }
+  }
   setStatus(activeFile.value.path, `${getLanguageLabel(activeFile.value.language)} | ${activeFile.value.dirty ? tr("status.unsaved") : tr("status.saved")}`);
 }
 

@@ -357,10 +357,12 @@ function escapeAttributeValue(value) {
 function safeMarkdownUrl(url, allowDataImage) {
     const value = String(url || '').trim();
     if (!value) return '';
+    if (/[\u0000-\u001f\u007f]/.test(value) || /\s/.test(value)) return '';
     const lowerValue = value.toLowerCase();
     if (allowDataImage && /^data:image\/(?:png|gif|jpe?g|webp|svg\+xml);base64,/.test(lowerValue)) return value;
     if (/^(?:https?:|mailto:|tel:)/i.test(value)) return value;
-    if (/^(?:\/|\.\/|\.\.\/|#)[^\s]*$/.test(value)) return value;
+    const normalized = value.replace(/\\/g, '/');
+    if (!/^(?:\/\/|[a-z][a-z0-9+.-]*:)/i.test(normalized)) return value;
     return '';
 }
 
