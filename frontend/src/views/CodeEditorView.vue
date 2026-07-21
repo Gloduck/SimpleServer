@@ -150,8 +150,8 @@
             <article v-for="message in aiMessages" :key="message.id" class="ai-message" :class="`ai-message-${message.role}`">
               <template v-if="message.role === 'tool' && message.tool">
                 <button type="button" class="ai-tool-toggle" @click="message.expanded = !message.expanded">
-                  <span>{{ tr('ai.role.tool') }} · {{ message.tool.name }} · {{ message.tool.ok ? 'OK' : 'ERROR' }}</span>
-                  <span class="codicon" :class="message.expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'" aria-hidden="true"></span>
+                  <span>{{ tr('ai.role.tool') }} · {{ message.tool.name }} · {{ message.tool.pending ? tr('ai.toolRunning') : (message.tool.cancelled ? tr('ai.toolCancelled') : (message.tool.ok ? 'OK' : 'ERROR')) }}</span>
+                  <span class="codicon" :class="message.tool.pending ? 'codicon-loading codicon-modifier-spin' : (message.tool.cancelled ? 'codicon-circle-slash' : (message.expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'))" aria-hidden="true"></span>
                 </button>
                 <div class="ai-message-content" v-html="renderMarkdown(message.content)"></div>
                 <button v-if="message.imagePreview" type="button" class="ai-image-result" :title="message.imagePreview.path" @click="openFileByPath(message.imagePreview.path)">
@@ -165,7 +165,7 @@
                   </div>
                   <div>
                     <strong>{{ tr('ai.toolResult') }}</strong>
-                    <pre>{{ formatJsonForDisplay(message.tool.result) }}</pre>
+                    <pre>{{ message.tool.pending ? tr('ai.toolRunning') : (message.tool.cancelled ? tr('ai.toolCancelled') : formatJsonForDisplay(message.tool.result)) }}</pre>
                   </div>
                 </div>
               </template>
@@ -855,6 +855,8 @@ const messages = {
     "ai.role.tool": "工具",
     "ai.toolArgs": "入参",
     "ai.toolResult": "结果",
+    "ai.toolRunning": "执行中",
+    "ai.toolCancelled": "已取消",
     "ai.imageGenerated": "已生成图片 {path}",
     "ai.imageEdited": "已编辑图片 {path}",
     "ai.error.missingConfig": "请先在设置中填写 API Key 和模型。",
@@ -1166,6 +1168,8 @@ const messages = {
     "ai.role.tool": "Tool",
     "ai.toolArgs": "Arguments",
     "ai.toolResult": "Result",
+    "ai.toolRunning": "RUNNING",
+    "ai.toolCancelled": "CANCELLED",
     "ai.imageGenerated": "Generated image {path}",
     "ai.imageEdited": "Edited image {path}",
     "ai.error.missingConfig": "Fill in API key and model in Settings first.",
@@ -4411,10 +4415,50 @@ async function deleteActiveAiSession() {
 
 function addAiMessage(role, content, meta = {}, session = getActiveAiSession()) {
   session.messages.push(createAiMessage(role, content, meta));
+  return session.messages.at(-1);
 }
 
 function createAiMessage(role, content, meta = {}) {
   return { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, role, content, ...meta };
+}
+
+function addPendingAiToolMessage(call, args, session) {
+  return addAiMessage("tool", tr("ai.toolRunning"), {
+    expanded: false,
+    tool: { name: call.name, pending: true, cancelled: false, ok: null, args, result: null },
+  }, session);
+}
+
+function completeAiToolMessage(message, result) {
+  if (message.tool.cancelled) return;
+  message.content = result.summary || "";
+  message.imagePreview = createAiImagePreview(result);
+  message.tool.pending = false;
+  message.tool.cancelled = false;
+  message.tool.ok = Boolean(result.ok);
+  message.tool.result = result;
+}
+
+function cancelAiToolMessage(message) {
+  if (!message?.tool?.pending) return;
+  const result = { ok: false, cancelled: true, summary: tr("ai.toolCancelled") };
+  message.content = result.summary;
+  message.tool.pending = false;
+  message.tool.cancelled = true;
+  message.tool.ok = false;
+  message.tool.result = result;
+}
+
+function cancelPendingAiToolMessages(entries, startIndex = 0) {
+  entries.slice(startIndex).forEach(({ message }) => cancelAiToolMessage(message));
+}
+
+function createAiAbortError() {
+  return new DOMException(tr("status.aiStopped"), "AbortError");
+}
+
+function throwIfAiAborted(signal) {
+  if (signal?.aborted) throw createAiAbortError();
 }
 
 function getActiveAiTouchedPaths(session = getActiveAiSession()) {
@@ -4644,7 +4688,10 @@ async function sendAiPrompt() {
 }
 
 function stopAiTask() {
-  activeAiSession.value?.abortController?.abort();
+  const session = activeAiSession.value;
+  session?.abortController?.abort();
+  session?.messages.forEach(cancelAiToolMessage);
+  void nextTick(scrollAiMessagesToBottom);
 }
 
 function resetAiConversation() {
@@ -4722,17 +4769,41 @@ async function runAiAgent(prompt, signal, session = getActiveAiSession(), runCon
     if (!toolCalls.length) return;
     conversation.push(...getContinuationOutputItems(response));
     const imageInputs = [];
-    for (const call of toolCalls) {
-      const args = parseAiToolArguments(call);
-      if (call.name === "read_image") {
-        const result = await runAiReadImageToolCall(args, imageInputs);
-        addAiMessage("tool", result.summary || "", { expanded: false, tool: { name: call.name, ok: result.ok, args, result } }, session);
-        conversation.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
-        continue;
+    const parsedToolCalls = toolCalls.map((call) => ({ call, args: parseAiToolArguments(call) }));
+    const pendingToolCalls = parsedToolCalls.map(({ call, args }) => ({ call, args, message: addPendingAiToolMessage(call, args, session) }));
+    await nextTick();
+    scrollAiMessagesToBottom();
+    for (let index = 0; index < pendingToolCalls.length; index += 1) {
+      if (signal.aborted) {
+        cancelPendingAiToolMessages(pendingToolCalls, index);
+        await nextTick();
+        scrollAiMessagesToBottom();
+        throw createAiAbortError();
       }
-      const result = await runAiToolCall(call, args, session, signal);
-      addAiMessage("tool", result.summary || "", { expanded: false, imagePreview: createAiImagePreview(result), tool: { name: call.name, ok: result.ok, args, result } }, session);
-      conversation.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
+      const { call, args, message } = pendingToolCalls[index];
+      try {
+        const result = call.name === "read_image"
+          ? await runAiReadImageToolCall(args, imageInputs)
+          : await runAiToolCall(call, args, session, signal);
+        throwIfAiAborted(signal);
+        completeAiToolMessage(message, result);
+        conversation.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
+      } catch (error) {
+        if (error.name !== "AbortError" && !signal.aborted) throw error;
+        cancelAiToolMessage(message);
+        cancelPendingAiToolMessages(pendingToolCalls, index + 1);
+        await nextTick();
+        scrollAiMessagesToBottom();
+        throw error.name === "AbortError" ? error : createAiAbortError();
+      }
+      await nextTick();
+      scrollAiMessagesToBottom();
+      if (signal.aborted) {
+        cancelPendingAiToolMessages(pendingToolCalls, index + 1);
+        await nextTick();
+        scrollAiMessagesToBottom();
+        throw createAiAbortError();
+      }
     }
     if (imageInputs.length) conversation.push(buildImageInputMessage(imageInputs));
   }
@@ -4751,6 +4822,7 @@ async function runAiReadImageToolCall(args, imageInputs) {
       size: image.size,
     };
   } catch (error) {
+    if (error.name === "AbortError") throw error;
     return { ok: false, summary: error.message || String(error) };
   }
 }
@@ -5146,8 +5218,8 @@ async function runAiToolCall(call, args = {}, session = getActiveAiSession(), si
       case "read_files": return okTool(await aiToolReadFiles(args));
       case "generate_or_edit_image": return okTool(await aiToolGenerateOrEditImage(args, session, signal));
       case "search_text": return okTool(await aiToolSearchText(args));
-      case "run_javascript": return await aiToolRunJavaScript(args);
-      case "request_proxy": return okTool(await aiToolRequestProxy(args));
+      case "run_javascript": return await aiToolRunJavaScript(args, signal);
+      case "request_proxy": return okTool(await aiToolRequestProxy(args, signal));
       case "get_ssh_connections": return okTool(aiToolGetSshConnections());
       case "open_ssh_connection": return okTool(await aiToolOpenSshConnection(args.connection));
       case "activate_ssh_terminal": return okTool(aiToolActivateSshTerminal(args.connection));
@@ -5168,6 +5240,7 @@ async function runAiToolCall(call, args = {}, session = getActiveAiSession(), si
       default: return { ok: false, summary: `Unknown tool: ${call.name}` };
     }
   } catch (error) {
+    if (error.name === "AbortError") throw error;
     return { ok: false, summary: error.message || String(error) };
   }
 }
@@ -5667,6 +5740,7 @@ async function aiToolReadImage(path) {
 }
 
 async function aiToolGenerateOrEditImage({ prompt, output_path: outputPath, input_path: inputPath, mask_path: maskPath, size = "auto", quality = "auto", background = "auto", output_format: outputFormat, overwrite = false } = {}, session = getActiveAiSession(), signal) {
+  throwIfAiAborted(signal);
   const normalizedPrompt = String(prompt || "").trim();
   if (!normalizedPrompt) throw new Error("prompt is required");
   const normalizedOutputPath = normalizeWorkspacePath(outputPath);
@@ -5680,6 +5754,7 @@ async function aiToolGenerateOrEditImage({ prompt, output_path: outputPath, inpu
 
   const input = normalizedInputPath ? await getWorkspaceImageSource(normalizedInputPath) : null;
   const mask = maskPath ? await getWorkspaceImageSource(maskPath, { mask: true }) : null;
+  throwIfAiAborted(signal);
   if (input && mask && input.width && mask.width && (input.width !== mask.width || input.height !== mask.height)) throw new Error("mask_path dimensions must match input_path");
   const blob = await callOpenAiImage({
     prompt: normalizedPrompt,
@@ -5692,9 +5767,11 @@ async function aiToolGenerateOrEditImage({ prompt, output_path: outputPath, inpu
     background: String(background || "auto"),
     outputFormat: format,
   }, signal);
+  throwIfAiAborted(signal);
   const dimensions = await readImageDimensions(blob);
+  throwIfAiAborted(signal);
   const operation = input ? "edited" : "generated";
-  const file = await stageImageFile({ path: normalizedOutputPath, blob, session });
+  const file = await stageImageFile({ path: normalizedOutputPath, blob, session, signal });
   const summary = tr(input ? "ai.imageEdited" : "ai.imageGenerated", { path: file.path });
   setStatus(summary, tr("status.unsaved"));
   return {
@@ -5759,18 +5836,21 @@ async function readImageDimensions(blob) {
   }
 }
 
-async function stageImageFile({ path, blob, session }) {
+async function stageImageFile({ path, blob, session, signal }) {
+  throwIfAiAborted(signal);
   let file = openFiles.get(path);
   if (!file) {
     const node = findNodeByPath(tree.value, path);
     if (node) {
       const diskFile = await node.handle.getFile();
+      throwIfAiAborted(signal);
       if (!FileUtils.isImageFile(diskFile)) throw new Error(`Output file is not an image: ${path}`);
       file = createImageFileState(node, diskFile, { closed: false });
     } else {
       file = createVirtualImageFileState(path, blob);
     }
   }
+  throwIfAiAborted(signal);
   if (file.fileType !== "image") throw new Error(`Output file is not an image: ${path}`);
   if (file.blob !== blob) setImageFileBlob(file, blob);
   file.deleted = false;
@@ -5855,7 +5935,8 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
   return { summary: `${results.length} match(es)`, results };
 }
 
-async function aiToolRunJavaScript({ code, input = {}, timeout_ms: timeoutMs, result_mode: resultMode, max_output_chars: maxOutputChars } = {}) {
+async function aiToolRunJavaScript({ code, input = {}, timeout_ms: timeoutMs, result_mode: resultMode, max_output_chars: maxOutputChars } = {}, signal) {
+  throwIfAiAborted(signal);
   const script = String(code || "");
   if (!script.trim()) return { ok: false, summary: "JavaScript code is required" };
   if (script.length > AI_JAVASCRIPT_MAX_CODE_CHARS) return { ok: false, summary: `JavaScript code is too large: ${script.length} chars` };
@@ -5865,7 +5946,7 @@ async function aiToolRunJavaScript({ code, input = {}, timeout_ms: timeoutMs, re
   const logs = [];
   const startedAt = performance.now();
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let worker = null;
     let objectUrl = "";
     let timer = 0;
@@ -5875,12 +5956,25 @@ async function aiToolRunJavaScript({ code, input = {}, timeout_ms: timeoutMs, re
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
       worker?.terminate();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       resolve({ elapsed_ms: Math.round(performance.now() - startedAt), logs, ...result });
     };
 
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      worker?.terminate();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      reject(createAiAbortError());
+    };
+
     try {
+      signal?.addEventListener("abort", abort, { once: true });
+      throwIfAiAborted(signal);
       objectUrl = URL.createObjectURL(new Blob([createAiJavaScriptWorkerSource()], { type: "application/javascript" }));
       worker = new Worker(objectUrl);
       worker.onmessage = (event) => {
@@ -5906,6 +6000,10 @@ async function aiToolRunJavaScript({ code, input = {}, timeout_ms: timeoutMs, re
       }, timeout);
       worker.postMessage({ code: script, input, result_mode: resultMode, max_output_chars: maxOutputChars });
     } catch (error) {
+      if (error.name === "AbortError") {
+        abort();
+        return;
+      }
       finish({ ok: false, summary: error.message || String(error), error: { message: error.message || String(error) } });
     }
   });
@@ -6006,7 +6104,8 @@ self.onmessage = async (event) => {
 `;
 }
 
-async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, follow_redirect: followRedirect = true, enable_cors: enableCors = true, include_headers: includeHeaders = false, filter_script: filterScript, max_chars: maxChars } = {}) {
+async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, follow_redirect: followRedirect = true, enable_cors: enableCors = true, include_headers: includeHeaders = false, filter_script: filterScript, max_chars: maxChars } = {}, signal) {
+  throwIfAiAborted(signal);
   validateBackendEnabled();
   if (!url) throw new Error("url is required");
   const target = new URL(url);
@@ -6023,6 +6122,7 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, fol
     headers: requestHeaders,
     body: requestMethod === "GET" || requestMethod === "HEAD" ? undefined : String(body ?? ""),
     credentials: "omit",
+    signal,
   });
   const text = await response.text();
   const responseHeaders = Object.fromEntries(response.headers.entries());
@@ -6038,7 +6138,7 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, fol
       input: text,
       result_mode: "text",
       max_output_chars: outputLimit,
-    });
+    }, signal);
     if (!filterResult.ok) throw new Error(`filter_script failed: ${filterResult.summary || "Unknown error"}`);
     clipped = normalizeAiJavaScriptTextResult(filterResult.result, outputLimit);
     filterElapsedMs = filterResult.elapsed_ms || 0;
