@@ -154,6 +154,10 @@
                   <span class="codicon" :class="message.expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'" aria-hidden="true"></span>
                 </button>
                 <div class="ai-message-content" v-html="renderMarkdown(message.content)"></div>
+                <button v-if="message.imagePreview" type="button" class="ai-image-result" :title="message.imagePreview.path" @click="openFileByPath(message.imagePreview.path)">
+                  <img :src="message.imagePreview.objectUrl" :alt="message.imagePreview.path" />
+                  <span>{{ message.imagePreview.path }}</span>
+                </button>
                 <div v-if="message.expanded" class="ai-tool-details">
                   <div>
                     <strong>{{ tr('ai.toolArgs') }}</strong>
@@ -297,6 +301,10 @@
               <input v-model="settings.ai.completionModel" list="ai-model-options" spellcheck="false" />
             </label>
             <label class="setting-row">
+              <span>{{ tr('settings.aiImageModel') }}</span>
+              <input v-model="settings.ai.imageModel" list="ai-model-options" spellcheck="false" />
+            </label>
+            <label class="setting-row">
               <span>{{ tr('settings.aiAgentModel') }}</span>
               <input v-model="settings.ai.agentModels" spellcheck="false" :placeholder="tr('settings.aiAgentModelsPlaceholder')" @change="normalizeAgentModelsInput" />
             </label>
@@ -411,11 +419,11 @@
           <button @click="openFolder">{{ tr('action.openFolder') }}</button>
         </div>
         <div ref="editorHost" class="monaco-host" :class="{ visible: activeTextFile && !activeDiffPath && !activeSshTerminal }" :aria-label="tr('editor.aria')"></div>
-        <div v-if="activeImageFile && !activeDiffPath && !activeSshTerminal" class="image-preview" :aria-label="tr('imagePreview.aria')" @click="focusActivePreviewEditor">
-          <img :src="activeImageFile.objectUrl" :alt="activeImageFile.name" />
+        <div v-if="displayedImageFile && !activeSshTerminal" class="image-preview" :aria-label="tr('imagePreview.aria')" @click="focusActivePreviewEditor">
+          <img :src="displayedImageFile.objectUrl" :alt="displayedImageFile.name" />
           <div class="image-preview-meta">
-            <strong>{{ activeImageFile.name }}</strong>
-            <span>{{ FileUtils.formatFileSize(activeImageFile.size) }} · {{ activeImageFile.mimeType || tr('imagePreview.type') }}</span>
+            <strong>{{ displayedImageFile.name }}</strong>
+            <span>{{ FileUtils.formatFileSize(displayedImageFile.size) }} · {{ displayedImageFile.mimeType || tr('imagePreview.type') }}</span>
           </div>
         </div>
         <div v-if="activeUnsupportedFile && !activeDiffPath && !activeSshTerminal" class="unsupported-preview" :aria-label="tr('unsupportedFile.aria')" @click="focusActivePreviewEditor">
@@ -430,7 +438,7 @@
           <p>{{ tr('diff.unsupportedDescription') }}</p>
           <small>{{ activeDiffUnsupportedFile.path }} · {{ activeDiffUnsupportedFile.deleted ? tr('changes.deleted') : tr('status.unsaved') }}</small>
         </div>
-        <div ref="diffHost" class="monaco-host diff-host" :class="{ visible: activeDiffPath && !activeDiffUnsupportedFile && !activeSshTerminal }" :aria-label="tr('diff.aria')"></div>
+        <div ref="diffHost" class="monaco-host diff-host" :class="{ visible: activeDiffPath && !activeDiffUnsupportedFile && !activeDiffImageFile && !activeSshTerminal }" :aria-label="tr('diff.aria')"></div>
         <section v-if="activeSshTerminal" class="ssh-terminal" :aria-label="tr('ssh.terminal')">
           <header class="ssh-terminal-header">
             <span>{{ activeSshTerminal.title }}</span>
@@ -620,7 +628,7 @@ const LEGACY_AI_COMPLETE_SHORTCUT = "Ctrl+Shift+Enter";
 const LEGACY_FOLD_ALL_SHORTCUT = "Ctrl+K Ctrl+0";
 const LEGACY_UNFOLD_ALL_SHORTCUT = "Ctrl+K Ctrl+J";
 const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", preview: "Ctrl+Shift+V", toggleSidebar: "Ctrl+B", fold: "Ctrl+Shift+[", unfold: "Ctrl+Shift+]", foldAll: "Ctrl+Alt+[", unfoldAll: "Ctrl+Alt+]", aiComplete: "Ctrl+Alt+Enter" };
-const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
+const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", imageModel: "gpt-image-1", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
 const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
 const DEFAULT_SSH_WHITELIST_TEMPLATE = [
   "pwd", "ls", "cat", "less", "more", "head", "tail", "grep", "egrep", "fgrep", "awk", "sed", "sort", "uniq", "wc", "cut", "tr", "tee", "xargs", "find", "stat", "file", "readlink", "realpath", "basename", "dirname", "tree",
@@ -644,6 +652,9 @@ const AI_COMPLETION_MANUAL_PREFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_SUFFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_MAX_OUTPUT_TOKENS = 512;
 const AI_IMAGE_MAX_FILE_SIZE = 20 * 1024 * 1024;
+const AI_IMAGE_MASK_MAX_FILE_SIZE = 4 * 1024 * 1024;
+const AI_IMAGE_OUTPUT_MAX_FILE_SIZE = 25 * 1024 * 1024;
+const PREVIEW_INLINE_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
 const AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS = 2000;
 const AI_JAVASCRIPT_MAX_TIMEOUT_MS = 5000;
 const AI_JAVASCRIPT_MAX_CODE_CHARS = 20000;
@@ -725,6 +736,7 @@ const messages = {
     "settings.aiFetchModels": "从 API 拉取模型",
     "settings.aiModelsLoading": "正在拉取模型...",
     "settings.aiCompletionModel": "补全模型",
+    "settings.aiImageModel": "图片生成模型",
     "settings.aiAgentModel": "Agent 模型",
     "settings.aiAgentModelsPlaceholder": "用逗号分隔，例如 gpt-5.5,gpt-5.4-mini",
     "settings.aiAgentModelToAdd": "选择模型添加",
@@ -843,6 +855,8 @@ const messages = {
     "ai.role.tool": "工具",
     "ai.toolArgs": "入参",
     "ai.toolResult": "结果",
+    "ai.imageGenerated": "已生成图片 {path}",
+    "ai.imageEdited": "已编辑图片 {path}",
     "ai.error.missingConfig": "请先在设置中填写 API Key 和模型。",
     "ai.error.missingApiKey": "请先在设置中填写 API Key。",
     "ai.error.noWorkspace": "请先打开工作区。",
@@ -1033,6 +1047,7 @@ const messages = {
     "settings.aiFetchModels": "Fetch Models from API",
     "settings.aiModelsLoading": "Fetching models...",
     "settings.aiCompletionModel": "Completion Model",
+    "settings.aiImageModel": "Image Generation Model",
     "settings.aiAgentModel": "Agent Model",
     "settings.aiAgentModelsPlaceholder": "Comma-separated, for example gpt-5.5,gpt-5.4-mini",
     "settings.aiAgentModelToAdd": "Select model to add",
@@ -1151,6 +1166,8 @@ const messages = {
     "ai.role.tool": "Tool",
     "ai.toolArgs": "Arguments",
     "ai.toolResult": "Result",
+    "ai.imageGenerated": "Generated image {path}",
+    "ai.imageEdited": "Edited image {path}",
     "ai.error.missingConfig": "Fill in API key and model in Settings first.",
     "ai.error.missingApiKey": "Fill in API key in Settings first.",
     "ai.error.noWorkspace": "Open a workspace first.",
@@ -1506,7 +1523,7 @@ const aiAgentModelOptions = computed(() => {
   const configured = parseCommaList(settings.ai.agentModels);
   return uniqueStrings(configured.length ? configured : [settings.ai.agentModel, defaultAiSettings.agentModel]);
 });
-const aiModelOptions = computed(() => uniqueStrings([settings.ai.completionModel, ...aiAgentModelOptions.value, defaultAiSettings.completionModel, ...aiAvailableModels.value]));
+const aiModelOptions = computed(() => uniqueStrings([settings.ai.completionModel, settings.ai.imageModel, ...aiAgentModelOptions.value, defaultAiSettings.completionModel, defaultAiSettings.imageModel, ...aiAvailableModels.value]));
 const aiContextLength = computed(() => formatAiUsage(activeAiSession.value?.contextUsage));
 const canResetAiConversation = computed(() => Boolean(aiPrompt.value.trim() || aiMessages.value.length || getAiTouchedFiles().length));
 const tree = computed(() => {
@@ -1542,7 +1559,9 @@ const activeDiffFile = computed(() => {
   dirtyRevision.value;
   return activeDiffPath.value ? openFiles.get(activeDiffPath.value) : null;
 });
-const activeDiffUnsupportedFile = computed(() => activeDiffFile.value && !isTextFileState(activeDiffFile.value) ? activeDiffFile.value : null);
+const activeDiffImageFile = computed(() => activeDiffFile.value?.fileType === "image" && !activeDiffFile.value.deleted ? activeDiffFile.value : null);
+const activeDiffUnsupportedFile = computed(() => activeDiffFile.value?.fileType === "unsupported" || activeDiffFile.value?.deleted ? activeDiffFile.value : null);
+const displayedImageFile = computed(() => activeDiffImageFile.value || (!activeDiffPath.value ? activeImageFile.value : null));
 const activeLanguage = computed({ get: () => activeFile.value?.language || "plaintext", set: (value) => { if (activeFile.value) activeFile.value.language = value; } });
 const activePreviewType = computed(() => getPreviewType(activeTextFile.value));
 const canPreviewActiveFile = computed(() => Boolean(activePreviewType.value));
@@ -1645,6 +1664,7 @@ onBeforeUnmount(() => {
   inlineCompletionDisposables.splice(0).forEach((disposable) => disposable.dispose());
   abortAiCompletionRequest();
   aiSessions.forEach((session) => session.abortController?.abort());
+  aiSessions.forEach((session) => disposeAiMessageResources(session.messages));
   closeAllSshSessions({ disposeTerminal: true });
   openFiles.forEach((file) => disposeFileModels(file, { force: true }));
   disposeWorkspaceModels({ force: true });
@@ -2004,6 +2024,10 @@ async function getPreviewResourceUrl(value, file, objectUrls) {
     return value;
   }
   if (resource.fileType === "text") return `${getTextDataUrl(resource)}${resolved.hash}`;
+  if (resource.fileType === "image") {
+    const dataUrl = await getPreviewImageDataUrl(resource);
+    return dataUrl ? `${dataUrl}${resolved.hash}` : value;
+  }
   if (resource.diskFile || resource.handle) return `${await getPreviewBlobUrl(resource, objectUrls)}${resolved.hash}`;
   return value;
 }
@@ -2035,7 +2059,8 @@ function getPreviewFileContent(file) {
 
 async function getPreviewBlobUrl(file, objectUrls) {
   if (objectUrls.has(file.path)) return objectUrls.get(file.path);
-  const diskFile = file.diskFile || await file.handle.getFile();
+  const source = file.fileType === "image" ? getActiveImageBlob(file) : null;
+  const diskFile = source || file.diskFile || await file.handle.getFile();
   const objectUrl = URL.createObjectURL(diskFile);
   objectUrls.set(file.path, objectUrl);
   return objectUrl;
@@ -2059,6 +2084,12 @@ function revokeObjectUrlMap(urls) {
 function getTextDataUrl(file) {
   const mimeType = getPreviewMimeType(file);
   return `data:${mimeType};charset=utf-8,${encodeURIComponent(getPreviewFileContent(file))}`;
+}
+
+async function getPreviewImageDataUrl(file) {
+  const blob = getActiveImageBlob(file) || file.diskFile || await file.handle.getFile();
+  if (blob.size > PREVIEW_INLINE_IMAGE_MAX_FILE_SIZE) return "";
+  return FileUtils.normalizeImageDataUrl(await FileUtils.readFileAsDataUrl(blob), FileUtils.getImageMimeType(file.name, blob.type));
 }
 
 function getPreviewMimeType(file) {
@@ -2556,6 +2587,11 @@ async function getWorkspaceUploadSource(path, useUnsaved) {
   const opened = openFiles.get(path);
   if (useUnsaved && opened?.dirty && isTextFileState(opened) && !opened.deleted) {
     const body = new Blob([opened.model.getValue()], { type: getPreviewMimeType(opened) });
+    return { body, size: body.size };
+  }
+  if (useUnsaved && opened?.dirty && opened.fileType === "image" && !opened.deleted) {
+    const body = getActiveImageBlob(opened);
+    if (!body) throw new Error(`Image data is unavailable: ${path}`);
     return { body, size: body.size };
   }
   if (opened?.handle && !opened.deleted) {
@@ -3395,12 +3431,26 @@ function openImageFile(node, file) {
 }
 
 function createImageFileState(node, file, options = {}) {
-  const objectUrl = URL.createObjectURL(file);
-  const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "image", objectUrl, size: file.size, mimeType: file.type, dirty: false, closed: options.closed ?? true, language: "plaintext", monacoLanguage: "plaintext", isNew: false, deleted: false };
+  const blob = markRaw(file);
+  const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "image", blob, savedBlob: blob, objectUrl: URL.createObjectURL(blob), size: blob.size, mimeType: blob.type || FileUtils.getImageMimeType(node.name), dirty: false, closed: options.closed ?? true, language: "plaintext", monacoLanguage: "plaintext", isNew: false, deleted: false };
   fileState.model = getOrCreatePreviewModel(getReadonlyPreviewContent(fileState), node.path);
   openFiles.set(node.path, fileState);
   touchDirtyState();
   return fileState;
+}
+
+function getActiveImageBlob(file) {
+  return file?.fileType === "image" ? file.blob || null : null;
+}
+
+function setImageFileBlob(file, blob) {
+  if (file?.fileType !== "image" || !(blob instanceof Blob)) throw new Error("Image data is not a Blob");
+  if (file.objectUrl) URL.revokeObjectURL(file.objectUrl);
+  file.blob = markRaw(blob);
+  file.objectUrl = URL.createObjectURL(blob);
+  file.size = blob.size;
+  file.mimeType = blob.type || FileUtils.getImageMimeType(file.name);
+  refreshReadonlyPreviewModel(file);
 }
 
 function openUnsupportedFile(node, file) {
@@ -3476,7 +3526,7 @@ function activateReadonlyPreviewEditor(file) {
 }
 
 function focusActivePreviewEditor() {
-  if (activeFile.value?.model || activeDiffUnsupportedFile.value?.model) editor.value?.focus();
+  if (activeFile.value?.model || activeDiffFile.value?.model) editor.value?.focus();
 }
 
 function activateDiff(path) {
@@ -3558,20 +3608,29 @@ async function saveFile(file, options = {}) {
     if (updateStatus) setStatus(tr("status.deleted", { path }), new Date().toLocaleTimeString(settings.locale));
     return true;
   }
-  if (!isTextFileState(file)) {
+  if (file.fileType === "image") {
+    const blob = getActiveImageBlob(file);
+    if (!blob) throw new Error(`Image data is unavailable: ${file.path}`);
+    if (!file.handle) file.handle = markRaw(await getFileHandleForPath(file.path, true));
+    await writeFileHandle(file.handle, blob);
+    file.savedBlob = blob;
+    file.isNew = false;
+    updateDirtyState(file);
+  } else if (!isTextFileState(file)) {
     if (updateStatus) setStatus(tr("error.unsupportedFile"), file.path);
     return false;
+  } else {
+    if (!file.handle) file.handle = markRaw(await getFileHandleForPath(file.path, true));
+    const writable = await file.handle.createWritable();
+    await writable.write(file.model.getValue());
+    await writable.close();
+    file.savedValue = file.model.getValue();
+    file.originalModel?.setValue(file.savedValue);
+    file.isNew = false;
+    file.dirty = false;
   }
-  if (!file.handle) file.handle = markRaw(await getFileHandleForPath(file.path, true));
-  const writable = await file.handle.createWritable();
-  await writable.write(file.model.getValue());
-  await writable.close();
-  file.savedValue = file.model.getValue();
-  file.originalModel?.setValue(file.savedValue);
-  file.isNew = false;
-  file.dirty = false;
   if (refresh) await refreshTree();
-  if (file.closed) {
+  if (file.closed && !file.dirty) {
     removeFileState(file.path);
   } else {
     openFiles.set(file.path, file);
@@ -3600,7 +3659,8 @@ function changeActiveLanguage() {
 }
 
 function updateDirtyState(file) {
-  file.dirty = Boolean(file.isNew || file.deleted) || (isTextFileState(file) && file.model.getValue() !== file.savedValue);
+  const imageChanged = file.fileType === "image" && file.blob !== file.savedBlob;
+  file.dirty = Boolean(file.isNew || file.deleted || imageChanged) || (isTextFileState(file) && file.model.getValue() !== file.savedValue);
   openFiles.set(file.path, file);
   touchDirtyState();
 }
@@ -3749,6 +3809,10 @@ async function getNodeExportFile(node) {
   const fileState = openFiles.get(node.path);
   if (fileState?.deleted) throw new Error(`File is marked for deletion: ${node.path}`);
   if (isTextFileState(fileState)) return new File([fileState.model.getValue()], node.name, { type: "text/plain;charset=utf-8" });
+  if (fileState?.fileType === "image") {
+    const blob = getActiveImageBlob(fileState);
+    if (blob) return new File([blob], node.name, { type: blob.type || FileUtils.getImageMimeType(node.name) });
+  }
   const handle = fileState?.handle || node.handle;
   if (!handle) throw new Error(`File handle is unavailable: ${node.path}`);
   return handle.getFile();
@@ -3917,6 +3981,8 @@ async function revertFile(path, options = {}) {
   if (isTextFileState(file)) {
     file.model.setValue(file.savedValue);
     file.originalModel?.setValue(file.savedValue);
+  } else if (file.fileType === "image") {
+    setImageFileBlob(file, file.savedBlob);
   } else {
     refreshReadonlyPreviewModel(file);
   }
@@ -4186,6 +4252,76 @@ async function callOpenAiResponses(payload, signal) {
   return data;
 }
 
+async function callOpenAiImage(options, signal) {
+  const model = settings.ai.imageModel.trim();
+  validateAiConfig(model);
+  const isDallE = /^dall-e-/i.test(model);
+  if (isDallE && options.outputFormat !== "png") throw new Error(`${model} output must use a .png path`);
+  if (/^dall-e-3$/i.test(model) && options.inputBlob) throw new Error("dall-e-3 does not support image edits");
+  if (/^dall-e-2$/i.test(model) && options.inputBlob) {
+    const inputType = FileUtils.getImageMimeType(options.inputName, options.inputBlob.type);
+    if (inputType !== "image/png") throw new Error("dall-e-2 edits require a PNG input image");
+    if (options.inputBlob.size > AI_IMAGE_MASK_MAX_FILE_SIZE) throw new Error(`dall-e-2 edit input exceeds ${FileUtils.formatFileSize(AI_IMAGE_MASK_MAX_FILE_SIZE)}`);
+    const dimensions = await readImageDimensions(options.inputBlob);
+    if (dimensions.width && dimensions.width !== dimensions.height) throw new Error("dall-e-2 edits require a square input image");
+  }
+  const common = isDallE
+    ? { model, prompt: options.prompt, response_format: "b64_json" }
+    : { model, prompt: options.prompt, size: options.size || "auto", quality: options.quality || "auto", background: options.background || "auto", output_format: options.outputFormat };
+  if (isDallE && options.size && options.size !== "auto") common.size = options.size;
+  if (/^dall-e-3$/i.test(model) && options.quality && options.quality !== "auto") common.quality = normalizeDallE3Quality(options.quality);
+  let endpoint = "generations";
+  let body;
+  let headers = { Authorization: `Bearer ${settings.ai.apiKey.trim()}` };
+  if (options.inputBlob) {
+    endpoint = "edits";
+    const form = new FormData();
+    Object.entries(common).forEach(([key, value]) => { if (value) form.append(key, value); });
+    form.append("image", new File([options.inputBlob], options.inputName || "input.png", { type: options.inputBlob.type || "image/png" }));
+    if (options.maskBlob) form.append("mask", new File([options.maskBlob], options.maskName || "mask.png", { type: options.maskBlob.type || "image/png" }));
+    body = form;
+  } else {
+    headers = { ...headers, "Content-Type": "application/json" };
+    body = JSON.stringify({ ...common, n: 1 });
+  }
+  const response = await fetch(`${getAiBaseUrl()}/images/${endpoint}`, { method: "POST", headers, body, signal });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error?.message || data.message || response.statusText);
+  const item = data.data?.[0] || data;
+  let blob;
+  if (item.b64_json || item.base64) {
+    blob = base64ToBlob(item.b64_json || item.base64, getImageMimeTypeForFormat(options.outputFormat));
+  } else if (item.url) {
+    const imageResponse = await fetch(item.url, { signal });
+    if (!imageResponse.ok) throw new Error(`Failed to download generated image: ${imageResponse.statusText}`);
+    blob = await imageResponse.blob();
+  } else {
+    throw new Error("Image API response did not include b64_json or url");
+  }
+  if (!blob.type || blob.type === "application/octet-stream") blob = new Blob([blob], { type: getImageMimeTypeForFormat(options.outputFormat) });
+  if (blob.size > AI_IMAGE_OUTPUT_MAX_FILE_SIZE) throw new Error(`Generated image exceeds ${FileUtils.formatFileSize(AI_IMAGE_OUTPUT_MAX_FILE_SIZE)}`);
+  return blob;
+}
+
+function base64ToBlob(value, mimeType) {
+  const base64 = String(value || "").replace(/^data:[^;,]+;base64,/i, "");
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mimeType });
+}
+
+function getImageMimeTypeForFormat(format) {
+  return { jpeg: "image/jpeg", jpg: "image/jpeg", webp: "image/webp", png: "image/png" }[String(format || "png").toLowerCase()] || "image/png";
+}
+
+function normalizeDallE3Quality(value) {
+  const quality = String(value || "").toLowerCase();
+  if (quality === "high" || quality === "hd") return "hd";
+  if (["low", "medium", "standard"].includes(quality)) return "standard";
+  throw new Error(`Unsupported dall-e-3 quality: ${value}`);
+}
+
 async function fetchAiModels() {
   if (aiModelsLoading.value) return;
   try {
@@ -4265,6 +4401,7 @@ async function deleteActiveAiSession() {
   if (index === -1) return;
   const confirmed = await showConfirm(tr("confirm.deleteAiSession"), { title: tr("ai.deleteSession"), tone: "danger" });
   if (!confirmed) return;
+  disposeAiMessageResources(aiSessions[index].messages);
   aiSessions.splice(index, 1);
   activeAiSessionId.value = aiSessions[Math.min(index, aiSessions.length - 1)].id;
   refreshAiTouchedFlags();
@@ -4317,6 +4454,20 @@ function formatJsonForDisplay(value) {
   } catch {
     return String(value ?? "");
   }
+}
+
+function createAiImagePreview(result) {
+  const path = result?.image_path;
+  const file = path ? openFiles.get(path) : null;
+  const blob = getActiveImageBlob(file);
+  if (!blob) return null;
+  return { path, objectUrl: URL.createObjectURL(blob), size: blob.size, mimeType: blob.type || file.mimeType };
+}
+
+function disposeAiMessageResources(messages) {
+  (messages || []).forEach((message) => {
+    if (message.imagePreview?.objectUrl) URL.revokeObjectURL(message.imagePreview.objectUrl);
+  });
 }
 
 function registerInlineCompletions() {
@@ -4500,6 +4651,7 @@ function resetAiConversation() {
   if (aiBusy.value || !canResetAiConversation.value) return;
   const session = getActiveAiSession();
   aiPrompt.value = "";
+  disposeAiMessageResources(session.messages);
   session.messages.splice(0, session.messages.length);
   session.touchedPaths.clear();
   session.contextUsage = null;
@@ -4535,6 +4687,7 @@ async function compressAiContext() {
     updateAiContextUsage(response, session);
     const summary = extractResponseText(response);
     if (!summary) throw new Error("Empty compressed context");
+    disposeAiMessageResources(session.messages);
     session.messages.splice(0, session.messages.length, createAiMessage("assistant", `# ${tr("ai.contextSummaryTitle")}\n\n${summary}`));
     await nextTick();
     setStatus(tr("ai.contextCompressed"), `${beforeLength} -> ${formatAiUsage(session.contextUsage)}`);
@@ -4567,7 +4720,7 @@ async function runAiAgent(prompt, signal, session = getActiveAiSession(), runCon
     if (text) addAiMessage("assistant", text, {}, session);
     const toolCalls = extractFunctionCalls(response);
     if (!toolCalls.length) return;
-    conversation.push(...getNonReasoningOutputItems(response));
+    conversation.push(...getContinuationOutputItems(response));
     const imageInputs = [];
     for (const call of toolCalls) {
       const args = parseAiToolArguments(call);
@@ -4577,8 +4730,8 @@ async function runAiAgent(prompt, signal, session = getActiveAiSession(), runCon
         conversation.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
         continue;
       }
-      const result = await runAiToolCall(call, args, session);
-      addAiMessage("tool", result.summary || "", { expanded: false, tool: { name: call.name, ok: result.ok, args, result } }, session);
+      const result = await runAiToolCall(call, args, session, signal);
+      addAiMessage("tool", result.summary || "", { expanded: false, imagePreview: createAiImagePreview(result), tool: { name: call.name, ok: result.ok, args, result } }, session);
       conversation.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
     }
     if (imageInputs.length) conversation.push(buildImageInputMessage(imageInputs));
@@ -4611,8 +4764,25 @@ function buildImageInputMessage(images) {
   return { role: "user", content };
 }
 
-function getNonReasoningOutputItems(response) {
-  return (response.output || []).filter((item) => item.type !== "reasoning");
+function getContinuationOutputItems(response) {
+  return (response.output || []).flatMap((item) => {
+    if (item.type === "function_call" && item.name) {
+      return [compactObject({ type: "function_call", id: item.id, call_id: item.call_id, name: item.name, arguments: item.arguments || "{}", status: item.status })];
+    }
+    if (item.type === "message") {
+      const content = (item.content || []).flatMap((part) => {
+        if (part.type === "output_text") return [compactObject({ type: "output_text", text: part.text, annotations: part.annotations, logprobs: part.logprobs })];
+        if (part.type === "refusal") return [compactObject({ type: "refusal", refusal: part.refusal })];
+        return [];
+      });
+      return [compactObject({ type: "message", id: item.id, role: item.role || "assistant", content, status: item.status })];
+    }
+    return [];
+  });
+}
+
+function compactObject(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
 }
 
 function getAgentInstructions() {
@@ -4817,6 +4987,22 @@ function getAiAllToolDefinitions() {
     { type: "function", name: "read_file", requirements: ["workspace"], description: aiToolDescription("Read a workspace text file.", "Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads. This tool only reads text-like files; binary or unsupported files will fail.", "Use max_chars to keep large files concise; default is intentionally limited."), parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "number", description: "Optional 1-based starting line number. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return." }, max_chars: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["path"] } },
     { type: "function", name: "read_files", requirements: ["workspace"], description: aiToolDescription("Read multiple workspace text files in one call.", "Prefer this over repeated read_file calls when several files are known. Dirty in-memory content is returned when present. Offset and limit apply to each file.", "Use max_chars_per_file to keep large files concise; default is intentionally limited."), parameters: { type: "object", properties: { paths: { type: "array", items: { type: "string" } }, offset: { type: "number", description: "Optional 1-based starting line number applied to each file. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return per file." }, max_chars_per_file: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["paths"] } },
     { type: "function", name: "read_image", requirements: ["workspace"], description: aiToolDescription("Read an image file and attach it to the next model turn for visual analysis.", "Use this for screenshots, diagrams, mockups, and other workspace image files. Do not use it for non-image files or oversized images."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+    { type: "function", name: "generate_or_edit_image", requirements: ["workspace"], description: aiToolDescription(
+      "Generate a new image or edit an existing workspace image using the configured image model.",
+      "Omit input_path to use the image generation endpoint. Provide input_path to use the image edit endpoint; mask_path is optional and requires input_path.",
+      "The result replaces the workspace image's in-memory content and is not written to disk until the user saves it. Editing into the same path is safe because the saved disk image remains the revert baseline. Set overwrite only when intentionally targeting another existing file.",
+      "Only PNG, JPEG, and WebP output paths are supported. Keep prompts self-contained because the image API does not receive the coding-agent conversation."
+    ), parameters: { type: "object", properties: {
+      prompt: { type: "string", description: "Complete image generation or editing prompt." },
+      output_path: { type: "string", description: "Workspace-relative output path ending in .png, .jpg, .jpeg, or .webp." },
+      input_path: { type: "string", description: "Optional workspace image path. When present, the edit endpoint is used." },
+      mask_path: { type: "string", description: "Optional workspace mask image path for image editing." },
+      size: { type: "string", description: "Provider-supported image size, for example auto, 1024x1024, 1536x1024, or 1024x1536." },
+      quality: { type: "string", description: "Provider-supported quality. GPT Image commonly uses auto, low, medium, or high; DALL-E 3 uses standard or hd." },
+      background: { type: "string", description: "Generation background, for example auto, opaque, or transparent." },
+      output_format: { type: "string", description: "Optional png, jpeg, or webp. Defaults from output_path." },
+      overwrite: { type: "boolean", description: "Allow targeting an existing output file other than input_path. The disk file remains unchanged until manual save." }
+    }, required: ["prompt", "output_path"] } },
     { type: "function", name: "search_text", requirements: ["workspace"], description: aiToolDescription("Search exact text across workspace files.", "This is a simple substring search, not a regex search. Use path to limit the search scope and max_results to keep output concise."), parameters: { type: "object", properties: { query: { type: "string" }, path: { type: "string" }, max_results: { type: "number" } }, required: ["query"] } },
     { type: "function", name: "get_current_file", requirements: ["workspace"], description: aiToolDescription("Get the current editor file, cursor position, and selected text.", "Use this for editor context only; do not assume the current file is the user's intended target when recent chat or AI-touched files indicate another file."), parameters: { type: "object", properties: {} } },
     { type: "function", name: "replace_in_file", requirements: ["workspace"], description: aiToolDescription("Replace the first exact text occurrence in a workspace file in memory.", "Use this for minimal local edits with exact old_text and new_text, similar to patch hunks. Do not pass whole-file old_text/new_text unless the file is tiny and no smaller stable edit is possible.", "This edits only the in-memory editor model. Changes are not saved to disk until the user saves. Do not claim the file changed unless this tool reports success."), parameters: { type: "object", properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" } }, required: ["path", "old_text", "new_text"] } },
@@ -4948,7 +5134,7 @@ function parseAiToolArguments(call) {
   return call.arguments ? JSON.parse(call.arguments) : {};
 }
 
-async function runAiToolCall(call, args = {}, session = getActiveAiSession()) {
+async function runAiToolCall(call, args = {}, session = getActiveAiSession(), signal) {
   try {
     const availability = getAiToolAvailability(call.name);
     if (availability.found && !availability.available) return { ok: false, summary: `Tool ${call.name} is unavailable because ${availability.reason}` };
@@ -4958,6 +5144,7 @@ async function runAiToolCall(call, args = {}, session = getActiveAiSession()) {
       case "refresh_tree": return okTool(await aiToolRefreshTree(args));
       case "read_file": return okTool(await aiToolReadFile(args));
       case "read_files": return okTool(await aiToolReadFiles(args));
+      case "generate_or_edit_image": return okTool(await aiToolGenerateOrEditImage(args, session, signal));
       case "search_text": return okTool(await aiToolSearchText(args));
       case "run_javascript": return await aiToolRunJavaScript(args);
       case "request_proxy": return okTool(await aiToolRequestProxy(args));
@@ -5465,8 +5652,8 @@ async function aiToolReadImage(path) {
   let file;
   if (opened) {
     if (opened.fileType !== "image") throw new Error(`File is not an image: ${normalized}`);
-    if (!opened.handle) throw new Error(`Image has no readable file handle: ${normalized}`);
-    file = await opened.handle.getFile();
+    file = getActiveImageBlob(opened);
+    if (!file) throw new Error(`Image data is unavailable: ${normalized}`);
   } else {
     const node = findNodeByPath(tree.value, normalized);
     if (!node || node.kind !== "file") throw new Error(`File not found: ${normalized}`);
@@ -5477,6 +5664,132 @@ async function aiToolReadImage(path) {
   const mimeType = FileUtils.getImageMimeType(file.name || normalized, file.type);
   const dataUrl = FileUtils.normalizeImageDataUrl(await FileUtils.readFileAsDataUrl(file), mimeType);
   return { path: normalized, mimeType, size: file.size, dataUrl };
+}
+
+async function aiToolGenerateOrEditImage({ prompt, output_path: outputPath, input_path: inputPath, mask_path: maskPath, size = "auto", quality = "auto", background = "auto", output_format: outputFormat, overwrite = false } = {}, session = getActiveAiSession(), signal) {
+  const normalizedPrompt = String(prompt || "").trim();
+  if (!normalizedPrompt) throw new Error("prompt is required");
+  const normalizedOutputPath = normalizeWorkspacePath(outputPath);
+  const format = normalizeImageOutputFormat(outputFormat, normalizedOutputPath);
+  const normalizedInputPath = inputPath ? normalizeWorkspacePath(inputPath) : "";
+  if (maskPath && !normalizedInputPath) throw new Error("mask_path requires input_path");
+  const existingTarget = openFiles.get(normalizedOutputPath) || findNodeByPath(tree.value, normalizedOutputPath);
+  if (existingTarget?.kind === "directory") throw new Error(`Output path is a directory: ${normalizedOutputPath}`);
+  if (existingTarget && normalizedOutputPath !== normalizedInputPath && !overwrite) throw new Error(`File already exists: ${normalizedOutputPath}`);
+  if (openFiles.get(normalizedOutputPath) && openFiles.get(normalizedOutputPath).fileType !== "image") throw new Error(`Output file is not an image: ${normalizedOutputPath}`);
+
+  const input = normalizedInputPath ? await getWorkspaceImageSource(normalizedInputPath) : null;
+  const mask = maskPath ? await getWorkspaceImageSource(maskPath, { mask: true }) : null;
+  if (input && mask && input.width && mask.width && (input.width !== mask.width || input.height !== mask.height)) throw new Error("mask_path dimensions must match input_path");
+  const blob = await callOpenAiImage({
+    prompt: normalizedPrompt,
+    inputBlob: input?.blob,
+    inputName: input?.name,
+    maskBlob: mask?.blob,
+    maskName: mask?.name,
+    size: String(size || "auto"),
+    quality: String(quality || "auto"),
+    background: String(background || "auto"),
+    outputFormat: format,
+  }, signal);
+  const dimensions = await readImageDimensions(blob);
+  const operation = input ? "edited" : "generated";
+  const file = await stageImageFile({ path: normalizedOutputPath, blob, session });
+  const summary = tr(input ? "ai.imageEdited" : "ai.imageGenerated", { path: file.path });
+  setStatus(summary, tr("status.unsaved"));
+  return {
+    summary,
+    image_path: file.path,
+    input_path: input?.path || null,
+    operation,
+    mime_type: file.mimeType,
+    size: file.size,
+    width: dimensions.width,
+    height: dimensions.height,
+    dirty: file.dirty,
+    created: file.isNew,
+  };
+}
+
+function normalizeImageOutputFormat(value, path) {
+  const requested = String(value || "").trim().toLowerCase().replace("jpg", "jpeg");
+  const extension = FileUtils.getFileExtension(path).replace("jpg", "jpeg");
+  const format = requested || extension;
+  if (!["png", "jpeg", "webp"].includes(format)) throw new Error("output_path must end in .png, .jpg, .jpeg, or .webp");
+  if (requested && extension !== requested) throw new Error(`output_format ${requested} does not match output_path: ${path}`);
+  return format;
+}
+
+async function getWorkspaceImageSource(path, options = {}) {
+  const normalized = normalizeWorkspacePath(path);
+  const opened = openFiles.get(normalized);
+  let blob;
+  let name = normalized.split("/").pop();
+  if (opened) {
+    if (opened.fileType !== "image" || opened.deleted) throw new Error(`File is not an image: ${normalized}`);
+    blob = getActiveImageBlob(opened);
+  } else {
+    const node = findNodeByPath(tree.value, normalized);
+    if (!node || node.kind !== "file" || !node.handle) throw new Error(`File not found: ${normalized}`);
+    blob = await node.handle.getFile();
+    name = node.name;
+  }
+  if (!blob || !FileUtils.isImageFile(new File([blob], name, { type: blob.type }))) throw new Error(`File is not an image: ${normalized}`);
+  const mimeType = FileUtils.getImageMimeType(name, blob.type);
+  if (options.mask) {
+    if (mimeType !== "image/png") throw new Error(`Mask must be a PNG image: ${normalized}`);
+    if (blob.size > AI_IMAGE_MASK_MAX_FILE_SIZE) throw new Error(`Mask exceeds ${FileUtils.formatFileSize(AI_IMAGE_MASK_MAX_FILE_SIZE)}: ${normalized}`);
+  } else {
+    if (!["image/png", "image/jpeg", "image/webp"].includes(mimeType)) throw new Error(`Image edit input must be PNG, JPEG, or WebP: ${normalized}`);
+    if (blob.size > AI_IMAGE_MAX_FILE_SIZE) throw new Error(`Image is too large: ${normalized}`);
+  }
+  const dimensions = await readImageDimensions(blob);
+  return { path: normalized, name, blob, mimeType, ...dimensions };
+}
+
+async function readImageDimensions(blob) {
+  if (!window.createImageBitmap) return { width: 0, height: 0 };
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const dimensions = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return dimensions;
+  } catch {
+    return { width: 0, height: 0 };
+  }
+}
+
+async function stageImageFile({ path, blob, session }) {
+  let file = openFiles.get(path);
+  if (!file) {
+    const node = findNodeByPath(tree.value, path);
+    if (node) {
+      const diskFile = await node.handle.getFile();
+      if (!FileUtils.isImageFile(diskFile)) throw new Error(`Output file is not an image: ${path}`);
+      file = createImageFileState(node, diskFile, { closed: false });
+    } else {
+      file = createVirtualImageFileState(path, blob);
+    }
+  }
+  if (file.fileType !== "image") throw new Error(`Output file is not an image: ${path}`);
+  if (file.blob !== blob) setImageFileBlob(file, blob);
+  file.deleted = false;
+  file.closed = false;
+  if (file.isNew) file.aiCreated = true;
+  markAiTouchedFile(file, session);
+  updateDirtyState(file);
+  activateFile(file.path);
+  return file;
+}
+
+function createVirtualImageFileState(path, blob) {
+  const name = path.split("/").pop();
+  const imageBlob = markRaw(blob);
+  const fileState = { name, path, handle: null, fileType: "image", blob: imageBlob, savedBlob: null, objectUrl: URL.createObjectURL(imageBlob), size: imageBlob.size, mimeType: imageBlob.type || FileUtils.getImageMimeType(name), dirty: true, closed: false, language: "plaintext", monacoLanguage: "plaintext", isNew: true, deleted: false };
+  fileState.model = getOrCreatePreviewModel(getReadonlyPreviewContent(fileState), path);
+  openFiles.set(path, fileState);
+  touchDirtyState();
+  return fileState;
 }
 
 async function aiToolReadFiles({ paths, offset, limit, max_chars_per_file: maxCharsPerFile } = {}) {
@@ -6412,6 +6725,10 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .ai-tool-details > div { min-width: 0; max-width: 100%; }
 .code-editor-view .ai-tool-details strong { display: block; margin-bottom: 4px; }
 .code-editor-view .ai-tool-details pre { max-width: 100%; max-height: 240px; margin: 0; overflow-x: hidden; overflow-y: auto; overflow-wrap: anywhere; padding: 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--editor); color: var(--text); font-family: Consolas, 'Courier New', monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.code-editor-view .ai-image-result { display: grid; width: 100%; min-width: 0; gap: 6px; padding: 6px; border-color: var(--border); background: var(--editor); color: var(--muted); font-size: 10px; text-align: left; }
+.code-editor-view .ai-image-result:hover { border-color: var(--accent-strong); background: var(--editor); color: var(--text); }
+.code-editor-view .ai-image-result img { width: 100%; max-height: 260px; border-radius: 4px; object-fit: contain; background: var(--panel); }
+.code-editor-view .ai-image-result span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .ai-message-content { min-width: 0; max-width: 100%; overflow-wrap: anywhere; color: var(--text); font-size: 12px; word-break: break-word; }
 .code-editor-view .ai-message-content * { max-width: 100%; }
 .code-editor-view .ai-message-content pre { overflow-x: auto; white-space: pre-wrap; }
@@ -6481,7 +6798,7 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .markdown-preview { font-size: 14px; line-height: 1.55; }
 .code-editor-view .preview-frame { width: 100%; height: 100%; border: 0; background: #ffffff; color-scheme: light; }
 .code-editor-view .image-preview { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; align-items: center; justify-items: center; gap: 18px; padding: 24px; overflow: auto; background: var(--editor); }
-.code-editor-view .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 12px 32px var(--shadow); }
+.code-editor-view .image-preview > img { max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 12px 32px var(--shadow); }
 .code-editor-view .image-preview-meta { display: grid; justify-items: center; gap: 4px; max-width: min(680px, 100%); color: var(--muted); font-size: 12px; text-align: center; }
 .code-editor-view .image-preview-meta strong { max-width: 100%; overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .unsupported-preview { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px; padding: 28px; overflow: auto; background: var(--editor); color: var(--muted); text-align: center; }
