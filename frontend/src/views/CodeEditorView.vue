@@ -5660,11 +5660,12 @@ function getAiAllToolDefinitions() {
     ), parameters: { type: "object", properties: { names: { type: "array", items: { type: "string" }, description: "Optional tool names to check. Omit to return all tools." } } } },
     { type: "function", name: "run_javascript", description: aiToolDescription(
       "Execute JavaScript in an isolated browser Web Worker for calculations, parsing, data transformation, bounded HTTP requests, and declared workspace file processing.",
-      "The code is the body of an async function with input and runtime variables available. Use return for the normal result. runtime.request({ url, method, headers, body, responseType: 'text'|'json'|'bytes', followRedirect, timeoutMs }) returns { status, statusText, ok, headers, body, size, proxied, url }. Requests run inside the Worker and automatically use the backend proxy when enabled; runtime.network.proxy reports only whether proxying is active.",
-      "Declare every readable file in input_files. Declare exact output files in output_files or allowed dynamic output roots in output_directories. Use await runtime.files.readText(path), await runtime.files.readBytes(path), runtime.files.stat(path), runtime.files.writeText(path, content, mimeType), and runtime.files.writeBytes(path, bytes, mimeType). Paths are workspace-relative and there are no file aliases. File operations require an open workspace; plain scripts and direct network requests do not.",
+      "The provided code is inserted directly as the body of an already-async function: async function(input, runtime) { ... }. Top-level await is supported. Write statements directly in the function body. Do not wrap the entire snippet in an unreturned async IIFE such as (async () => { ... })(), because the outer function would finish before the IIFE completes. If an IIFE is necessary, use return await (async () => { ... })(). Every asynchronous runtime operation must be awaited before the outer function returns.",
+      "runtime.request({ url, method, headers, body, responseType: 'text'|'json'|'bytes', followRedirect, timeoutMs }) returns { status, statusText, ok, headers, body, size, proxied, url }. Requests run inside the Worker and automatically use the backend proxy when enabled; runtime.network.proxy reports only whether proxying is active.",
+      "Declare every readable file in input_files. Declare exact output paths in output_files. Use output_directories when output child paths are determined during execution; path '.' means the workspace root. Use await runtime.files.readText(path), await runtime.files.readBytes(path), runtime.files.stat(path), runtime.files.writeText(path, content, mimeType), and runtime.files.writeBytes(path, bytes, mimeType). All paths are workspace-relative and there are no file aliases. File operations require an open workspace; plain calculations and network requests do not.",
       "All file and response data is memory-bounded. Oversized input, downloads, or output fail without truncation or temporary storage. timeout_ms defaults to 30000ms, must be positive, and is capped at 3600000ms."
     ), parameters: { type: "object", properties: {
-      code: { type: "string", description: "JavaScript async function body. Example: return input.items.map(x => x * 2);" },
+      code: { type: "string", description: "Body of an already-async function with input and runtime variables available. Top-level await is supported. Write statements directly and return the final result. Do not wrap the entire code in an unreturned async IIFE. Every asynchronous runtime operation must complete before the outer function returns." },
       input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." },
       input_files: { type: "array", description: "Workspace files made readable to the script. Paths must be workspace-relative.", items: { type: "object", properties: {
         path: { type: "string" },
@@ -5677,7 +5678,7 @@ function getAiAllToolDefinitions() {
         overwrite: { type: "boolean", description: "Allow replacing existing saved or unsaved content. Defaults to false." }
       }, required: ["path"] } },
       output_directories: { type: "array", description: "Workspace directories under which the script may dynamically create files, for example extracted archive entries.", items: { type: "object", properties: {
-        path: { type: "string" },
+        path: { type: "string", description: "Workspace-relative output directory. Use '.' for the workspace root." },
         overwrite: { type: "boolean", description: "Allow replacing existing saved or unsaved files under this directory. Defaults to false." }
       }, required: ["path"] } },
       timeout_ms: { type: "number", description: `Optional positive timeout in milliseconds. Defaults to ${AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS}, max ${AI_JAVASCRIPT_MAX_TIMEOUT_MS}.` }
@@ -7000,7 +7001,8 @@ function normalizeAiJavaScriptOutputDirectories(value) {
   const paths = new Set();
   return normalizeAiJavaScriptArray(value, "output_directories").map((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw createAiJavaScriptError("INVALID_ARGUMENT", "Each output_directories entry must be an object", { phase: "preflight" });
-    const path = normalizeAiJavaScriptPath(item.path);
+    const rawPath = String(item.path || "").trim();
+    const path = rawPath === "." ? "" : normalizeAiJavaScriptPath(rawPath);
     if (paths.has(path)) throw createAiJavaScriptError("DUPLICATE_FILE_PATH", `Duplicate output directory: ${path}`, { phase: "preflight", path });
     paths.add(path);
     return { path, overwrite: item.overwrite === true };

@@ -11,7 +11,7 @@ function resolveAiJavaScriptOutputPolicy(path, outputFiles = [], outputDirectori
     const exact = outputFiles.find((item) => item.path === path);
     if (exact) return exact;
     return outputDirectories
-        .filter((item) => path !== item.path && path.startsWith(`${item.path}/`))
+        .filter((item) => item.path === '' ? path !== '' : path !== item.path && path.startsWith(`${item.path}/`))
         .sort((left, right) => right.path.length - left.path.length)[0] || null;
 }
 
@@ -180,7 +180,7 @@ function safeValue(value, depth = 0, seen = []) {
   if (depth >= MAX_DEPTH) return "[MaxDepth]";
   if (seen.includes(value)) return "[Circular]";
 
-  const nextSeen = seen.concat(value);
+  const nextSeen = [...seen, value];
   if (Array.isArray(value)) {
     const output = value.slice(0, MAX_COLLECTION_ITEMS).map((item) => safeValue(item, depth + 1, nextSeen));
     if (value.length > MAX_COLLECTION_ITEMS) output.push("[" + (value.length - MAX_COLLECTION_ITEMS) + " more items]");
@@ -223,7 +223,7 @@ function normalizePath(path) {
 }
 
 function isPathUnder(path, directory) {
-  return path !== directory && path.startsWith(directory + "/");
+  return directory === "" ? path !== "" : path !== directory && path.startsWith(directory + "/");
 }
 
 function normalizeBytes(value) {
@@ -377,8 +377,19 @@ function createRuntime(payload) {
   const outputFiles = new Map((payload.outputFiles || []).map((file) => [file.path, file]));
   const outputDirectories = (payload.outputDirectories || []).slice().sort((left, right) => right.path.length - left.path.length);
   const pendingOutputs = new Map();
+  const pendingOperations = new Set();
   const limits = Object.freeze({ ...payload.limits });
   const state = { downloadedBytes: 0, outputBytes: 0, requestCount: 0 };
+
+  function trackOperation(operation) {
+    const promise = Promise.resolve(operation);
+    pendingOperations.add(promise);
+    promise.then(
+      () => pendingOperations.delete(promise),
+      () => pendingOperations.delete(promise),
+    );
+    return promise;
+  }
 
   function requireInput(path) {
     const normalized = normalizePath(path);
@@ -421,15 +432,19 @@ function createRuntime(payload) {
       const file = requireInput(path);
       return Object.freeze({ path: file.path, type: file.type, size: file.size, mimeType: file.mimeType || "" });
     },
-    async readText(path) {
-      const file = requireInput(path);
-      if (file.type !== "text") throw runtimeError("FILE_TYPE_MISMATCH", "Input file is not text: " + file.path, { phase: "input", path: file.path });
-      return file.content;
+    readText(path) {
+      return trackOperation(Promise.resolve().then(() => {
+        const file = requireInput(path);
+        if (file.type !== "text") throw runtimeError("FILE_TYPE_MISMATCH", "Input file is not text: " + file.path, { phase: "input", path: file.path });
+        return file.content;
+      }));
     },
-    async readBytes(path) {
-      const file = requireInput(path);
-      if (file.type !== "bytes") throw runtimeError("FILE_TYPE_MISMATCH", "Input file is not binary: " + file.path, { phase: "input", path: file.path });
-      return new Uint8Array(file.content.slice(0));
+    readBytes(path) {
+      return trackOperation(Promise.resolve().then(() => {
+        const file = requireInput(path);
+        if (file.type !== "bytes") throw runtimeError("FILE_TYPE_MISMATCH", "Input file is not binary: " + file.path, { phase: "input", path: file.path });
+        return new Uint8Array(file.content.slice(0));
+      }));
     },
     writeText(path, content, mimeType = "text/plain;charset=utf-8") {
       const text = String(content ?? "");
@@ -445,10 +460,11 @@ function createRuntime(payload) {
     runtime: Object.freeze({
       limits,
       network: Object.freeze({ proxy: Boolean(payload.network?.proxy) }),
-      request: (options) => performRequest(options, payload.network, limits, state),
+      request: (options) => trackOperation(performRequest(options, payload.network, limits, state)),
       files,
     }),
     collectOutputs: () => Array.from(pendingOutputs.values()),
+    hasPendingOperations: () => pendingOperations.size > 0,
   };
 }
 
@@ -469,6 +485,9 @@ self.onmessage = async (event) => {
     const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
     const run = new AsyncFunction("input", "runtime", "\"use strict\";\n" + String(payload.code || ""));
     const result = await run(payload.input, state.runtime);
+    if (state.hasPendingOperations()) {
+      throw runtimeError("UNAWAITED_ASYNC_OPERATION", "The script returned while runtime operations were still pending. Use top-level await and do not launch an unreturned async IIFE.", { phase: "execution" });
+    }
     const outputFiles = state.collectOutputs();
     const transfer = outputFiles.filter((file) => file.type === "bytes").map((file) => file.content.buffer);
     const formattedResult = payload.resultMode === "text"
