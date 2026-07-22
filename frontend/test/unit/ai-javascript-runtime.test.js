@@ -491,21 +491,23 @@ test('场景：代理请求失败时不会自动降级为直接请求', async ()
     assert.equal(new URL(requestedUrls[0]).origin, 'https://backend.test');
 });
 
-test('场景：脚本直接调用原生网络接口会被拒绝并提示使用运行时接口', async () => {
+test('场景：脚本可以直接调用原生网络接口', async () => {
     const {done} = await runWorker({
-        code: 'await fetch("https://example.test");',
+        code: 'const response = await fetch("https://example.test"); return await response.text();',
+    }, {
+        fetchImpl: async () => new Response('native'),
     });
 
-    assert.equal(done.ok, false);
-    assert.equal(done.error.code, 'RUNTIME_API_DISABLED');
+    assert.equal(done.ok, true);
+    assert.deepEqual(done.result, {text: 'native', text_chars: 6, returned_chars: 6, truncated: false});
 });
 
-test('场景：脚本不能访问 OPFS 或未定义的临时文件接口', async () => {
+test('场景：脚本可以访问 OPFS 但运行时不提供临时文件接口', async () => {
     const opfs = await runWorker({
-        code: 'await navigator.storage.getDirectory();',
+        code: 'return Boolean(await navigator.storage.getDirectory());',
     });
-    assert.equal(opfs.done.ok, false);
-    assert.equal(opfs.done.error.code, 'RUNTIME_API_DISABLED');
+    assert.equal(opfs.done.ok, true);
+    assert.equal(opfs.done.result, true);
 
     const temp = await runWorker({
         code: 'return { hasTempApi: "temp" in runtime.files };',

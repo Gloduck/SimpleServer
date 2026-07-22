@@ -82,41 +82,6 @@ const REQUEST_PROXY_PATH = "/api/requestProxy";
 const nativePostMessage = self.postMessage.bind(self);
 const nativeFetch = self.fetch.bind(self);
 
-function disabledApi(name) {
-  return function disabledRuntimeApi() {
-    throw runtimeError("RUNTIME_API_DISABLED", name + " is disabled; use the run_javascript runtime API");
-  };
-}
-
-function disableGlobal(name) {
-  if (!(name in self)) return;
-  try {
-    Object.defineProperty(self, name, {
-      value: disabledApi(name),
-      writable: false,
-      configurable: false,
-    });
-  } catch {
-  }
-}
-
-Object.defineProperty(self, "postMessage", {
-  value: disabledApi("postMessage"),
-  writable: false,
-  configurable: false,
-});
-["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "Worker", "SharedWorker", "BroadcastChannel", "importScripts"].forEach(disableGlobal);
-try {
-  if (self.navigator?.storage?.getDirectory) {
-    Object.defineProperty(self.navigator.storage, "getDirectory", {
-      value: disabledApi("navigator.storage.getDirectory"),
-      writable: false,
-      configurable: false,
-    });
-  }
-} catch {
-}
-
 function runtimeError(code, message, details = {}) {
   const error = new Error(message);
   error.code = code;
