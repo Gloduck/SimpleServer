@@ -15,9 +15,9 @@ import {
     streamToBlob,
     textToBlob,
     withBlobType,
-} from './file-utils.js';
+} from '../../src/shared/file-utils.js';
 
-test('normalizes file paths and resolves file metadata', () => {
+test('场景：规范化文件路径并解析文件元数据', () => {
     assert.equal(normalizeFilePath('/docs//guide/../readme.md'), 'docs/readme.md');
     assert.equal(joinFilePath('docs', '../readme.md'), 'readme.md');
     assert.equal(getFileName('docs/guide/../readme.md'), 'readme.md');
@@ -27,7 +27,7 @@ test('normalizes file paths and resolves file metadata', () => {
     assert.throws(() => normalizeFilePath('../../secret'), {code: 'INVALID_FILE_PATH'});
 });
 
-test('converts text, blobs and streams without changing their bytes', async () => {
+test('场景：文本、Blob 和流转换保持原始字节不变', async () => {
     const text = '\u4f60\u597d';
     const textBlob = textToBlob(text, 'text/markdown');
     assert.equal(textBlob.size, 6);
@@ -43,7 +43,7 @@ test('converts text, blobs and streams without changing their bytes', async () =
     assert.equal(await blobToText(streamedBlob), text);
 });
 
-test('converts standard and URL-safe base64 values', async () => {
+test('场景：标准 Base64 与 URL 安全 Base64 可以互相转换', async () => {
     const text = '\u4f60\u597d';
     const bytes = new TextEncoder().encode(text);
     const base64 = bytesToBase64(bytes);

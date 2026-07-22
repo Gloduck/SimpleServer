@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import test from 'node:test';
-import {GithubProvider} from './providers/github-provider.js';
+import {GithubProvider} from '../../src/shared/file-system/providers/github-provider.js';
 import {
     FileConflictError,
     FileSession,
     FileSystem,
-} from './index.js';
+} from '../../src/shared/file-system/index.js';
 
 const enabled = process.env.SIMPLE_SERVER_GITHUB_INTEGRATION === '1';
 
-test('GithubProvider integrates with the GitHub Contents API', {
-    skip: enabled ? false : 'live GitHub integration is disabled',
+test('场景：GithubProvider 与 GitHub Contents API 完成真实读写和冲突处理', {
+    skip: enabled ? false : '未启用真实 GitHub 集成测试',
     timeout: 120_000,
 }, async () => {
     const required = [

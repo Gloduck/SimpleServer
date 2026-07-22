@@ -6,9 +6,9 @@ import {
     getParentFilePath,
     joinFilePath,
     normalizeFilePath,
-} from '../file-utils.js';
-import {BrowserHandleProvider} from './providers/browser-handle-provider.js';
-import {GithubProvider} from './providers/github-provider.js';
+} from '../../src/shared/file-utils.js';
+import {BrowserHandleProvider} from '../../src/shared/file-system/providers/browser-handle-provider.js';
+import {GithubProvider} from '../../src/shared/file-system/providers/github-provider.js';
 import {
     createFileSystem,
     FileAlreadyExistsError,
@@ -22,9 +22,9 @@ import {
     FileSystemProvider,
     FileTooLargeError,
     writeFileTarget,
-} from './index.js';
+} from '../../src/shared/file-system/index.js';
 
-test('normalizes root-relative paths and rejects traversal above root', () => {
+test('场景：规范化根目录相对路径并拒绝越过根目录', () => {
     assert.equal(normalizeFilePath(''), '');
     assert.equal(normalizeFilePath('/docs//./guide/../readme.md'), 'docs/readme.md');
     assert.equal(normalizeFilePath('docs\\guide.txt'), 'docs/guide.txt');
@@ -34,7 +34,7 @@ test('normalizes root-relative paths and rejects traversal above root', () => {
     assert.throws(() => normalizeFilePath('../../secret'), {code: 'INVALID_FILE_PATH'});
 });
 
-test('enforces UTF-8 memory boundaries while leaving streaming reads unrestricted', async () => {
+test('场景：UTF-8 内存读写限制生效且流式读取不受内存限制', async () => {
     const provider = new FakeProvider({
         'four.txt': {text: 'éé', version: 'v1'},
         'six.txt': {text: '你好', version: 'v2'},
@@ -53,7 +53,7 @@ test('enforces UTF-8 memory boundaries while leaving streaming reads unrestricte
     assert.equal(provider.files.has('write-six.txt'), false);
 });
 
-test('FileSystemProvider supplies the shared write implementation through openWrite', async () => {
+test('场景：FileSystemProvider 通过 openWrite 提供通用写入实现', async () => {
     const chunks = [];
     class StreamingProvider extends FileSystemProvider {
         getCapabilities() {
@@ -74,7 +74,7 @@ test('FileSystemProvider supplies the shared write implementation through openWr
     assert.equal(await new Blob(chunks).text(), 'shared');
 });
 
-test('FileChangeSet stages text, blobs and deletes with stable base metadata', () => {
+test('场景：FileChangeSet 暂存文本、二进制和删除时保留稳定基线元数据', () => {
     const changes = new FileChangeSet();
     const created = changes.stageText('/new.txt', '你好', {baseVersion: null, baseSize: null});
     assert.deepEqual({status: created.status, dataType: created.dataType, size: created.size}, {
@@ -101,7 +101,7 @@ test('FileChangeSet stages text, blobs and deletes with stable base metadata', (
     assert.deepEqual(changes.list(), []);
 });
 
-test('FileSession merges effective, base and changes views', async () => {
+test('场景：FileSession 正确合并 effective、base 和 changes 视图', async () => {
     const {session} = createSession();
     await session.stageText('alpha.txt', 'changed');
     await session.stageText('docs/new.txt', 'new');
@@ -139,7 +139,7 @@ test('FileSession merges effective, base and changes views', async () => {
     ]);
 });
 
-test('FileSession commits create, modify and delete with base expectedVersion', async () => {
+test('场景：FileSession 使用基线版本提交创建、修改和删除', async () => {
     const {provider, session} = createSession();
     await session.stageText('alpha.txt', 'changed');
     await session.stageBlob('new.bin', new Blob([new Uint8Array([1, 2, 3])], {type: 'application/octet-stream'}));
@@ -157,7 +157,7 @@ test('FileSession commits create, modify and delete with base expectedVersion', 
     assert.deepEqual(session.listChanges(), []);
 });
 
-test('FileSession preserves failed optimistic-lock changes for retry or revert', async () => {
+test('场景：乐观锁提交失败后 FileSession 保留变更以便重试或回滚', async () => {
     const {provider, session} = createSession();
     await session.stageText('alpha.txt', 'changed');
     provider.files.get('alpha.txt').version = 'external-v2';
@@ -168,7 +168,7 @@ test('FileSession preserves failed optimistic-lock changes for retry or revert',
     assert.equal(session.hasChange('alpha.txt'), false);
 });
 
-test('FileSession create-only staging never overwrites an existing file', async () => {
+test('场景：仅创建模式不会覆盖已存在文件', async () => {
     const {provider, session} = createSession();
 
     await assert.rejects(
@@ -179,7 +179,7 @@ test('FileSession create-only staging never overwrites an existing file', async 
     assert.equal(session.hasChange('alpha.txt'), false);
 });
 
-test('场景：overwrite 为假时已保存文件会保持原内容并返回文件已存在错误', async () => {
+test('场景：覆盖参数为假时已保存文件会保持原内容并返回文件已存在错误', async () => {
     const {provider, session} = createSession();
 
     await assert.rejects(
@@ -191,7 +191,7 @@ test('场景：overwrite 为假时已保存文件会保持原内容并返回文�
     assert.equal(session.hasChange('alpha.txt'), false);
 });
 
-test('场景：overwrite 为真时会替换未保存文本但磁盘基线保持不变', async () => {
+test('场景：覆盖参数为真时会替换未保存文本但磁盘基线保持不变', async () => {
     const {session} = createSession();
 
     await session.stageText('alpha.txt', '用户未保存内容');
@@ -202,7 +202,7 @@ test('场景：overwrite 为真时会替换未保存文本但磁盘基线保持�
     assert.equal(session.getChange('alpha.txt').status, 'modified');
 });
 
-test('场景：overwrite 为真时会取消待删除状态并写入新的文本或二进制内容', async () => {
+test('场景：覆盖参数为真时会取消待删除状态并写入新的文本或二进制内容', async () => {
     const {session} = createSession();
 
     await session.stageDelete('alpha.txt');
@@ -219,7 +219,7 @@ test('场景：overwrite 为真时会取消待删除状态并写入新的文本�
     assert.equal(session.getChange('delete.txt').status, 'modified');
 });
 
-test('FileSession refreshes a conflicted change base without losing staged content', async () => {
+test('场景：刷新冲突基线时保留已暂存内容', async () => {
     const {provider, session} = createSession();
     await session.stageText('alpha.txt', 'local edit');
     provider.files.get('alpha.txt').version = 'external-v2';
@@ -233,7 +233,7 @@ test('FileSession refreshes a conflicted change base without losing staged conte
     assert.equal(await provider.readText('alpha.txt'), 'local edit');
 });
 
-test('FileSession preserves and rebases edits staged while a commit is in flight', async () => {
+test('场景：提交进行期间的新编辑会被保留并重新基于最新版本', async () => {
     const {provider, session} = createSession();
     await session.stageText('alpha.txt', 'first edit');
     const originalWrite = provider.write.bind(provider);
@@ -263,12 +263,12 @@ test('FileSession preserves and rebases edits staged while a commit is in flight
     assert.equal(provider.operations.filter((operation) => operation.operation === 'write').length, 2);
 });
 
-test('FileConflictError exposes its stable error code', () => {
+test('场景：FileConflictError 暴露稳定错误码', () => {
     assert.equal(FileConflictError.code, 'FILE_CONFLICT');
     assert.equal(new FileConflictError('alpha.txt').code, FileConflictError.code);
 });
 
-test('FileSession commits against the version observed when the file was read', async () => {
+test('场景：FileSession 按读取文件时观察到的版本提交', async () => {
     const {provider, session} = createSession();
     assert.equal(await session.readText('alpha.txt'), 'alpha');
     provider.files.get('alpha.txt').version = 'external-v2';
@@ -278,7 +278,7 @@ test('FileSession commits against the version observed when the file was read', 
     assert.equal(session.listChanges()[0].baseVersion, 'alpha-v1');
 });
 
-test('FileSession deletes against the version observed when the file was listed', async () => {
+test('场景：FileSession 按列出文件时观察到的版本删除', async () => {
     const {provider, session} = createSession();
     await session.list('');
     provider.files.get('delete.txt').version = 'external-delete-v2';
@@ -288,7 +288,7 @@ test('FileSession deletes against the version observed when the file was listed'
     assert.equal(session.listChanges()[0].baseVersion, 'delete-v1');
 });
 
-test('FileSession can forget observed base metadata after an external write', async () => {
+test('场景：外部写入后 FileSession 可以遗忘已观察的基线', async () => {
     const {provider, session} = createSession();
     assert.equal(await session.readText('alpha.txt'), 'alpha');
     provider.files.get('alpha.txt').version = 'external-v2';
@@ -298,7 +298,7 @@ test('FileSession can forget observed base metadata after an external write', as
     assert.equal(session.listChanges()[0].baseVersion, 'external-v2');
 });
 
-test('FileSession tree refresh does not replace the version observed with file content', async () => {
+test('场景：刷新文件树不会替换通过文件内容观察到的版本', async () => {
     const {provider, session} = createSession();
     assert.equal(await session.readText('alpha.txt'), 'alpha');
     provider.files.get('alpha.txt').version = 'external-v2';
@@ -308,7 +308,7 @@ test('FileSession tree refresh does not replace the version observed with file c
     assert.equal(session.getChange('alpha.txt').baseVersion, 'alpha-v1');
 });
 
-test('FileSession background reads do not replace an adopted editor baseline', async () => {
+test('场景：后台读取不会替换编辑器已采用的基线', async () => {
     const {provider, session} = createSession();
     assert.equal(await session.readText('alpha.txt', {adoptBase: true}), 'alpha');
     provider.files.set('alpha.txt', {
@@ -321,7 +321,7 @@ test('FileSession background reads do not replace an adopted editor baseline', a
     assert.equal(session.getChange('alpha.txt').baseVersion, 'alpha-v1');
 });
 
-test('FileSession changes resource view cannot fall through to base resources', async () => {
+test('场景：changes 资源视图不会回退读取 base 资源', async () => {
     const {provider, session} = createSession();
     provider.getResourceUrl = async () => ({url: 'https://example.test/base'});
 
@@ -329,7 +329,7 @@ test('FileSession changes resource view cannot fall through to base resources', 
     assert.equal((await session.getResourceUrl('alpha.txt', {view: 'base'})).url, 'https://example.test/base');
 });
 
-test('writeFileTarget streams through a writable file target', async () => {
+test('场景：writeFileTarget 通过可写文件目标执行流式写入', async () => {
     const chunks = [];
     const handle = {
         kind: 'file',
@@ -347,7 +347,7 @@ test('writeFileTarget streams through a writable file target', async () => {
     assert.equal(await new Blob(chunks).text(), 'streamed');
 });
 
-test('FileSystem keeps directory relationship checks behind the provider boundary', async () => {
+test('场景：FileSystem 通过 Provider 边界判断目录关系', async () => {
     const destinationRoot = {kind: 'directory', name: 'destination'};
     const sourceRoot = {
         kind: 'directory',
@@ -362,7 +362,7 @@ test('FileSystem keeps directory relationship checks behind the provider boundar
     assert.equal(await sourceFileSystem.isCopyDestinationInside('', destinationFileSystem, ''), true);
 });
 
-test('BrowserHandleProvider rejects a virtual directory copied onto its nominal source path', async () => {
+test('场景：BrowserHandleProvider 拒绝将虚拟目录复制到其名义源路径', async () => {
     const root = {
         kind: 'directory',
         name: 'root',
@@ -376,7 +376,7 @@ test('BrowserHandleProvider rejects a virtual directory copied onto its nominal 
     assert.equal(await sourceFileSystem.isCopyDestinationInside('virtual', destinationFileSystem, 'virtual'), true);
 });
 
-test('FileSystem keeps file target identity checks behind the provider boundary', async () => {
+test('场景：FileSystem 通过 Provider 边界判断文件目标是否相同', async () => {
     const sourceFile = {kind: 'file', name: 'copy.txt'};
     const root = {
         kind: 'directory',
@@ -398,7 +398,7 @@ test('FileSystem keeps file target identity checks behind the provider boundary'
     assert.equal(await fileSystem.isSameFileTarget(sourceFile.name, target), true);
 });
 
-test('createFileSystem hides provider construction behind registered source types', () => {
+test('场景：createFileSystem 通过注册的来源类型隐藏 Provider 构造过程', () => {
     const handle = {kind: 'directory', name: 'root'};
     const fileSystem = createFileSystem({type: 'local', config: {directoryHandle: handle}});
 
@@ -406,7 +406,7 @@ test('createFileSystem hides provider construction behind registered source type
     assert.equal(fileSystem.getCapabilities().createDirectory, true);
 });
 
-test('GithubProvider writes UTF-8 bytes with the caller SHA and does not prefetch', async () => {
+test('场景：GithubProvider 使用调用方 SHA 写入 UTF-8 字节且不会预读取', async () => {
     const requests = [];
     const provider = new GithubProvider({
         token: 'token',
@@ -433,7 +433,7 @@ test('GithubProvider writes UTF-8 bytes with the caller SHA and does not prefetc
     assert.equal('sha' in JSON.parse(requests[0].options.body), false);
 });
 
-test('GithubProvider treats a missing expected update target as a conflict', async () => {
+test('场景：GithubProvider 将预期更新目标缺失视为冲突', async () => {
     const provider = new GithubProvider({
         token: 'token',
         repo: 'owner/repo',
@@ -446,7 +446,7 @@ test('GithubProvider treats a missing expected update target as a conflict', asy
     );
 });
 
-test('GithubProvider invokes browser-style fetch with a valid global receiver', async () => {
+test('场景：GithubProvider 以有效全局接收者调用浏览器 fetch', async () => {
     let calls = 0;
     const provider = new GithubProvider({
         token: 'token',
@@ -466,7 +466,7 @@ test('GithubProvider invokes browser-style fetch with a valid global receiver', 
     assert.equal(calls, 3);
 });
 
-test('GithubProvider keeps resources behind authenticated file reads', async () => {
+test('场景：GithubProvider 通过鉴权文件读取保护资源访问', async () => {
     const provider = new GithubProvider({
         token: 'token',
         repo: 'owner/repo',
@@ -478,7 +478,7 @@ test('GithubProvider keeps resources behind authenticated file reads', async () 
     assert.equal(await new FileSystem({provider}).getResourceUrl('docs/my image.png'), null);
 });
 
-test('GithubProvider bypasses third-party download proxies when authentication is required', async () => {
+test('场景：需要鉴权时 GithubProvider 绕过第三方下载代理', async () => {
     const requests = [];
     const provider = new GithubProvider({
         token: 'secret-token',
@@ -511,7 +511,7 @@ test('GithubProvider bypasses third-party download proxies when authentication i
     assert.equal(new Headers(requests[1].options.headers).get('authorization'), 'Bearer secret-token');
 });
 
-test('GithubProvider keeps download_url reads streaming', async () => {
+test('场景：GithubProvider 对 download_url 保持流式读取', async () => {
     let requests = 0;
     const provider = new GithubProvider({
         token: 'token',
@@ -543,7 +543,7 @@ test('GithubProvider keeps download_url reads streaming', async () => {
     assert.equal(await new Response(opened.stream).text(), 'stream');
 });
 
-test('GithubProvider preserves the SHA observed by FileSession.openRead', async () => {
+test('场景：GithubProvider 保留 FileSession.openRead 观察到的 SHA', async () => {
     let sha = 'github-v1';
     const provider = new GithubProvider({
         token: 'token',
@@ -566,7 +566,7 @@ test('GithubProvider preserves the SHA observed by FileSession.openRead', async 
     assert.equal(session.getChange('readme.md').baseVersion, 'github-v1');
 });
 
-test('FileResourceResolver reference-counts object URLs and reports unsupported environments', async () => {
+test('场景：FileResourceResolver 对对象 URL 引用计数并报告不支持环境', async () => {
     const createDescriptor = Object.getOwnPropertyDescriptor(globalThis.URL, 'createObjectURL');
     const revokeDescriptor = Object.getOwnPropertyDescriptor(globalThis.URL, 'revokeObjectURL');
     const revoked = [];
