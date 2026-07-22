@@ -300,13 +300,23 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { CommonUtils } from '@/shared/common-utils.js';
 import { CommonComponents } from '@/shared/common-components.js';
 import { CdnUtils } from '@/shared/cdn-utils.js';
+import { FileUtils } from '@/shared/file-utils.js';
+import {
+    createFileSystem,
+    FileConflictError,
+    FileOperationPolicy,
+    FileResourceResolver,
+    FileSession,
+    normalizeFilePath,
+} from '@/shared/file-system/index.js';
 import { enableEditorPwa } from '@/shared/pwa-install.js';
 
 const VDITOR_CDN_BASE = CdnUtils.vditor.base;
+const MAX_MEMORY_WRITE_BYTES = 25 * 1024 * 1024;
 
 function loadVditor() {
     return CdnUtils.loadVditor();
@@ -400,28 +410,52 @@ export default {
         },
 
         setup() {
-            const buildPathWithParam = (path, params) => {
-                let url = path;
-                if (params) {
-                    const paramStr = Object.entries(params)
-                        .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
-                        .join('&');
-                    url += `?${paramStr}`;
-                }
-                return url;
-            };
-
-            const isFilePath = (str) => {
-                try {
-                    new URL(str);
-                    return false;
-                } catch {
-                    return true;
-                }
-            };
-
             const formatTime = CommonUtils.formatRelativeTime;
             const computePath = CommonUtils.computePath;
+
+            const isExternalResourceUrl = (url) => {
+                const value = String(url || '').trim();
+                return !value || value.startsWith('#') || value.startsWith('//') || /^[a-z][a-z\d+.-]*:/i.test(value);
+            };
+
+            const splitResourceUrl = (url) => {
+                const match = String(url).match(/^([^?#]*)([?#].*)?$/);
+                const rawPath = match?.[1] || '';
+                let path = rawPath;
+                try {
+                    path = decodeURI(rawPath);
+                } catch {
+                }
+                return {path, suffix: match?.[2] || ''};
+            };
+
+            const resolveResourcePath = (documentPath, url) => {
+                const resource = splitResourceUrl(url);
+                return {
+                    path: computePath(documentPath, true, resource.path),
+                    suffix: resource.suffix
+                };
+            };
+
+            const appendResourceSuffix = (url, suffix) => {
+                if (!suffix) return url;
+                if (suffix.startsWith('?') && url.includes('?')) return `${url}&${suffix.slice(1)}`;
+                return `${url}${suffix}`;
+            };
+
+            const relativePathFromFile = (documentPath, targetPath) => {
+                const documentDirectory = computePath(documentPath, true, '');
+                const fromParts = documentDirectory.split('/').filter(Boolean);
+                const targetParts = targetPath.split('/').filter(Boolean);
+                let commonLength = 0;
+                while (commonLength < fromParts.length && fromParts[commonLength] === targetParts[commonLength]) {
+                    commonLength += 1;
+                }
+                return [
+                    ...Array(fromParts.length - commonLength).fill('..'),
+                    ...targetParts.slice(commonLength)
+                ].join('/');
+            };
 
             // 过滤文件树（仅保留.md文件或全部）
             const filterFileTree = (items) => {
@@ -442,455 +476,6 @@ export default {
                     return item;
                 });
             };
-
-            class StorageStrategy {
-                async convertFilePath(mdFilePath) {
-                    throw new Error('Not implemented');
-                }
-
-                async listFile(path) {
-                    throw new Error('Not implemented');
-                }
-
-                async loadFile(path) {
-                    throw new Error('Not implemented');
-                }
-
-                async saveFile(path, content) {
-                    throw new Error('Not implemented');
-                }
-
-                async createFile(path, content) {
-                    throw new Error('Not implemented');
-                }
-
-                async deleteFile(path) {
-                    throw new Error('Not implemented');
-                }
-
-                async validConnection() {
-                    throw new Error('Not implemented');
-                }
-
-                fileUploadPath() {
-                    throw new Error('Not implemented');
-                }
-
-                async uploadFile(fileUploadPath, file) {
-                    throw new Error('Not implemented');
-                }
-
-                isConnectable() {
-                    throw new Error('Not implemented');
-                }
-
-                getDisplayInfo() {
-                    throw new Error('Not implemented');
-                }
-
-                sourceName() {
-                    throw new Error('Not implemented');
-                }
-            }
-
-            class GithubStrategy extends StorageStrategy {
-                constructor(token, repo, branch, rootPath, proxy, uploadPath) {
-                    super();
-                    this.token = token;
-                    this.repo = repo;
-                    this.branch = branch;
-                    this.rootPath = rootPath;
-                    this.proxy = proxy;
-                    this.uploadPath = uploadPath;
-                }
-
-                isConnectable() {
-                    return this.token && this.repo && this.branch;
-                }
-
-                getDisplayInfo() {
-                    return this.repo;
-                }
-
-                sourceName() {
-                    return "GitHub";
-                }
-
-                // GitHub API 请求
-                async githubApiRequest(endpoint, options = {}) {
-                    const GITHUB_API_BASE = 'https://api.github.com';
-                    const url = `${GITHUB_API_BASE}${endpoint}`;
-                    const response = await fetch(url, {
-                        ...options,
-                        headers: {
-                            'Accept': 'application/vnd.github.v3+json',
-                            'Authorization': `Bearer ${this.token}`,
-                            ...options.headers
-                        }
-                    });
-
-                    if (!response.ok) {
-                        const errorData = await response.json().catch(() => ({}));
-                        throw new Error(errorData.message || `HTTP ${response.status}`);
-                    }
-
-                    if (response.status === 204) {
-                        return true;
-                    }
-                    return response.json();
-                };
-
-                getFormatPath(path) {
-                    if (!path) {
-                        return '';
-                    }
-                    if (path.endsWith('/')) {
-                        path = path.slice(0, -1);
-                    }
-                    if (path.startsWith('/')) {
-                        path = path.slice(1);
-                    }
-                    return path;
-                }
-
-                buildPath(basePath) {
-                    const paths = [];
-                    const formatRootPath = this.getFormatPath(this.rootPath);
-                    if (formatRootPath) {
-                        paths.push(formatRootPath);
-                    }
-                    const formatBasePath = this.getFormatPath(basePath);
-                    if (formatBasePath) {
-                        paths.push(formatBasePath);
-                    }
-                    return paths.join('/');
-                }
-
-                removeRootPath(path) {
-                    if (!path) {
-                        return path;
-                    }
-                    const formatRootPath = this.getFormatPath(this.rootPath);
-                    if (!formatRootPath) {
-                        return path;
-                    }
-                    const prefix = formatRootPath + "/";
-                    if (path.startsWith(prefix)) {
-                        return path.slice(prefix.length);
-                    }
-
-                    if (path === formatRootPath) {
-                        return "";
-                    }
-
-                    return path;
-                }
-
-                async listFile(path) {
-                    const filePath = this.buildPath(path);
-                    const endpoint = filePath ? `/repos/${this.repo}/contents/${filePath}` : `/repos/${this.repo}/contents`;
-                    const contents = await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()));
-
-                    if (!Array.isArray(contents)) {
-                        return [];
-                    }
-
-                    const map = contents
-                        .map(item => ({
-                            name: item.name,
-                            path: this.removeRootPath(item.path),
-                            type: item.type === 'dir' ? 'directory' : 'file',
-                            fullPath: this.removeRootPath(item.path)
-                        }));
-                    console.log(map);
-                    return map;
-                }
-
-                async loadFile(path) {
-                    const filePath = this.buildPath(path);
-                    const endpoint = `/repos/${this.repo}/contents/${filePath}`;
-                    const data = await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()));
-                    let content = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
-                    return {content};
-                }
-
-                async saveFile(path, content) {
-                    const fileSha = await this.getFileSha(path);
-                    const encodedContent = btoa(unescape(encodeURIComponent(content)));
-                    const filePath = this.buildPath(path);
-                    const endpoint = `/repos/${this.repo}/contents/${filePath}`;
-
-                    const bodyParams = {
-                        message: `Update ${path} via SimpleServer MdEditor`,
-                        content: encodedContent,
-                        sha: fileSha,
-                        branch: this.branch
-                    };
-
-                    await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()), {
-                        method: 'PUT',
-                        body: JSON.stringify(bodyParams)
-                    });
-                }
-
-                async createFile(path, content = '') {
-                    const filePath = this.buildPath(path);
-                    const encodedContent = btoa(unescape(encodeURIComponent(content)));
-                    const endpoint = `/repos/${this.repo}/contents/${filePath}`;
-
-                    const bodyParams = {
-                        message: `Create ${path} via SimpleServer MdEditor`,
-                        content: encodedContent,
-                        branch: this.branch
-                    };
-
-                    await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()), {
-                        method: 'PUT',
-                        body: JSON.stringify(bodyParams)
-                    });
-                }
-
-                async deleteFile(path) {
-                    const sha = await this.getFileSha(path);
-                    const filePath = this.buildPath(path);
-                    const endpoint = `/repos/${this.repo}/contents/${filePath}`;
-
-                    const bodyParams = {
-                        message: `Delete ${path} via SimpleServer MdEditor`,
-                        sha: sha,
-                        branch: this.branch
-                    };
-
-                    await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()), {
-                        method: 'DELETE',
-                        body: JSON.stringify(bodyParams)
-                    });
-                }
-
-                async validConnection() {
-                    await this.githubApiRequest('/user');
-                }
-
-                async convertFilePath(mdFilePath) {
-                    if (!mdFilePath) {
-                        return mdFilePath;
-                    }
-                    const filePath = this.buildPath(mdFilePath);
-                    const rawUrl = `https://raw.githubusercontent.com/${this.repo}/${this.branch}/${filePath}`;
-                    if (this.proxy) {
-                        return `${this.proxy}/${rawUrl}`;
-                    }
-                    return rawUrl;
-                }
-
-                async getFileSha(filePath) {
-                    let sha = null;
-                    try {
-                        const fileRequestPath = this.buildPath(filePath);
-                        const endpoint = `/repos/${this.repo}/contents/${fileRequestPath}`;
-                        const checkData = await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()));
-                        sha = checkData.sha;
-                    } catch (e) {
-                        throw new Error("Fetch file sha failed");
-                    }
-                    return sha;
-                }
-
-                fileUploadPath() {
-                    return this.uploadPath;
-                }
-
-                async uploadFile(fileUploadPath, file) {
-                    const fileName = file.name;
-
-                    const reader = new FileReader();
-                    return new Promise((resolve, reject) => {
-                        reader.onload = async () => {
-                            try {
-                                const dataUrl = reader.result;
-                                let content = dataUrl.split(',')[1];
-
-                                if (!dataUrl.includes(',')) {
-                                    content = btoa(unescape(encodeURIComponent(dataUrl)));
-                                }
-                                const filePath = computePath(fileUploadPath, false, fileName);
-                                const fileRequestPath = this.buildPath(filePath);
-                                const sha = await this.getFileSha(filePath);
-                                const endpoint = `/repos/${this.repo}/contents/${fileRequestPath}`;
-
-                                const bodyParams = {
-                                    message: `Upload ${fileName} via SimpleServer MdEditor`,
-                                    content: content,
-                                    sha: sha,
-                                    branch: this.branch
-                                };
-
-                                await this.githubApiRequest(buildPathWithParam(endpoint, this.getBaseParam()), {
-                                    method: 'PUT',
-                                    body: JSON.stringify(bodyParams)
-                                });
-
-                                resolve(filePath);
-                            } catch (error) {
-                                reject(error);
-                            }
-                        };
-                        reader.onerror = reject;
-                        reader.readAsDataURL(file);
-                    });
-                }
-
-                getBaseParam() {
-                    const params = {
-                        ref: this.branch
-                    };
-                    params.timestamp = Date.now();
-                    return params;
-                }
-            }
-
-            class LocalStrategy extends StorageStrategy {
-                constructor(directoryHandle, name, uploadPath) {
-                    super();
-                    this.directoryHandle = directoryHandle;
-                    this.name = name;
-                    this.uploadPath = uploadPath;
-                }
-
-                async convertFilePath(mdFilePath) {
-                    if (!mdFilePath) {
-                        return mdFilePath;
-                    }
-                    const fileEntry = await this.findFileHandle(this.directoryHandle, mdFilePath);
-                    const fileData = await fileEntry.getFile();
-                    return URL.createObjectURL(fileData);
-                }
-
-                isConnectable() {
-                    return this.directoryHandle && this.directoryHandle.kind === 'directory';
-                }
-
-                getDisplayInfo() {
-                    return this.name || '本地文件夹';
-                }
-
-                sourceName() {
-                    return "本地文件夹";
-                }
-
-                async listFile(path) {
-                    const dirHandle = await this.findDirHandle(this.directoryHandle, path);
-
-                    const items = [];
-                    for await (const entry of dirHandle.values()) {
-                        const entryPath = path ? `${path}/${entry.name}` : entry.name;
-                        items.push({
-                            name: entry.name,
-                            path: entryPath,
-                            type: entry.kind === 'directory' ? 'directory' : 'file',
-                            fullPath: entryPath
-                        });
-                    }
-                    return items;
-                }
-
-                async loadFile(path) {
-                    const fileHandle = await this.findFileHandle(this.directoryHandle, path);
-                    if (!fileHandle) {
-                        throw new Error('文件不存在');
-                    }
-                    const file = await fileHandle.getFile();
-                    const content = await file.text();
-                    return {content};
-                }
-
-                async saveFile(path, content) {
-                    const fileHandle = await this.findFileHandle(this.directoryHandle, path);
-                    if (!fileHandle) {
-                        throw new Error('文件不存在');
-                    }
-                    const writable = await fileHandle.createWritable();
-                    await writable.write(content);
-                    await writable.close();
-                }
-
-                async createFile(path, content = '') {
-                    const parentHandle = await this.findParentHandle(this.directoryHandle, path);
-                    const fileName = path.split('/').pop();
-                    const fileHandle = await parentHandle.getFileHandle(fileName, {create: true});
-                    const writable = await fileHandle.createWritable();
-                    await writable.write(content);
-                    await writable.close();
-                }
-
-                async deleteFile(path) {
-                    const parentHandle = await this.findParentHandle(this.directoryHandle, path);
-                    const fileName = path.split('/').pop();
-                    await parentHandle.removeEntry(fileName);
-                }
-
-                async validConnection() {
-                    if (!window.showDirectoryPicker) {
-                        throw new Error('本地文件夹连接失败，当前浏览器不支持');
-                    }
-                }
-
-                fileUploadPath() {
-                    return this.uploadPath;
-                }
-
-                async uploadFile(fileUploadPath, file) {
-                    const fileName = file.name;
-
-                    return new Promise(async (resolve, reject) => {
-                        try {
-                            const filePath = computePath(fileUploadPath, false, fileName);
-                            let fileHandler = await this.findFileHandle(this.directoryHandle, filePath, true);
-                            const writable = await fileHandler.createWritable();
-                            await writable.write(file);
-                            await writable.close();
-
-                            resolve(filePath);
-                        } catch (error) {
-                            reject(error);
-                        }
-                    });
-                }
-
-                async traversePath(dirHandle, path, create = false, lastPartHandler) {
-                    if (!path) {
-                        return dirHandle;
-                    }
-                    if (path.startsWith("/")) {
-                        path = path.slice(1);
-                    }
-                    const parts = path.split('/');
-                    let currentHandle = dirHandle;
-                    for (let i = 0; i < parts.length - 1; i++) {
-                        if (!parts[i]) continue;
-                        currentHandle = await currentHandle.getDirectoryHandle(parts[i], {create});
-                    }
-                    return await lastPartHandler(currentHandle, parts, create);
-                }
-
-                async findFileHandle(dirHandle, path, create = false) {
-                    return await this.traversePath(dirHandle, path, create, (handle, parts) => {
-                        return handle.getFileHandle(parts[parts.length - 1], {create});
-                    });
-                }
-
-                async findDirHandle(dirHandle, path, create = false) {
-                    return await this.traversePath(dirHandle, path, create, (handle, parts) => {
-                        return handle.getDirectoryHandle(parts[parts.length - 1], {create});
-                    });
-                }
-
-                async findParentHandle(dirHandle, path, create = false) {
-                    return await this.traversePath(dirHandle, path, create, (handle) => {
-                        return handle;
-                    });
-                }
-            }
 
             const sidebarCollapsed = ref(false);
             const showConfigModal = ref(true);
@@ -920,33 +505,22 @@ export default {
             const newFilePath = ref('');
             const toastRef = ref(null);
             let disableEditorPwa = null;
+            let session = null;
+            let resourceResolver = null;
+            let currentResourceHandles = [];
+            let workspaceVersion = 0;
+            let fileReadVersion = 0;
+            let editorContentVersion = 0;
+            let editorInputVersion = 0;
+            let activeFileUploadPath = '';
+            let vditorReady = false;
+            let pendingVditorContent = '';
 
             const showToast = (message, type = 'info') => {
                 if (toastRef.value) {
                     toastRef.value.show(message, type);
                 }
             };
-
-            const getStrategy = computed(() => {
-                if (mdSource.value === 'local') {
-                    return new LocalStrategy(
-                        localConfig.value.directoryHandle,
-                        localConfig.value.directoryHandle ? localConfig.value.directoryHandle.name : '',
-                        localConfig.value.uploadPath
-                    );
-                } else if (mdSource.value === 'github') {
-                    return new GithubStrategy(
-                        githubConfig.value.token,
-                        githubConfig.value.repo,
-                        githubConfig.value.branch,
-                        githubConfig.value.rootPath,
-                        githubConfig.value.proxy,
-                        githubConfig.value.uploadPath
-                    );
-                } else {
-                    throw new Error('未知的Markdown源类型');
-                }
-            });
 
             const showFileTree = computed(() => {
                 if (showAllFile.value) {
@@ -956,16 +530,23 @@ export default {
             });
 
             const displaySourceInfo = computed(() => {
-                return getStrategy.value.getDisplayInfo();
+                return mdSource.value === 'github'
+                    ? githubConfig.value.repo
+                    : localConfig.value.name || '本地文件夹';
             });
 
             const sourceName = computed(() => {
-                return getStrategy.value.sourceName();
+                return mdSource.value === 'github' ? 'GitHub' : '本地文件夹';
             });
 
             const canConnect = computed(() => {
-                return getStrategy.value.isConnectable();
+                if (mdSource.value === 'github') {
+                    return Boolean(githubConfig.value.token && githubConfig.value.repo && githubConfig.value.branch);
+                }
+                return localConfig.value.directoryHandle?.kind === 'directory';
             });
+
+            const fileUploadPath = () => activeFileUploadPath;
 
             const settingHandlers = [
                 {
@@ -1072,6 +653,8 @@ export default {
                 if (!confirm(`确定要清除 ${sourceName.value} 配置吗？`)) {
                     return;
                 }
+                if (!confirmDiscardChanges()) return;
+                disposeWorkspace();
                 for (let settingHandler of settingHandlers) {
                     if (settingHandler.source !== mdSource.value) {
                         continue;
@@ -1083,16 +666,13 @@ export default {
                     localConfig.value.directoryHandle = null;
                     localConfig.value.name = '';
                 }
-                fileTree.value = [];
-                resetCurrentFileInfo();
                 showToast('配置已清除', 'info');
                 showConfigModal.value = true;
             };
 
             const saveConfigAndConnect = async () => {
                 saveConfigToStorage();
-                showConfigModal.value = false;
-                await connect();
+                if (await connect()) showConfigModal.value = false;
             };
 
             const selectDirectory = async () => {
@@ -1124,127 +704,236 @@ export default {
                 });
             };
 
-            const resetCurrentFileInfo = () => {
+            const releaseCurrentResources = () => {
+                for (const handle of currentResourceHandles) handle.release();
+                currentResourceHandles = [];
+            };
+
+            const resetCurrentFileInfo = ({revertChange = true} = {}) => {
+                fileReadVersion += 1;
+                if (revertChange && session && currentFilePath.value) {
+                    session.revert(currentFilePath.value);
+                }
+                releaseCurrentResources();
                 currentFilePath.value = '';
                 currentFilePathMapping.value = {};
                 isDirty.value = false;
+                lastSaved.value = '';
                 setVditorContent('');
             };
 
+            const confirmDiscardChanges = () => {
+                return !isDirty.value || confirm('当前文件有未保存的更改，确定要放弃吗？');
+            };
+
+            const disposeWorkspace = () => {
+                workspaceVersion += 1;
+                resetCurrentFileInfo();
+                session?.revertAll();
+                resourceResolver?.dispose();
+                session = null;
+                resourceResolver = null;
+                activeFileUploadPath = '';
+                fileTree.value = [];
+            };
+
             const connect = async () => {
-                if (!canConnect.value) return;
-                const strategy = getStrategy.value;
+                if (!canConnect.value || !confirmDiscardChanges()) return false;
+
+                disposeWorkspace();
+                const connectionWorkspaceVersion = workspaceVersion;
+                const source = mdSource.value;
+                const config = source === 'local'
+                    ? {
+                        directoryHandle: localConfig.value.directoryHandle,
+                        uploadPath: localConfig.value.uploadPath
+                    }
+                    : {
+                        token: githubConfig.value.token,
+                        repo: githubConfig.value.repo,
+                        branch: githubConfig.value.branch,
+                        rootPath: githubConfig.value.rootPath,
+                        proxy: githubConfig.value.proxy,
+                        uploadPath: githubConfig.value.uploadPath
+                    };
+                let nextResolver = null;
 
                 isLoading.value = true;
                 try {
-                    await strategy.validConnection();
-                    await refreshFileTree();
+                    const nextFileSystem = createFileSystem({
+                        type: source,
+                        config,
+                        policy: new FileOperationPolicy({
+                            maxMemoryWriteBytes: MAX_MEMORY_WRITE_BYTES,
+                            maxListEntries: Number.MAX_SAFE_INTEGER,
+                            maxWalkEntries: Number.MAX_SAFE_INTEGER
+                        })
+                    });
+                    const nextSession = new FileSession({fileSystem: nextFileSystem});
+                    nextResolver = new FileResourceResolver();
+
+                    await nextSession.checkAccess('', {
+                        writable: true,
+                        request: true
+                    });
+                    const nextFileTree = await loadFileTree('', nextSession);
+                    if (connectionWorkspaceVersion !== workspaceVersion) {
+                        nextResolver.dispose();
+                        return false;
+                    }
+
+                    session = nextSession;
+                    resourceResolver = nextResolver;
+                    activeFileUploadPath = config.uploadPath;
+                    fileTree.value = nextFileTree;
                     showToast('连接成功!', 'success');
+                    return true;
                 } catch (error) {
+                    nextResolver?.dispose();
                     showToast(`连接失败: ${error.message}`, 'error');
                     console.error('Connection error:', error);
+                    return false;
                 } finally {
-                    isLoading.value = false;
+                    if (connectionWorkspaceVersion === workspaceVersion) isLoading.value = false;
                 }
             };
 
             const refreshFileTree = async () => {
-                if (!canConnect.value) return;
+                if (!session) return;
 
+                const activeSession = session;
+                const activeWorkspaceVersion = workspaceVersion;
                 isLoading.value = true;
 
                 try {
-                    fileTree.value = await loadFileTree('');
+                    const nextFileTree = await loadFileTree('', activeSession);
+                    if (activeSession === session && activeWorkspaceVersion === workspaceVersion) {
+                        fileTree.value = nextFileTree;
+                    }
                 } catch (error) {
-                    showToast(`获取文件列表失败: ${error.message}`, 'error');
+                    if (activeSession === session && activeWorkspaceVersion === workspaceVersion) {
+                        showToast(`获取文件列表失败: ${error.message}`, 'error');
+                    }
                 } finally {
-                    isLoading.value = false;
+                    if (activeSession === session && activeWorkspaceVersion === workspaceVersion) {
+                        isLoading.value = false;
+                    }
                 }
             };
 
-            const loadFileTree = async (path) => {
-                const strategy = getStrategy.value;
-                const files = await strategy.listFile(path);
-                for (const file of files) {
-                    if (file.type === 'directory') {
-                        file.children = await loadFileTree(file.path);
+            const loadFileTree = async (path, activeSession) => {
+                const entries = await activeSession.list(path);
+                const files = [];
+                for (const entry of entries) {
+                    const type = entry.kind === 'directory' ? 'directory' : 'file';
+                    const file = {
+                        name: entry.name,
+                        path: entry.path,
+                        type,
+                        children: []
+                    };
+                    if (type === 'directory') {
+                        file.children = await loadFileTree(entry.path, activeSession);
                     }
+                    files.push(file);
                 }
                 return files;
             };
 
             const selectFile = async (path) => {
                 if (path === currentFilePath.value) return;
-
-                if (isDirty.value) {
-                    if (!confirm('当前文件有未保存的更改，确定要放弃吗？')) {
-                        return;
-                    }
-                }
+                if (!confirmDiscardChanges()) return;
                 resetCurrentFileInfo();
                 currentFilePath.value = path;
-                await loadMarkdownFile(path);
+                const readVersion = ++fileReadVersion;
+                await loadMarkdownFile(path, readVersion);
             };
 
-            const loadMarkdownFile = async (path) => {
-                try {
-                    const strategy = getStrategy.value;
-                    const {content} = await strategy.loadFile(path);
+            const loadMarkdownFile = async (path, readVersion) => {
+                const activeSession = session;
+                const activeResolver = resourceResolver;
+                const activeWorkspaceVersion = workspaceVersion;
+                if (!activeSession || !activeResolver) return;
 
-                    const processedContent = await convertMarkdownFilePath(path, content, currentFilePathMapping.value);
-                    setVditorContent(processedContent);
+                try {
+                    const content = await activeSession.readText(path, {adoptBase: true});
+                    const converted = await convertMarkdownFilePath(path, content, activeSession, activeResolver);
+                    if (readVersion !== fileReadVersion || activeWorkspaceVersion !== workspaceVersion || path !== currentFilePath.value) {
+                        converted.handles.forEach((handle) => handle.release());
+                        return;
+                    }
+                    releaseCurrentResources();
+                    currentResourceHandles = converted.handles;
+                    currentFilePathMapping.value = converted.mapping;
+                    setVditorContent(converted.content);
                 } catch (error) {
-                    console.log(error);
-                    showToast(`加载文件失败: ${error.message}`, 'error');
+                    if (readVersion === fileReadVersion && activeWorkspaceVersion === workspaceVersion) {
+                        console.error('Load Markdown failed:', error);
+                        showToast(`加载文件失败: ${error.message}`, 'error');
+                    }
                 }
             };
 
             // Markdown 路径转换核心逻辑
-            const processMarkdownPaths = async (content, mapping, converter) => {
+            const processMarkdownPaths = async (content, converter) => {
                 const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
                 const linkRegex = /(?<!!)\[([^\]]*)\]\(([^)]+)\)/g;
-                let processedContent = content;
-
-                const processMatches = async (regex, buildReplacement) => {
-                    const matches = [...processedContent.matchAll(regex)];
+                const processMatches = async (source, regex, buildReplacement) => {
+                    let result = '';
+                    let lastIndex = 0;
+                    const matches = [...source.matchAll(regex)];
                     for (const match of matches) {
-                        const fullMatch = match[0];
                         const url = match[2];
-                        const result = await converter(match, url, mapping);
-                        if (result !== url) {
-                            processedContent = processedContent.replace(
-                                fullMatch,
-                                buildReplacement(match, result)
-                            );
-                        }
+                        const convertedUrl = await converter(match, url);
+                        result += source.slice(lastIndex, match.index);
+                        result += convertedUrl === url ? match[0] : buildReplacement(match, convertedUrl);
+                        lastIndex = match.index + match[0].length;
                     }
+                    return result + source.slice(lastIndex);
                 };
 
-                await processMatches(imageRegex, (match, url) => `![${match[1]}](${url})`);
-                await processMatches(linkRegex, (match, url) => `[${match[1]}](${url})`);
-
-                return processedContent;
+                const withImages = await processMatches(content, imageRegex, (match, url) => `![${match[1]}](${url})`);
+                return processMatches(withImages, linkRegex, (match, url) => `[${match[1]}](${url})`);
             };
 
-            const convertMarkdownFilePath = async (path, content, mapping) => {
-                return await processMarkdownPaths(content, mapping, async (match, url) => {
-                    if (!isFilePath(url)) {
-                        return url;
-                    }
-                    const formatUrl = computePath(path, true, url);
-                    const filePath = computePath(currentFilePath.value, true, formatUrl);
-                    const convertedUrl = await getStrategy.value.convertFilePath(filePath);
-                    if (convertedUrl && convertedUrl !== filePath) {
-                        mapping[convertedUrl] = url;
-                        return convertedUrl;
-                    }
-                    return url;
-                });
+            const convertMarkdownFilePath = async (path, content, activeSession, activeResolver) => {
+                const mapping = {};
+                const handles = [];
+                const resources = new Map();
+                try {
+                    const convertedContent = await processMarkdownPaths(content, async (match, url) => {
+                        if (isExternalResourceUrl(url)) return url;
+                        try {
+                            const resourcePath = resolveResourcePath(path, url);
+                            if (!resourcePath.path) return url;
+
+                            let resource = resources.get(resourcePath.path);
+                            if (!resource) {
+                                resource = await activeResolver.acquire(resourcePath.path, {
+                                    source: activeSession,
+                                    view: 'effective'
+                                });
+                                resources.set(resourcePath.path, resource);
+                                handles.push(resource);
+                            }
+                            const convertedUrl = appendResourceSuffix(resource.url, resourcePath.suffix);
+                            mapping[convertedUrl] = url;
+                            return convertedUrl;
+                        } catch (error) {
+                            console.warn(`Resolve Markdown resource failed: ${url}`, error);
+                            return url;
+                        }
+                    });
+                    return {content: convertedContent, mapping, handles};
+                } catch (error) {
+                    handles.forEach((handle) => handle.release());
+                    throw error;
+                }
             };
 
             const revertMarkdownFilePath = async (path, content, mapping) => {
-                return await processMarkdownPaths(content, mapping, (match, url, mapping) => {
-                    if (mapping.hasOwnProperty(url)) {
+                return processMarkdownPaths(content, (match, url) => {
+                    if (Object.prototype.hasOwnProperty.call(mapping, url)) {
                         return mapping[url];
                     }
                     return url;
@@ -1252,16 +941,15 @@ export default {
             };
 
             const setVditorContent = (content) => {
-                if (vditor) {
-                    setTimeout(() => {
-                        if (vditor && vditor.setValue) {
-                            vditor.setValue(content);
-                            isDirty.value = false;
-                        }
-                    }, 100);
-                } else {
-                    throw new Error("Vditor 编辑器未初始化");
-                }
+                pendingVditorContent = String(content ?? '');
+                if (!vditor || !vditorReady) return;
+                const contentVersion = ++editorContentVersion;
+                setTimeout(() => {
+                    if (contentVersion === editorContentVersion && vditor?.setValue) {
+                        vditor.setValue(pendingVditorContent);
+                        isDirty.value = false;
+                    }
+                }, 100);
             };
 
             let vditor = null;
@@ -1274,6 +962,7 @@ export default {
                     height: '100%',
                     placeholder: '选择文件开始编辑，或新建一个文件...',
                     toolbarConfig: {pin: true},
+                    customWysiwygToolbar: () => {},
                     editorName: 'vditor',
                     toolbar: [
                         'headings', 'bold', 'italic', 'strike', 'link', '|',
@@ -1284,44 +973,79 @@ export default {
                     ],
                     upload: {
                         url: '',
-                        max: 50 * 1024 * 1024,
-                        handler: (files) => {
-                            if (!canConnect.value) {
+                        max: MAX_MEMORY_WRITE_BYTES,
+                        handler: async (files) => {
+                            if (!session || !resourceResolver || !currentFilePath.value) {
                                 showToast(`请先连接 ${sourceName.value}`, 'error');
-                                return;
+                                return [];
                             }
-                            const strategy = getStrategy.value;
-                            const results = [];
-                            const promises = files.map(async (file) => {
+
+                            const activeSession = session;
+                            const activeResolver = resourceResolver;
+                            const activeWorkspaceVersion = workspaceVersion;
+                            const documentPath = currentFilePath.value;
+                            const configuredUploadPath = fileUploadPath();
+                            const uploadDirectory = computePath(documentPath, true, configuredUploadPath);
+                            const results = await Promise.all(Array.from(files).map(async (file) => {
+                                const path = computePath(uploadDirectory, false, file.name);
+                                let committed = false;
                                 try {
-                                    const curPath = currentFilePath.value;
-                                    const uploadPath = computePath(curPath, true, strategy.fileUploadPath());
-                                    const url = await strategy.uploadFile(uploadPath, file);
-                                    results.push({url, name: file.name});
+                                    await activeSession.stageBlob(path, file, {mimeType: file.type});
+                                    await activeSession.commit(path, {
+                                        message: `Upload ${file.name} via SimpleServer MdEditor`
+                                    });
+                                    committed = true;
+
+                                    if (activeWorkspaceVersion !== workspaceVersion || documentPath !== currentFilePath.value) {
+                                        return null;
+                                    }
+
+                                    const markdownPath = relativePathFromFile(documentPath, path);
+                                    activeResolver.invalidate(path, {source: activeSession, view: 'effective'});
+                                    let resource;
+                                    try {
+                                        resource = await activeResolver.acquire(path, {
+                                            source: activeSession,
+                                            view: 'effective'
+                                        });
+                                    } catch (error) {
+                                        console.warn(`Resolve uploaded resource failed: ${path}`, error);
+                                        if (activeWorkspaceVersion !== workspaceVersion || documentPath !== currentFilePath.value) return null;
+                                        return {
+                                            name: file.name,
+                                            url: markdownPath,
+                                            isImage: FileUtils.isImageFile(file)
+                                        };
+                                    }
+                                    if (activeWorkspaceVersion !== workspaceVersion || documentPath !== currentFilePath.value) {
+                                        resource.release();
+                                        return null;
+                                    }
+
+                                    currentResourceHandles.push(resource);
+                                    currentFilePathMapping.value[resource.url] = markdownPath;
+                                    return {
+                                        name: file.name,
+                                        url: resource.url,
+                                        isImage: FileUtils.isImageFile(file)
+                                    };
                                 } catch (error) {
+                                    if (!committed) activeSession.revert(path);
                                     console.error('Upload failed:', error);
                                     showToast(`上传 ${file.name} 失败: ${error.message}`, 'error');
+                                    return null;
                                 }
-                            });
-                            Promise.all(promises).then(async () => {
-                                for (const result of results) {
-                                    let fileUrl = result.url;
-                                    if (isFilePath(fileUrl)) {
-                                        try {
-                                            const filePath = computePath(currentFilePath.value, true, fileUrl);
-                                            const convertFileUrl = await strategy.convertFilePath(filePath);
-                                            if (convertFileUrl && convertFileUrl !== filePath) {
-                                                currentFilePathMapping.value[convertFileUrl] = fileUrl;
-                                                fileUrl = convertFileUrl;
-                                            }
-                                        } catch (error) {
-                                            console.error('Convert file path failed:', error);
-                                        }
-                                    }
-                                    vditor.insertValue(`\n![${result.name}](${fileUrl})\n`);
-                                }
-                            });
-                            return results;
+                            }));
+
+                            const completed = results.filter(Boolean);
+                            for (const result of completed) {
+                                const markdown = result.isImage
+                                    ? `![${result.name}](${result.url})`
+                                    : `[${result.name}](${result.url})`;
+                                vditor.insertValue(`\n${markdown}\n`);
+                            }
+                            if (completed.length > 0) await refreshFileTree();
+                            return completed;
                         }
                     },
                     preview: {
@@ -1329,11 +1053,14 @@ export default {
                         markdown: {}
                     },
                     input: () => {
+                        editorInputVersion += 1;
                         if (currentFilePath.value) {
                             isDirty.value = true;
                         }
                     },
                     after: () => {
+                        vditorReady = true;
+                        setVditorContent(pendingVditorContent);
                     }
                 });
 
@@ -1344,7 +1071,7 @@ export default {
                 if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (currentFilePath.value && isDirty.value) {
+                    if (currentFilePath.value && isDirty.value && !isSaving.value) {
                         saveMarkdownFile();
                     }
                 }
@@ -1352,21 +1079,36 @@ export default {
 
             const saveMarkdownFile = async () => {
                 const path = currentFilePath.value;
-                if (!path || !vditor) return;
+                const activeSession = session;
+                const activeWorkspaceVersion = workspaceVersion;
+                if (!path || !vditor || !activeSession) return;
 
                 isSaving.value = true;
                 try {
                     let content = vditor.getMarkdown ? vditor.getMarkdown() : vditor.getValue();
-                    const strategy = getStrategy.value;
+                    const saveInputVersion = editorInputVersion;
                     const processedContent = await revertMarkdownFilePath(path, content, currentFilePathMapping.value);
-                    await strategy.saveFile(path, processedContent);
+                    await activeSession.stageText(path, processedContent, {mimeType: 'text/markdown'});
+                    await activeSession.commit(path, {
+                        message: `Update ${path} via SimpleServer MdEditor`
+                    });
 
-                    isDirty.value = false;
-                    lastSaved.value = formatTime(new Date());
-                    showToast('保存成功!', 'success');
+                    if (activeSession === session && activeWorkspaceVersion === workspaceVersion && path === currentFilePath.value) {
+                        const hasNewChanges = editorInputVersion !== saveInputVersion;
+                        isDirty.value = hasNewChanges;
+                        lastSaved.value = formatTime(new Date());
+                        showToast(hasNewChanges ? '已保存提交时的内容，当前仍有未保存修改' : '保存成功!', hasNewChanges ? 'info' : 'success');
+                    }
                 } catch (error) {
-                    if (error.message.includes('409')) {
-                        showToast('保存失败：文件已被修改，请刷新后重试', 'error');
+                    if (activeSession !== session || activeWorkspaceVersion !== workspaceVersion) return;
+                    if (error?.code === FileConflictError.code) {
+                        try {
+                            await activeSession.refreshChangeBase(path);
+                            showToast('保存失败：文件已被修改，当前内容已保留，请再次保存', 'error');
+                        } catch (refreshError) {
+                            console.error('Refresh conflicted file failed:', refreshError);
+                            showToast('保存失败：文件已被修改，请刷新后重试', 'error');
+                        }
                     } else {
                         showToast(`保存失败: ${error.message}`, 'error');
                     }
@@ -1376,52 +1118,64 @@ export default {
             };
 
             const createNewFile = async () => {
-                if (!newFilePath.value) return;
+                const activeSession = session;
+                if (!newFilePath.value || !activeSession) return;
 
-                let path = newFilePath.value;
-                if (!path.endsWith('.md')) {
-                    path += '.md';
-                }
-
-                const content = '';
+                let path = '';
 
                 try {
-                    const strategy = getStrategy.value;
-                    await strategy.createFile(path, content);
+                    path = normalizeFilePath(newFilePath.value.trim());
+                    if (!path) throw new Error('文件路径不能为空');
+                    if (!path.endsWith('.md')) path += '.md';
+                    await activeSession.stageText(path, '', {mimeType: 'text/markdown', createOnly: true});
+                    await activeSession.commit(path, {
+                        message: `Create ${path} via SimpleServer MdEditor`
+                    });
 
+                    if (activeSession !== session) return;
                     showNewFileModal.value = false;
                     newFilePath.value = '';
                     await refreshFileTree();
                     await selectFile(path);
                     showToast('文件创建成功!', 'success');
                 } catch (error) {
-                    showToast(`创建失败: ${error.message}`, 'error');
+                    if (path) activeSession.revert(path);
+                    if (activeSession === session) showToast(`创建失败: ${error.message}`, 'error');
                 }
             };
 
             const deleteFile = async (path) => {
                 if (!path) return;
                 if (!confirm(`确定要删除文件 ${path} 吗？`)) return;
+                const activeSession = session;
+                if (!activeSession) return;
 
                 try {
-                    const strategy = getStrategy.value;
-                    await strategy.deleteFile(path);
+                    await activeSession.stageDelete(path);
+                    await activeSession.commit(path, {
+                        message: `Delete ${path} via SimpleServer MdEditor`
+                    });
 
+                    if (activeSession !== session) return;
                     if (currentFilePath.value === path) {
-                        resetCurrentFileInfo();
-                        setVditorContent('');
+                        resetCurrentFileInfo({revertChange: false});
                     }
                     await refreshFileTree();
                     showToast('文件删除成功!', 'success');
                 } catch (error) {
-                    showToast(`删除失败: ${error.message}`, 'error');
+                    if (activeSession !== session) return;
+                    if (error?.code === FileConflictError.code) {
+                        activeSession.revert(path);
+                        showToast('删除失败：文件已被修改，请刷新后重试', 'error');
+                    } else {
+                        showToast(`删除失败: ${error.message}`, 'error');
+                    }
                 }
             };
 
-            const tryConnectToMdSource = () => {
+            const tryConnectToMdSource = async () => {
                 if (mdSource.value === 'github' && githubConfig.value.token && githubConfig.value.repo && githubConfig.value.branch) {
-                    showConfigModal.value = false;
-                    connect();
+                    showConfigModal.value = !(await connect());
                 } else {
                     showConfigModal.value = true;
                 }
@@ -1448,7 +1202,7 @@ export default {
                 loadConfig();
                 try {
                     await initVditor();
-                    tryConnectToMdSource();
+                    await tryConnectToMdSource();
                 } catch (error) {
                     console.error('Failed to initialize Vditor:', error);
                     showToast(`Markdown 编辑器加载失败: ${error.message}`, 'error');
@@ -1457,6 +1211,8 @@ export default {
 
             onBeforeUnmount(() => {
                 disableEditorPwa?.();
+                vditorReady = false;
+                disposeWorkspace();
                 window.removeEventListener('keydown', handleKeyDown, {capture: true});
             });
 

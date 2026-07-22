@@ -372,6 +372,14 @@
             <input v-model="settings.minimap" type="checkbox" @change="applyEditorOptions" />
             <span>{{ tr('settings.minimap') }}</span>
           </label>
+          <label class="setting-row">
+            <span>{{ tr('settings.maxMemoryReadMb') }}</span>
+            <input v-model.number="maxMemoryReadMb" type="number" min="1" step="1" />
+          </label>
+          <label class="setting-row">
+            <span>{{ tr('settings.maxMemoryWriteMb') }}</span>
+            <input v-model.number="maxMemoryWriteMb" type="number" min="1" step="1" />
+          </label>
           <section class="setting-row keybinding-card">
             <div class="setting-title-row">
               <span>{{ tr('settings.exportUrl') }}</span>
@@ -483,7 +491,7 @@
       <button type="button" role="menuitem" @click="runContextAction('new-folder')">{{ tr('action.newFolder') }}</button>
       <button type="button" role="menuitem" @click="runContextAction('new-file-pending')">{{ tr('action.newFilePending') }}</button>
       <div class="context-separator" aria-hidden="true"></div>
-      <button type="button" role="menuitem" :disabled="!contextMenu.node || contextMenu.node.deleted" @click="runContextAction('save-as')">{{ tr('action.saveAs') }}</button>
+      <button type="button" role="menuitem" :disabled="!contextMenu.node || isPathPendingDelete(contextMenu.node.path)" @click="runContextAction('save-as')">{{ tr('action.saveAs') }}</button>
       <div class="context-separator" aria-hidden="true"></div>
       <button type="button" role="menuitem" class="danger" :disabled="!contextMenu.node" @click="runContextAction('delete')">{{ tr('action.delete') }}</button>
       <button type="button" role="menuitem" class="danger" :disabled="!contextMenu.node || contextMenu.node.kind !== 'file'" @click="runContextAction('delete-pending')">{{ tr('action.deletePending') }}</button>
@@ -616,9 +624,24 @@ import { CdnUtils } from "@/shared/cdn-utils.js";
 import { FileUtils } from "@/shared/file-utils.js";
 import { MarkdownUtils } from "@/shared/markdown-utils.js";
 import { enableEditorPwa } from "@/shared/pwa-install.js";
+import {
+  createFileSystem,
+  FileConflictError,
+  FileOperationPolicy,
+  FileSession,
+  FileTooLargeError,
+  getMimeType,
+  getParentFilePath,
+  joinFilePath,
+  normalizeFilePath,
+  writeFileTarget,
+} from "@/shared/file-system/index.js";
 
 const STORAGE_KEY = "browser-code-editor-settings";
 const SETTINGS_URL_PARAM = "settings";
+const MEBIBYTE = 1024 * 1024;
+const DEFAULT_MAX_MEMORY_READ_BYTES = 20 * MEBIBYTE;
+const DEFAULT_MAX_MEMORY_WRITE_BYTES = 25 * MEBIBYTE;
 const REQUEST_PROXY_PATH = "/api/requestProxy";
 const SSH_WEBSOCKET_PATH = "/api/ssh/ws";
 const SFTP_UPLOAD_PATH = "/api/ssh/sftp/upload";
@@ -647,7 +670,7 @@ const DEFAULT_SIDEBAR_WIDTH = 300;
 const PREVIEW_MIN_WIDTH = 280;
 const PREVIEW_MAX_WIDTH = 900;
 const DEFAULT_PREVIEW_WIDTH = 480;
-const defaultSettings = { theme: "vs-dark", locale: "zh-CN", fontSize: 14, wordWrap: false, minimap: true, shortcuts: { ...vscodeShortcuts }, ai: { ...defaultAiSettings }, backend: { ...defaultBackendSettings }, ssh: { ...defaultSshSettings } };
+const defaultSettings = { theme: "vs-dark", locale: "zh-CN", fontSize: 14, wordWrap: false, minimap: true, maxMemoryReadBytes: DEFAULT_MAX_MEMORY_READ_BYTES, maxMemoryWriteBytes: DEFAULT_MAX_MEMORY_WRITE_BYTES, shortcuts: { ...vscodeShortcuts }, ai: { ...defaultAiSettings }, backend: { ...defaultBackendSettings }, ssh: { ...defaultSshSettings } };
 const AI_COMPLETION_MANUAL_PREFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_SUFFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_MAX_OUTPUT_TOKENS = 512;
@@ -669,7 +692,6 @@ const AI_TOOL_SEARCH_LINE_MAX_CHARS = 240;
 const SSH_OUTPUT_MAX_CHARS = 120000;
 const SSH_COMMAND_OUTPUT_WAIT_MS = 700;
 const SSH_CONNECT_TIMEOUT_MS = 15000;
-const WORKSPACE_MODEL_MAX_FILE_SIZE = 5 * 1024 * 1024;
 const WORKSPACE_FILE_ACTION_LIMIT = 1000;
 const WORKSPACE_REFERENCE_FILE_LIMIT = 2000;
 const WORKSPACE_REFERENCE_RESULT_LIMIT = 1000;
@@ -757,6 +779,8 @@ const messages = {
     "settings.fontSize": "字体大小",
     "settings.wordWrap": "自动换行",
     "settings.minimap": "显示 Minimap",
+    "settings.maxMemoryReadMb": "内存完整读取上限（MB）",
+    "settings.maxMemoryWriteMb": "内存完整写入上限（MB）",
     "settings.exportUrl": "导出设置 URL",
     "settings.copyExportUrl": "复制导出 URL",
     "settings.exportUrlHint": "导出 URL 会包含完整设置 JSON，包括 API Key。只分享给可信对象。访问带 settings 参数的 URL 时会询问是否覆盖本地设置。",
@@ -986,6 +1010,7 @@ const messages = {
     "error.invalidPath": "路径不合法",
     "error.invalidName": "名称不合法",
     "error.unsupportedFile": "不支持打开该文件类型",
+    "error.fileTooLarge": "文件过大：{path}，实际 {size}，限制 {limit}",
     "shortcut.save": "保存",
     "shortcut.format": "格式化文档",
     "shortcut.commandPalette": "命令面板",
@@ -1070,6 +1095,8 @@ const messages = {
     "settings.fontSize": "Font Size",
     "settings.wordWrap": "Word Wrap",
     "settings.minimap": "Show Minimap",
+    "settings.maxMemoryReadMb": "Full Memory Read Limit (MB)",
+    "settings.maxMemoryWriteMb": "Full Memory Write Limit (MB)",
     "settings.exportUrl": "Export Settings URL",
     "settings.copyExportUrl": "Copy Export URL",
     "settings.exportUrlHint": "The exported URL contains the full settings JSON, including API keys. Share it only with trusted recipients. Visiting a URL with the settings parameter asks before overriding local settings.",
@@ -1299,6 +1326,7 @@ const messages = {
     "error.invalidPath": "Invalid path",
     "error.invalidName": "Invalid name",
     "error.unsupportedFile": "Unsupported file type",
+    "error.fileTooLarge": "File too large: {path}; actual {size}, limit {limit}",
     "shortcut.save": "Save",
     "shortcut.format": "Format Document",
     "shortcut.commandPalette": "Command Palette",
@@ -1459,11 +1487,15 @@ const sshTerminalHost = ref(null);
 const editor = shallowRef(null);
 const diffEditor = shallowRef(null);
 const rootHandle = shallowRef(null);
+const fileSystem = shallowRef(null);
+const fileSession = shallowRef(null);
+let workspaceGeneration = 0;
 const rootName = ref("");
 const rootKind = ref("");
 const diskTree = shallowRef([]);
 const collapsedPaths = reactive(new Set());
 const openFiles = reactive(new Map());
+const externalWritePaths = new Set();
 const selectedChangePaths = reactive(new Set());
 const activePath = ref("");
 const activeDiffPath = ref("");
@@ -1494,6 +1526,14 @@ const dialogInput = ref(null);
 const dialogPrimaryButton = ref(null);
 const dialogState = reactive({ visible: false, mode: "alert", title: "", message: "", value: "", placeholder: "", confirmLabel: "", cancelLabel: "", tone: "default", selectOnFocus: false, closeOnBackdrop: true });
 const settings = reactive(loadSettings());
+const maxMemoryReadMb = computed({
+  get: () => bytesToMegabytes(settings.maxMemoryReadBytes),
+  set: (value) => { settings.maxMemoryReadBytes = megabytesToBytes(value, DEFAULT_MAX_MEMORY_READ_BYTES); },
+});
+const maxMemoryWriteMb = computed({
+  get: () => bytesToMegabytes(settings.maxMemoryWriteBytes),
+  set: (value) => { settings.maxMemoryWriteBytes = megabytesToBytes(value, DEFAULT_MAX_MEMORY_WRITE_BYTES); },
+});
 const sshSessions = reactive(new Map());
 const activeSshTerminalId = ref("");
 const sshRevision = ref(0);
@@ -1595,7 +1635,10 @@ watch(searchMatchCase, () => { if (searchSearched.value && searchQuery.value.tri
 watch(() => dirtyFiles.value.map((file) => file.path).join("\0"), pruneSelectedChangePaths);
 watch(previewPaneVisible, () => { nextTick(layoutVisibleEditors); });
 watch([previewPaneVisible, previewPath, previewUrlSuffix, dirtyRevision, () => settings.locale], () => { void updatePreviewContent(); });
-watch(settings, persistSettings, { deep: true });
+watch(settings, () => {
+  syncFileOperationPolicy();
+  persistSettings();
+}, { deep: true });
 
 onMounted(async () => {
   document.documentElement.lang = settings.locale;
@@ -1667,6 +1710,7 @@ onBeforeUnmount(() => {
   keybindingDisposables.splice(0).forEach((disposable) => disposable.dispose());
   inlineCompletionDisposables.splice(0).forEach((disposable) => disposable.dispose());
   abortAiCompletionRequest();
+  cancelRunningSftpTasks();
   aiSessions.forEach((session) => session.abortController?.abort());
   aiSessions.forEach((session) => disposeAiMessageResources(session.messages));
   closeAllSshSessions({ disposeTerminal: true });
@@ -2032,7 +2076,7 @@ async function getPreviewResourceUrl(value, file, objectUrls) {
     const dataUrl = await getPreviewImageDataUrl(resource);
     return dataUrl ? `${dataUrl}${resolved.hash}` : value;
   }
-  if (resource.diskFile || resource.handle) return `${await getPreviewBlobUrl(resource, objectUrls)}${resolved.hash}`;
+  if (resource.persisted || resource.isNew) return `${await getPreviewBlobUrl(resource, objectUrls)}${resolved.hash}`;
   return value;
 }
 
@@ -2041,14 +2085,14 @@ async function readPreviewFile(path) {
   const existing = openFiles.get(normalized);
   if (existing) {
     if (existing.deleted) throw new Error(`File not found: ${normalized}`);
+    assertOpenFileMemoryRead(existing);
     return existing;
   }
   const node = findNodeByPath(tree.value, normalized);
   if (!node || node.kind !== "file") throw new Error(`File not found: ${normalized}`);
-  const diskFile = await node.handle.getFile();
-  if (FileUtils.isImageFile(diskFile)) return { name: node.name, path: node.path, fileType: "image", diskFile, handle: node.handle };
-  if (!isReadableTextFile(diskFile)) return { name: node.name, path: node.path, fileType: "unsupported", diskFile, handle: node.handle };
-  return { name: node.name, path: node.path, fileType: "text", language: getLanguageId(node.name), content: await diskFile.text(), diskFile, handle: node.handle };
+  if (isImageEntry(node)) return { ...node, fileType: "image", persisted: true };
+  if (!isReadableTextEntry(node)) return { ...node, fileType: "unsupported", persisted: true };
+  return { ...node, fileType: "text", language: getLanguageId(node.name), content: await fileSession.value.readText(node.path), persisted: true };
 }
 
 function normalizePreviewFilePath(path) {
@@ -2064,8 +2108,9 @@ function getPreviewFileContent(file) {
 async function getPreviewBlobUrl(file, objectUrls) {
   if (objectUrls.has(file.path)) return objectUrls.get(file.path);
   const source = file.fileType === "image" ? getActiveImageBlob(file) : null;
-  const diskFile = source || file.diskFile || await file.handle.getFile();
-  const objectUrl = URL.createObjectURL(diskFile);
+  if (source) fileSystem.value.policy.assertMemoryRead(file.path, source.size);
+  const blob = source || await fileSession.value.readBlob(file.path);
+  const objectUrl = URL.createObjectURL(blob);
   objectUrls.set(file.path, objectUrl);
   return objectUrl;
 }
@@ -2091,8 +2136,9 @@ function getTextDataUrl(file) {
 }
 
 async function getPreviewImageDataUrl(file) {
-  const blob = getActiveImageBlob(file) || file.diskFile || await file.handle.getFile();
-  if (blob.size > PREVIEW_INLINE_IMAGE_MAX_FILE_SIZE) return "";
+  const blob = getActiveImageBlob(file) || await fileSession.value.readBlob(file.path);
+  const maxSize = Math.min(PREVIEW_INLINE_IMAGE_MAX_FILE_SIZE, fileSystem.value.policy.maxMemoryReadBytes);
+  if (blob.size > maxSize) return "";
   return FileUtils.normalizeImageDataUrl(await FileUtils.readFileAsDataUrl(blob), FileUtils.getImageMimeType(file.name, blob.type));
 }
 
@@ -2544,8 +2590,9 @@ async function submitSftpUpload(config, { localPath, remotePath, useUnsaved = fa
 async function runSftpUploadTask(task, config, normalizedLocalPath, normalizedRemotePath, uploadSource) {
   try {
     const result = await uploadSftpBody(config, normalizedRemotePath, uploadSource.body, uploadSource.size, task, task.signal);
-    completeSftpTask(task, uploadSource.size);
-    setStatus(tr("sftp.uploadCompleted", { path: normalizedLocalPath }), normalizedRemotePath);
+    if (completeSftpTask(task, uploadSource.size)) {
+      setStatus(tr("sftp.uploadCompleted", { path: normalizedLocalPath }), normalizedRemotePath);
+    }
     return { summary: `Uploaded ${normalizedLocalPath} to ${normalizedRemotePath}`, local_path: normalizedLocalPath, remote_path: normalizedRemotePath, size: result?.data?.size ?? uploadSource.size, result };
   } catch (error) {
     failSftpTask(task, error);
@@ -2557,18 +2604,21 @@ async function submitSftpDownload(config, { localPath, remotePath } = {}) {
   validateSftpReady();
   const normalizedLocalPath = normalizeWorkspacePath(localPath);
   const normalizedRemotePath = normalizeSftpRemotePath(remotePath);
+  const opened = openFiles.get(normalizedLocalPath);
+  if (opened?.dirty) throw new Error(`Local file has unsaved changes: ${normalizedLocalPath}`);
+  const workspace = captureWorkspace();
   const task = createSftpTask("download", config, normalizedLocalPath, normalizedRemotePath, 0);
   setStatus(tr("sftp.downloadStarted", { path: normalizedRemotePath }), normalizedLocalPath);
-  void runSftpDownloadTask(task, config, normalizedLocalPath, normalizedRemotePath);
+  void runSftpDownloadTask(task, config, normalizedLocalPath, normalizedRemotePath, workspace);
   return formatSftpTaskForTool(task, "SFTP download submitted");
 }
 
-async function runSftpDownloadTask(task, config, normalizedLocalPath, normalizedRemotePath) {
+async function runSftpDownloadTask(task, config, normalizedLocalPath, normalizedRemotePath, workspace) {
   try {
-    const size = await downloadSftpToWorkspace(config, normalizedRemotePath, normalizedLocalPath, task, task.signal);
-    completeSftpTask(task, size);
-    await refreshTree();
-    setStatus(tr("sftp.downloadCompleted", { path: normalizedRemotePath }), normalizedLocalPath);
+    const size = await downloadSftpToWorkspace(config, normalizedRemotePath, normalizedLocalPath, task, task.signal, workspace);
+    if (completeSftpTask(task, size)) {
+      setStatus(tr("sftp.downloadCompleted", { path: normalizedRemotePath }), normalizedLocalPath);
+    }
     return { summary: `Downloaded ${normalizedRemotePath} to ${normalizedLocalPath}`, local_path: normalizedLocalPath, remote_path: normalizedRemotePath, size };
   } catch (error) {
     failSftpTask(task, error);
@@ -2588,25 +2638,10 @@ function normalizeSftpRemotePath(path) {
 }
 
 async function getWorkspaceUploadSource(path, useUnsaved) {
-  const opened = openFiles.get(path);
-  if (useUnsaved && opened?.dirty && isTextFileState(opened) && !opened.deleted) {
-    const body = new Blob([opened.model.getValue()], { type: getPreviewMimeType(opened) });
-    return { body, size: body.size };
-  }
-  if (useUnsaved && opened?.dirty && opened.fileType === "image" && !opened.deleted) {
-    const body = getActiveImageBlob(opened);
-    if (!body) throw new Error(`Image data is unavailable: ${path}`);
-    return { body, size: body.size };
-  }
-  if (opened?.handle && !opened.deleted) {
-    const diskFile = await opened.handle.getFile();
-    return { body: diskFile, size: diskFile.size };
-  }
-  if (opened?.isNew && !opened.handle) throw new Error(`File has no saved disk content: ${path}`);
-  const node = findNodeByPath(tree.value, path);
-  if (!node || node.kind !== "file" || !node.handle) throw new Error(`File not found: ${path}`);
-  const diskFile = await node.handle.getFile();
-  return { body: diskFile, size: diskFile.size };
+  const openedFile = openFiles.get(path);
+  if (useUnsaved && openedFile) await awaitLatestStage(openedFile);
+  const body = await fileSession.value.readBlob(path, { view: useUnsaved ? "effective" : "base" });
+  return { body, size: body.size };
 }
 
 function createSftpTask(type, config, localPath, remotePath, total = 0) {
@@ -2630,11 +2665,12 @@ function createSftpTask(type, config, localPath, remotePath, total = 0) {
 }
 
 function completeSftpTask(task, total = task.total) {
-  if (task.status === "cancelled") return;
+  if (task.status === "cancelled") return false;
   task.status = "completed";
   task.loaded = Number(total) || task.loaded;
   task.total = Number(total) || task.total || task.loaded;
   task.cancel = null;
+  return true;
 }
 
 function failSftpTask(task, error) {
@@ -2736,14 +2772,18 @@ function uploadSftpBody(config, remotePath, body, size, task, externalSignal) {
   });
 }
 
-async function downloadSftpToWorkspace(config, remotePath, localPath, task, externalSignal) {
+async function downloadSftpToWorkspace(config, remotePath, localPath, task, externalSignal, workspace) {
+  const targetFile = isCurrentWorkspace(workspace) ? openFiles.get(localPath) : null;
+  if (targetFile?.dirty) throw new Error(`Local file has unsaved changes: ${localPath}`);
+  const writeKey = getExternalWriteKey(localPath, workspace.generation);
+  if (externalWritePaths.has(writeKey)) throw new Error(`Local file is already being replaced: ${localPath}`);
+  externalWritePaths.add(writeKey);
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (externalSignal) {
     if (externalSignal.aborted) abort();
     externalSignal.addEventListener("abort", abort, { once: true });
   }
-  let writable = null;
   try {
     const response = await fetch(buildSftpUrl(SFTP_DOWNLOAD_PATH, { remotePath }), {
       method: "GET",
@@ -2753,35 +2793,53 @@ async function downloadSftpToWorkspace(config, remotePath, localPath, task, exte
     });
     if (response.headers.get("content-type")?.includes("application/json")) {
       parseBackendResult(await response.text());
+      throw new Error(tr("sftp.error.backendResponse"));
     }
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    if (isCurrentWorkspace(workspace) && openFiles.get(localPath)?.dirty) throw new Error(`Local file has unsaved changes: ${localPath}`);
     task.total = Number(response.headers.get("content-length")) || 0;
-    const handle = await getFileHandleForPath(localPath, true);
-    writable = await handle.createWritable();
-    if (!response.body) {
-      const blob = await response.blob();
-      await writable.write(blob);
-      task.loaded = blob.size;
-      return blob.size;
-    }
-    const reader = response.body.getReader();
+    if (!response.body) throw new Error("Streaming response body is unavailable for SFTP download");
     let loaded = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      await writable.write(value);
-      loaded += value.byteLength;
-      task.loaded = loaded;
+    const progressStream = response.body.pipeThrough(new TransformStream({
+      transform(chunk, streamController) {
+        loaded += chunk.byteLength;
+        task.loaded = loaded;
+        streamController.enqueue(chunk);
+      },
+    }), { signal: controller.signal });
+    await workspace.fileSystem.writeStream(localPath, progressStream, {
+      createParents: true,
+      signal: controller.signal,
+      size: task.total || undefined,
+    });
+    if (isCurrentWorkspace(workspace)) {
+      try {
+        await reloadFileAfterExternalWrite(localPath, workspace);
+      } catch (error) {
+        console.warn(`SFTP download completed but workspace refresh failed: ${localPath}`, error);
+      }
     }
-    await writable.close();
-    writable = null;
     return loaded;
-  } catch (error) {
-    if (writable) await writable.abort().catch(() => {});
-    throw error;
   } finally {
+    externalWritePaths.delete(writeKey);
     if (externalSignal) externalSignal.removeEventListener("abort", abort);
   }
+}
+
+async function reloadFileAfterExternalWrite(path, workspace) {
+  if (!isCurrentWorkspace(workspace)) return;
+  const existing = openFiles.get(path);
+  if (existing?.dirty) throw new Error(`Local file has unsaved changes: ${path}`);
+  const wasActive = activePath.value === path;
+  const wasClosed = existing?.closed ?? true;
+  if (existing) removeFileState(path);
+  workspace.session.revert(path);
+  workspace.session.forgetBase(path);
+  await refreshTree();
+  if (!isCurrentWorkspace(workspace)) return;
+  if (!existing) return;
+  const reloaded = await ensureAnyFileState(path, { closed: wasClosed });
+  if (wasActive || !wasClosed) activateFile(reloaded.path);
 }
 
 function buildSftpUrl(path, params = {}) {
@@ -3017,12 +3075,16 @@ async function clearBrowserFolder() {
   if (!await showConfirm(tr("confirm.clearBrowserFolder"), { title: tr("action.clearBrowserFolder"), tone: "danger" })) return;
   try {
     const handle = await navigator.storage.getDirectory();
-    const entries = [];
-    for await (const entry of handle.entries()) entries.push(entry);
-    for (const [name, entry] of entries) {
-      await handle.removeEntry(name, { recursive: entry.kind === "directory" });
-    }
+    const temporaryFileSystem = createFileSystem({
+      type: "opfs",
+      config: { handle },
+      policy: createFileOperationPolicy(),
+    });
+    const entries = await temporaryFileSystem.list("");
+    for (const entry of entries) await temporaryFileSystem.remove(entry.path, { recursive: entry.kind === "directory" });
     if (rootKind.value === "opfs") {
+      fileSession.value.revertAll();
+      fileSession.value.forgetBase("");
       resetWorkspaceEditorState();
       await refreshTree({ collapseAll: true });
     }
@@ -3033,10 +3095,21 @@ async function clearBrowserFolder() {
 }
 
 async function activateWorkspace(handle, name, kind) {
+  const nextFileSystem = markRaw(createFileSystem({
+    type: kind,
+    config: { handle },
+    policy: createFileOperationPolicy(),
+  }));
+  const nextSession = markRaw(new FileSession({ fileSystem: nextFileSystem }));
+  await nextSession.checkAccess("", { writable: true, request: true });
+  cancelRunningSftpTasks();
+  workspaceGeneration += 1;
+  resetWorkspaceState();
   rootHandle.value = handle;
   rootName.value = name;
   rootKind.value = kind;
-  resetWorkspaceEditorState();
+  fileSystem.value = nextFileSystem;
+  fileSession.value = nextSession;
   await refreshTree({ collapseAll: true });
 }
 
@@ -3054,10 +3127,17 @@ function resetWorkspaceEditorState() {
   touchDirtyState();
 }
 
+function resetWorkspaceState() {
+  resetWorkspaceEditorState();
+  fileSession.value?.revertAll();
+  fileSession.value = null;
+  fileSystem.value = null;
+}
+
 async function refreshTree(options = {}) {
-  if (!rootHandle.value) return;
+  if (!fileSystem.value) return;
   try {
-    diskTree.value = await readDirectory(rootHandle.value, "");
+    diskTree.value = await readDirectory("");
     await refreshAgentsMdContext();
     pruneWorkspaceModels(diskTree.value);
     registerWorkspaceFileActions();
@@ -3080,7 +3160,7 @@ function collectFileNodes(nodes, maxItems = Number.POSITIVE_INFINITY) {
   const visit = (node) => {
     if (files.length >= maxItems) return;
     if (node.kind === "file") {
-      if (!node.deleted) files.push(node);
+      files.push(node);
       return;
     }
     (node.children || []).forEach(visit);
@@ -3212,8 +3292,13 @@ async function replaceAllSearchResults() {
       .sort((a, b) => b.range.startLineNumber - a.range.startLineNumber || b.range.startColumn - a.range.startColumn)
       .map((match) => ({ range: match.range, text: replacement }));
     if (!edits.length) continue;
-    file.model.pushEditOperations([], edits, () => null);
-    updateDirtyState(file);
+    let content = file.model.getValue();
+    edits.forEach((edit) => {
+      const start = file.model.getOffsetAt(edit.range.getStartPosition());
+      const end = file.model.getOffsetAt(edit.range.getEndPosition());
+      content = `${content.slice(0, start)}${edit.text}${content.slice(end)}`;
+    });
+    await replaceTextFileContent(file, content);
     replacedCount += edits.length;
   }
   setStatus(tr("search.replaced", { count: replacedCount }), searchQuery.value.trim());
@@ -3309,9 +3394,17 @@ function getOrCreatePreviewModel(content, path) {
 async function ensureWorkspaceModelForNode(node, token) {
   if (token?.isCancellationRequested || !node || node.kind !== "file") return null;
   const openFileState = openFiles.get(node.path);
-  if (openFileState && !openFileState.deleted) return isTextFileState(openFileState) ? openFileState.model : null;
+  if (openFileState && !openFileState.deleted) {
+    if (!isTextFileState(openFileState)) return null;
+    try {
+      assertOpenFileMemoryRead(openFileState);
+      return openFileState.model;
+    } catch {
+      return null;
+    }
+  }
   if (FileUtils.isImageFileName(node.name)) return null;
-  if (!node.handle) return null;
+  if (!isReadableTextEntry(node)) return null;
   const existing = monaco.editor.getModel(getWorkspaceModelUri(node.path));
   if (existing) {
     workspaceModelPaths.add(node.path);
@@ -3319,9 +3412,8 @@ async function ensureWorkspaceModelForNode(node, token) {
   }
   if (workspaceModelPromises.has(node.path)) return workspaceModelPromises.get(node.path);
   const promise = (async () => {
-    const file = await node.handle.getFile();
-    if (token?.isCancellationRequested || !isReadableTextFile(file)) return null;
-    const content = await file.text();
+    const content = await fileSession.value.readText(node.path);
+    if (token?.isCancellationRequested) return null;
     const monacoLanguage = getMonacoLanguageId(getLanguageId(node.name));
     const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
     workspaceModelPaths.add(node.path);
@@ -3366,14 +3458,14 @@ function upsertPendingFileNode(nodes, file) {
     const path = basePath ? `${basePath}/${part}` : part;
     let directory = current.find((node) => node.path === path && node.kind === "directory");
     if (!directory) {
-      directory = { name: part, path, parentPath: basePath, kind: "directory", handle: null, children: [], pending: true };
+      directory = { name: part, path, parentPath: basePath, kind: "directory", size: 0, mimeType: null, version: null, children: [] };
       current.push(directory);
     }
     current = directory.children;
     basePath = path;
   }
   const existing = current.find((node) => node.path === file.path);
-  const pendingNode = { name, path: file.path, parentPath: parts.join("/"), kind: "file", handle: file.handle, children: [], pending: true, deleted: file.deleted };
+  const pendingNode = { name, path: file.path, parentPath: parts.join("/"), kind: "file", size: file.size || 0, mimeType: file.mimeType || getMimeType(file.path), version: file.version ?? null, children: [] };
   if (existing) Object.assign(existing, pendingNode);
   else current.push(pendingNode);
 }
@@ -3383,13 +3475,24 @@ function sortTreeNodes(nodes) {
   nodes.forEach((node) => { if (node.children?.length) sortTreeNodes(node.children); });
 }
 
-async function readDirectory(directoryHandle, basePath) {
+async function readDirectory(basePath, state = { count: 0 }) {
   const nodes = [];
-  for await (const [name, handle] of directoryHandle.entries()) {
-    if (shouldHideName(name)) continue;
-    const path = basePath ? `${basePath}/${name}` : name;
-    const node = { name, path, parentPath: basePath, kind: handle.kind, handle: markRaw(handle), children: [] };
-    if (handle.kind === "directory") node.children = await readDirectory(handle, path);
+  const entries = await fileSystem.value.list(basePath);
+  for (const entry of entries) {
+    if (shouldHideName(entry.name)) continue;
+    state.count += 1;
+    if (state.count > fileSystem.value.policy.maxWalkEntries) break;
+    const node = {
+      name: entry.name,
+      path: entry.path,
+      parentPath: basePath,
+      kind: entry.kind,
+      size: Number(entry.size) || 0,
+      mimeType: entry.mimeType || null,
+      version: entry.version ?? null,
+      children: [],
+    };
+    if (entry.kind === "directory") node.children = await readDirectory(entry.path, state);
     nodes.push(node);
   }
   sortTreeNodes(nodes);
@@ -3404,19 +3507,16 @@ async function openFile(node) {
       activateFile(node.path);
       return openFiles.get(node.path);
     }
-    const file = await node.handle.getFile();
-    if (FileUtils.isImageFile(file)) return openImageFile(node, file);
-    if (!isReadableTextFile(file)) return openUnsupportedFile(node, file);
-    const content = await file.text();
+    if (isImageEntry(node)) return openImageFile(node, await fileSession.value.readBlob(node.path, { adoptBase: true }));
+    if (!isReadableTextEntry(node)) return openUnsupportedFile(node);
+    const content = await fileSession.value.readText(node.path, { adoptBase: true });
     const language = getLanguageId(node.name);
     const monacoLanguage = getMonacoLanguageId(language);
     const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
     workspaceModelPaths.delete(node.path);
     const originalModel = createOriginalModel(content, monacoLanguage, node.path);
-    const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "text", model, originalModel, savedValue: content, dirty: false, closed: false, language, monacoLanguage };
-    fileState.modelContentDisposable = model.onDidChangeContent(() => {
-      updateDirtyState(fileState);
-    });
+    const fileState = { name: node.name, path: node.path, fileType: "text", model, originalModel, savedValue: content, lastLegalValue: content, lastStagedValue: content, dirty: false, closed: false, language, monacoLanguage, isNew: false, persisted: true, deleted: false, size: node.size, mimeType: node.mimeType || getMimeType(node.path), version: node.version };
+    attachTextModelListener(fileState);
     openFiles.set(node.path, fileState);
     activateFile(node.path);
     setStatus(tr("status.openedFile", { name: node.name }), getLanguageLabel(language));
@@ -3436,7 +3536,7 @@ function openImageFile(node, file) {
 
 function createImageFileState(node, file, options = {}) {
   const blob = markRaw(file);
-  const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "image", blob, savedBlob: blob, objectUrl: URL.createObjectURL(blob), size: blob.size, mimeType: blob.type || FileUtils.getImageMimeType(node.name), dirty: false, closed: options.closed ?? true, language: "plaintext", monacoLanguage: "plaintext", isNew: false, deleted: false };
+  const fileState = { name: node.name, path: node.path, fileType: "image", blob, savedBlob: blob, objectUrl: URL.createObjectURL(blob), size: blob.size, mimeType: blob.type || node.mimeType || FileUtils.getImageMimeType(node.name), dirty: false, closed: options.closed ?? true, language: "plaintext", monacoLanguage: "plaintext", isNew: false, persisted: true, deleted: false, version: node.version };
   fileState.model = getOrCreatePreviewModel(getReadonlyPreviewContent(fileState), node.path);
   openFiles.set(node.path, fileState);
   touchDirtyState();
@@ -3457,15 +3557,26 @@ function setImageFileBlob(file, blob) {
   refreshReadonlyPreviewModel(file);
 }
 
-function openUnsupportedFile(node, file) {
-  const fileState = createUnsupportedFileState(node, file, { closed: false });
+async function stageImageFileBlob(file, blob, options = {}) {
+  fileSystem.value.policy.assertMemoryWrite(file.path, blob.size);
+  await queueFileStage(file, (session) => session.stageBlob(file.path, blob, {
+    mimeType: blob.type || file.mimeType,
+    createOnly: options.createOnly === true,
+  }));
+  setImageFileBlob(file, blob);
+  file.deleted = false;
+  updateDirtyState(file);
+}
+
+function openUnsupportedFile(node) {
+  const fileState = createUnsupportedFileState(node, { closed: false });
   activateFile(node.path);
-  setStatus(tr("status.openedFile", { name: node.name }), `${tr("unsupportedFile.type")} | ${FileUtils.formatFileSize(file.size)}`);
+  setStatus(tr("status.openedFile", { name: node.name }), `${tr("unsupportedFile.type")} | ${FileUtils.formatFileSize(node.size)}`);
   return fileState;
 }
 
-function createUnsupportedFileState(node, file, options = {}) {
-  const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "unsupported", size: file.size, mimeType: file.type, dirty: false, closed: options.closed ?? true, language: "plaintext", monacoLanguage: "plaintext", isNew: false, deleted: false };
+function createUnsupportedFileState(node, options = {}) {
+  const fileState = { name: node.name, path: node.path, fileType: "unsupported", size: node.size, mimeType: node.mimeType, dirty: false, closed: options.closed ?? true, language: "plaintext", monacoLanguage: "plaintext", isNew: false, persisted: true, deleted: false, version: node.version };
   fileState.model = getOrCreatePreviewModel(getReadonlyPreviewContent(fileState), node.path);
   openFiles.set(node.path, fileState);
   touchDirtyState();
@@ -3603,9 +3714,28 @@ async function saveActiveFile() {
 async function saveFile(file, options = {}) {
   const refresh = options.refresh ?? true;
   const updateStatus = options.status ?? true;
+  await awaitLatestStage(file);
+  if (!file.deleted && !isTextFileState(file) && file.fileType !== "image") {
+    if (updateStatus) setStatus(tr("error.unsupportedFile"), file.path);
+    return false;
+  }
+  const committedChange = fileSession.value.getChange(file.path);
+  let result;
+  try {
+    result = await fileSession.value.commit(file.path);
+  } catch (error) {
+    if (error?.code === FileConflictError.code) {
+      try {
+        await refreshConflictedFileBase(file);
+      } catch (refreshError) {
+        console.error("Failed to refresh conflicted file base", refreshError);
+      }
+    }
+    throw error;
+  }
+  const hasPendingChange = fileSession.value.hasChange(file.path);
   if (file.deleted) {
     const path = file.path;
-    await removeFileFromDisk(path);
     removeFileState(path);
     touchDirtyState();
     if (refresh) await refreshTree();
@@ -3613,36 +3743,74 @@ async function saveFile(file, options = {}) {
     return true;
   }
   if (file.fileType === "image") {
-    const blob = getActiveImageBlob(file);
-    if (!blob) throw new Error(`Image data is unavailable: ${file.path}`);
-    if (!file.handle) file.handle = markRaw(await getFileHandleForPath(file.path, true));
-    await writeFileHandle(file.handle, blob);
-    file.savedBlob = blob;
-    file.isNew = false;
-    updateDirtyState(file);
-  } else if (!isTextFileState(file)) {
-    if (updateStatus) setStatus(tr("error.unsupportedFile"), file.path);
-    return false;
+    file.savedBlob = committedChange?.dataType === "blob" ? committedChange.value : getActiveImageBlob(file);
   } else {
-    if (!file.handle) file.handle = markRaw(await getFileHandleForPath(file.path, true));
-    const writable = await file.handle.createWritable();
-    await writable.write(file.model.getValue());
-    await writable.close();
-    file.savedValue = file.model.getValue();
+    file.savedValue = committedChange?.dataType === "text" ? committedChange.value : file.model.getValue();
+    if (!hasPendingChange) {
+      file.lastLegalValue = file.savedValue;
+      file.lastStagedValue = file.savedValue;
+    }
     file.originalModel?.setValue(file.savedValue);
-    file.isNew = false;
-    file.dirty = false;
   }
+  file.isNew = false;
+  file.persisted = true;
+  file.version = result?.version ?? file.version;
+  updateDirtyState(file);
   if (refresh) await refreshTree();
   if (file.closed && !file.dirty) {
     removeFileState(file.path);
   } else {
     openFiles.set(file.path, file);
   }
-  selectedChangePaths.delete(file.path);
+  if (!file.dirty) selectedChangePaths.delete(file.path);
   touchDirtyState();
-  if (updateStatus) setStatus(tr("status.savedFile", { name: file.name }), new Date().toLocaleTimeString(settings.locale));
+  if (updateStatus) setStatus(tr("status.savedFile", { name: file.name }), file.dirty ? tr("status.unsaved") : new Date().toLocaleTimeString(settings.locale));
   return true;
+}
+
+async function refreshConflictedFileBase(file) {
+  const activeSession = fileSession.value;
+  let baseEntry = null;
+  let latestValue = null;
+  let missing = false;
+  try {
+    const opened = await activeSession.openRead(file.path, { view: "base" });
+    activeSession.policy.assertMemoryRead(file.path, opened.size);
+    const blob = opened.blob || await new Response(opened.stream).blob();
+    activeSession.policy.assertMemoryRead(file.path, blob.size);
+    baseEntry = opened;
+    latestValue = isTextFileState(file)
+      ? new TextDecoder("utf-8").decode(await blob.arrayBuffer())
+      : blob;
+  } catch (error) {
+    if (error?.code !== "FILE_NOT_FOUND") throw error;
+    missing = true;
+  }
+
+  const refreshedChange = await activeSession.refreshChangeBase(file.path, { baseEntry: missing ? null : baseEntry });
+  if (activeSession !== fileSession.value) return;
+  if (missing) {
+    file.isNew = true;
+    file.persisted = false;
+    file.version = null;
+    if (isTextFileState(file)) {
+      file.savedValue = "";
+      file.originalModel?.setValue("");
+    } else if (file.fileType === "image") {
+      file.savedBlob = null;
+    }
+  } else {
+    file.isNew = false;
+    file.persisted = true;
+    file.version = refreshedChange?.baseVersion ?? baseEntry?.version ?? file.version;
+    if (isTextFileState(file)) {
+      file.savedValue = latestValue;
+      file.originalModel?.setValue(latestValue);
+    } else if (file.fileType === "image") {
+      file.savedBlob = markRaw(latestValue);
+    }
+  }
+  updateDirtyState(file);
 }
 
 function changeActiveLanguage() {
@@ -3664,9 +3832,117 @@ function changeActiveLanguage() {
 
 function updateDirtyState(file) {
   const imageChanged = file.fileType === "image" && file.blob !== file.savedBlob;
+  if (isTextFileState(file)) file.size = fileSystem.value.policy.getTextSize(file.model.getValue());
   file.dirty = Boolean(file.isNew || file.deleted || imageChanged) || (isTextFileState(file) && file.model.getValue() !== file.savedValue);
   openFiles.set(file.path, file);
   touchDirtyState();
+}
+
+function attachTextModelListener(file) {
+  file.modelContentDisposable = file.model.onDidChangeContent(() => {
+    if (file.suppressStage || file.deleted) return;
+    if (externalWritePaths.has(getExternalWriteKey(file.path))) {
+      restoreLastLegalText(file);
+      reportFileOperationError(new Error(`File is being replaced by a download: ${file.path}`));
+      return;
+    }
+    const value = file.model.getValue();
+    try {
+      fileSystem.value.policy.assertMemoryWrite(file.path, fileSystem.value.policy.getTextSize(value));
+    } catch (error) {
+      restoreLastLegalText(file);
+      reportFileOperationError(error);
+      return;
+    }
+    file.lastLegalValue = value;
+    const stage = queueFileStage(file, (session) => !file.isNew && value === file.savedValue
+      ? session.revert(file.path)
+      : session.stageText(file.path, value, { mimeType: file.mimeType || getMimeType(file.path, "text/plain;charset=utf-8") }));
+    stage.catch(() => {
+      if (file.model.getValue() !== value) return;
+      file.lastLegalValue = file.lastStagedValue ?? file.savedValue;
+      restoreLastLegalText(file);
+      if (file.stagePromise === stage) {
+        file.stagePromise = Promise.resolve();
+        file.stageError = null;
+      }
+    });
+    stage.then(() => { file.lastStagedValue = value; }, () => {});
+    updateDirtyState(file);
+  });
+}
+
+function restoreLastLegalText(file) {
+  file.suppressStage = true;
+  try {
+    file.model.setValue(file.lastLegalValue ?? file.savedValue ?? "");
+  } finally {
+    file.suppressStage = false;
+  }
+  updateDirtyState(file);
+}
+
+function queueFileStage(file, operation) {
+  if (externalWritePaths.has(getExternalWriteKey(file.path))) {
+    const error = new Error(`File is being replaced by a download: ${file.path}`);
+    reportFileOperationError(error);
+    return Promise.reject(error);
+  }
+  const activeSession = fileSession.value;
+  const previous = file.stagePromise || Promise.resolve();
+  const promise = previous.catch(() => {}).then(() => {
+    if (!activeSession || activeSession !== fileSession.value) throw new Error("Workspace session changed");
+    return operation(activeSession);
+  });
+  file.stagePromise = promise;
+  promise.catch((error) => {
+    file.stageError = error;
+    reportFileOperationError(error);
+  });
+  promise.then(() => {
+    if (file.stagePromise === promise) file.stageError = null;
+  }, () => {});
+  return promise;
+}
+
+function captureWorkspace() {
+  return {
+    generation: workspaceGeneration,
+    fileSystem: fileSystem.value,
+    session: fileSession.value,
+  };
+}
+
+function isCurrentWorkspace(workspace) {
+  return workspace?.generation === workspaceGeneration
+    && workspace.fileSystem === fileSystem.value
+    && workspace.session === fileSession.value;
+}
+
+function getExternalWriteKey(path, generation = workspaceGeneration) {
+  return `${generation}:${path}`;
+}
+
+async function awaitLatestStage(file) {
+  if (file?.stagePromise) await file.stagePromise;
+  if (file?.stageError) throw file.stageError;
+}
+
+async function replaceTextFileContent(file, value) {
+  const text = String(value ?? "");
+  fileSystem.value.policy.assertMemoryWrite(file.path, fileSystem.value.policy.getTextSize(text));
+  await queueFileStage(file, (session) => !file.isNew && text === file.savedValue
+    ? session.revert(file.path)
+    : session.stageText(file.path, text, { mimeType: file.mimeType || getMimeType(file.path, "text/plain;charset=utf-8") }));
+  file.suppressStage = true;
+  try {
+    file.model.setValue(text);
+    file.lastLegalValue = text;
+    file.lastStagedValue = text;
+  } finally {
+    file.suppressStage = false;
+  }
+  updateDirtyState(file);
 }
 
 function touchDirtyState() {
@@ -3776,15 +4052,15 @@ function getDirectoryPath(path) {
 }
 
 async function saveNodeAs(node) {
-  if (!node || node.deleted) return;
+  if (!node || isPathPendingDelete(node.path)) return;
   try {
     if (node.kind === "file") {
-      const file = await getNodeExportFile(node);
       if (!window.showSaveFilePicker) {
-        downloadFile(file, node.name);
+        downloadFile(await getNodeExportBlob(node), node.name);
       } else {
         const destination = await window.showSaveFilePicker({ suggestedName: node.name });
-        await writeFileHandle(destination, file);
+        const source = await openEffectiveRead(node.path);
+        await writeFileTarget(destination, source.stream);
       }
       setStatus(tr("status.savedAs", { name: node.name }), node.path);
       return;
@@ -3797,41 +4073,49 @@ async function saveNodeAs(node) {
       return;
     }
     const destinationParent = markRaw(await window.showDirectoryPicker({ mode: "readwrite" }));
-    if (await isDirectoryInside(node.handle, destinationParent)) throw new Error(tr("error.destinationInsideSource"));
-    const existing = await getExistingDirectory(destinationParent, node.name);
-    if (existing && await isDirectoryInside(node.handle, existing)) throw new Error(tr("error.destinationInsideSource"));
+    const destinationFileSystem = markRaw(createFileSystem({
+      type: "local",
+      config: { handle: destinationParent },
+      policy: createFileOperationPolicy(),
+    }));
+    await destinationFileSystem.checkAccess("", { writable: true, request: true });
+    const destinationPath = normalizeFilePath(node.name);
+    if (await fileSystem.value.isCopyDestinationInside(node.path, destinationFileSystem, destinationPath)) throw new Error(tr("error.destinationInsideSource"));
+    const existing = await fileExists(destinationFileSystem, destinationPath);
     if (existing && !await showConfirm(tr("confirm.mergeSaveFolder", { name: node.name }), { title: tr("action.saveAs") })) return;
-    const destination = existing || await destinationParent.getDirectoryHandle(node.name, { create: true });
-    await copyTreeNodes(node.children || [], destination);
+    if (!existing) await destinationFileSystem.createDirectory(destinationPath);
+    await copyTreeNodes(node.children || [], destinationFileSystem, destinationPath);
     setStatus(tr("status.savedAs", { name: node.name }), node.path);
   } catch (error) {
     if (error.name !== "AbortError") reportError("error.saveAs", error);
   }
 }
 
-async function getNodeExportFile(node) {
-  const fileState = openFiles.get(node.path);
-  if (fileState?.deleted) throw new Error(`File is marked for deletion: ${node.path}`);
-  if (isTextFileState(fileState)) return new File([fileState.model.getValue()], node.name, { type: "text/plain;charset=utf-8" });
-  if (fileState?.fileType === "image") {
-    const blob = getActiveImageBlob(fileState);
-    if (blob) return new File([blob], node.name, { type: blob.type || FileUtils.getImageMimeType(node.name) });
-  }
-  const handle = fileState?.handle || node.handle;
-  if (!handle) throw new Error(`File handle is unavailable: ${node.path}`);
-  return handle.getFile();
+function isPathPendingDelete(path) {
+  return Boolean(path && openFiles.get(path)?.deleted);
 }
 
-async function copyTreeNodes(nodes, destination) {
+async function getNodeExportBlob(node) {
+  const fileState = openFiles.get(node.path);
+  if (fileState?.deleted) throw new Error(`File is marked for deletion: ${node.path}`);
+  if (fileState) await awaitLatestStage(fileState);
+  return fileSession.value.readBlob(node.path, { view: "effective" });
+}
+
+async function copyTreeNodes(nodes, destinationFileSystem, destinationPath) {
   for (const node of nodes) {
-    if (node.deleted) continue;
+    if (openFiles.get(node.path)?.deleted) continue;
     if (node.kind === "directory") {
-      const childDestination = await destination.getDirectoryHandle(node.name, { create: true });
-      await copyTreeNodes(node.children || [], childDestination);
+      const childDestination = joinFilePath(destinationPath, node.name);
+      await destinationFileSystem.createDirectory(childDestination, { recursive: true });
+      await copyTreeNodes(node.children || [], destinationFileSystem, childDestination);
       continue;
     }
-    const fileHandle = await destination.getFileHandle(node.name, { create: true });
-    await writeFileHandle(fileHandle, await getNodeExportFile(node));
+    const source = await openEffectiveRead(node.path);
+    await destinationFileSystem.writeStream(joinFilePath(destinationPath, node.name), source.stream, {
+      createParents: true,
+      size: source.size,
+    });
   }
 }
 
@@ -3848,25 +4132,20 @@ async function createFolderZip(node) {
 async function buildZipTree(nodes) {
   const entries = Object.create(null);
   for (const node of nodes) {
-    if (node.deleted) continue;
+    if (openFiles.get(node.path)?.deleted) continue;
     if (node.kind === "directory") {
       entries[node.name] = await buildZipTree(node.children || []);
       continue;
     }
-    entries[node.name] = new Uint8Array(await (await getNodeExportFile(node)).arrayBuffer());
+    entries[node.name] = new Uint8Array(await (await getNodeExportBlob(node)).arrayBuffer());
   }
   return entries;
 }
 
-async function writeFileHandle(handle, file) {
-  const writable = await handle.createWritable();
-  try {
-    await writable.write(file);
-    await writable.close();
-  } catch (error) {
-    if (writable.abort) await writable.abort().catch(() => {});
-    throw error;
-  }
+async function openEffectiveRead(path) {
+  const file = openFiles.get(path);
+  if (file) await awaitLatestStage(file);
+  return fileSession.value.openRead(path, { view: "effective" });
 }
 
 function downloadFile(file, name) {
@@ -3878,20 +4157,13 @@ function downloadFile(file, name) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function isDirectoryInside(source, possibleDescendant) {
-  if (!source || typeof source.resolve !== "function") return false;
+async function fileExists(targetFileSystem, path) {
   try {
-    return Array.isArray(await source.resolve(possibleDescendant));
-  } catch {
-    return false;
-  }
-}
-
-async function getExistingDirectory(parent, name) {
-  try {
-    return await parent.getDirectoryHandle(name);
+    const entry = await targetFileSystem.stat(path);
+    if (entry.kind !== "directory") throw new Error(`Destination path is not a directory: ${path}`);
+    return true;
   } catch (error) {
-    if (error.name === "NotFoundError") return null;
+    if (error?.code === "FILE_NOT_FOUND") return false;
     throw error;
   }
 }
@@ -3917,7 +4189,7 @@ async function createPendingFileFromContext(node) {
   try {
     const path = joinWorkspacePath(getContextDirectoryPath(node), name);
     if (findNodeByPath(tree.value, path) || openFiles.has(path)) throw new Error(`File already exists: ${path}`);
-    const file = createVirtualFileState(path, { closed: false });
+    const file = await createVirtualFileState(path, { closed: false });
     activateFile(file.path);
     setStatus(tr("status.pendingCreate", { path: file.path }), tr("status.unsaved"));
   } catch (error) {
@@ -3930,7 +4202,7 @@ async function createFolderFromContext(node) {
   if (!name) return;
   try {
     const path = joinWorkspacePath(getContextDirectoryPath(node), name);
-    await getDirectoryByParts(path.split("/"), true);
+    await fileSystem.value.createDirectory(path, { recursive: true });
     await refreshTree();
     setStatus(tr("status.refreshed", { name: rootName.value }), path);
   } catch (error) {
@@ -3941,7 +4213,9 @@ async function createFolderFromContext(node) {
 async function markNodeDeleted(node) {
   if (!node || node.kind !== "file") return;
   const file = openFiles.get(node.path);
-  if (file?.isNew && !file.handle) {
+  if (file?.isNew && !file.persisted) {
+    await file.stagePromise?.catch(() => {});
+    fileSession.value.revert(node.path);
     removeFileState(node.path);
     setStatus(tr("status.deleted", { path: node.path }), tr("status.unsaved"));
     return;
@@ -3976,14 +4250,21 @@ async function revertFile(path, options = {}) {
   const file = openFiles.get(path);
   if (!file || !file.dirty) return;
   if (options.confirm !== false && !await showConfirm(tr("confirm.revert", { path }), { title: tr("action.revert"), tone: "danger" })) return;
+  await file.stagePromise?.catch(() => {});
   if (file.isNew) {
+    fileSession.value.revert(path);
     removeFileState(path);
     if (options.status !== false) setStatus(tr("status.reverted", { path }), "");
     return;
   }
   file.deleted = false;
+  fileSession.value.revert(path);
   if (isTextFileState(file)) {
+    file.suppressStage = true;
     file.model.setValue(file.savedValue);
+    file.suppressStage = false;
+    file.lastLegalValue = file.savedValue;
+    file.lastStagedValue = file.savedValue;
     file.originalModel?.setValue(file.savedValue);
   } else if (file.fileType === "image") {
     setImageFileBlob(file, file.savedBlob);
@@ -4005,7 +4286,9 @@ async function revertFile(path, options = {}) {
 async function deleteNode(node) {
   if (!node || !rootHandle.value) return;
   const pendingFile = openFiles.get(node.path);
-  if (node.kind === "file" && pendingFile?.isNew && !pendingFile.handle) {
+  if (node.kind === "file" && pendingFile?.isNew && !pendingFile.persisted) {
+    await pendingFile.stagePromise?.catch(() => {});
+    fileSession.value.revert(node.path);
     removeFileState(node.path);
     setStatus(tr("status.deleted", { path: node.path }), tr("status.unsaved"));
     return;
@@ -4018,8 +4301,7 @@ async function deleteNode(node) {
   }), { title: tr("action.delete"), tone: "danger" });
   if (!confirmed) return;
   try {
-    const parentDirectory = await getDirectoryByParts(node.parentPath ? node.parentPath.split("/") : [], false);
-    await parentDirectory.removeEntry(node.name, { recursive: node.kind === "directory" });
+    await fileSystem.value.remove(node.path, { recursive: node.kind === "directory" });
     closeOpenFilesUnderPath(node.path);
     collapsedPaths.delete(node.path);
     await refreshTree();
@@ -4169,7 +4451,7 @@ function isBackendEnabled() {
 }
 
 function isWorkspaceLoaded() {
-  return Boolean(rootHandle.value);
+  return Boolean(fileSession.value);
 }
 
 function validateBackendEnabled() {
@@ -4289,22 +4571,81 @@ async function callOpenAiImage(options, signal) {
     body = JSON.stringify({ ...common, n: 1 });
   }
   const response = await fetch(`${getAiBaseUrl()}/images/${endpoint}`, { method: "POST", headers, body, signal });
-  const data = await response.json().catch(() => ({}));
+  const data = await readBoundedJsonResponse(response, getImageJsonResponseLimit(options.outputPath));
   if (!response.ok) throw new Error(data.error?.message || data.message || response.statusText);
   const item = data.data?.[0] || data;
   let blob;
   if (item.b64_json || item.base64) {
-    blob = base64ToBlob(item.b64_json || item.base64, getImageMimeTypeForFormat(options.outputFormat));
+    const encoded = item.b64_json || item.base64;
+    assertImageOutputSize(options.outputPath, estimateBase64DecodedSize(encoded));
+    blob = base64ToBlob(encoded, getImageMimeTypeForFormat(options.outputFormat));
   } else if (item.url) {
     const imageResponse = await fetch(item.url, { signal });
     if (!imageResponse.ok) throw new Error(`Failed to download generated image: ${imageResponse.statusText}`);
-    blob = await imageResponse.blob();
+    const contentLength = Number(imageResponse.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength >= 0) assertImageOutputSize(options.outputPath, contentLength);
+    blob = await readBoundedBlobResponse(imageResponse, options.outputPath, getImageOutputLimit());
   } else {
     throw new Error("Image API response did not include b64_json or url");
   }
   if (!blob.type || blob.type === "application/octet-stream") blob = new Blob([blob], { type: getImageMimeTypeForFormat(options.outputFormat) });
-  if (blob.size > AI_IMAGE_OUTPUT_MAX_FILE_SIZE) throw new Error(`Generated image exceeds ${FileUtils.formatFileSize(AI_IMAGE_OUTPUT_MAX_FILE_SIZE)}`);
+  assertImageOutputSize(options.outputPath, blob.size);
   return blob;
+}
+
+function estimateBase64DecodedSize(value) {
+  const base64 = String(value || "").replace(/^data:[^;,]+;base64,/i, "").replace(/\s/g, "");
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0));
+}
+
+function assertImageOutputSize(path, size) {
+  const maxSize = getImageOutputLimit();
+  if (Number.isFinite(size) && size > maxSize) throw new FileTooLargeError(path || "generated-image", { size, maxSize, operation: "AI image output" });
+}
+
+function getImageOutputLimit() {
+  return Math.min(AI_IMAGE_OUTPUT_MAX_FILE_SIZE, fileSystem.value.policy.maxMemoryWriteBytes);
+}
+
+function getImageJsonResponseLimit(path) {
+  const outputLimit = getImageOutputLimit();
+  const encodedLimit = Math.ceil((outputLimit * 4) / 3) + MEBIBYTE;
+  return { path: path || "generated-image", maxSize: encodedLimit, operation: "AI image JSON response" };
+}
+
+async function readBoundedJsonResponse(response, limit) {
+  const blob = await readBoundedBlobResponse(response, limit.path, limit.maxSize, limit.operation);
+  try {
+    return JSON.parse(await blob.text());
+  } catch {
+    return {};
+  }
+}
+
+async function readBoundedBlobResponse(response, path, maxSize, operation = "AI image output") {
+  const declaredSize = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredSize) && declaredSize > maxSize) {
+    throw new FileTooLargeError(path, { size: declaredSize, maxSize, operation });
+  }
+  if (!response.body) throw new Error(`Streaming response body is unavailable for ${operation}`);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxSize) {
+        await reader.cancel().catch(() => {});
+        throw new FileTooLargeError(path, { size, maxSize, operation });
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
 }
 
 function base64ToBlob(value, mimeType) {
@@ -4890,14 +5231,13 @@ function getRootAgentsMdContent() {
 }
 
 async function readRootAgentsMdFromDisk() {
-  if (!rootHandle.value) return "";
+  if (!fileSession.value) return "";
   try {
-    const handle = await rootHandle.value.getFileHandle(AI_AGENTS_FILE_NAME);
-    const file = await handle.getFile();
-    if (!isReadableTextFile(file)) return "";
-    return await file.text();
+    const entry = await fileSession.value.stat(AI_AGENTS_FILE_NAME);
+    if (!isReadableTextEntry(entry)) return "";
+    return await fileSession.value.readText(AI_AGENTS_FILE_NAME);
   } catch (error) {
-    if (error?.name === "NotFoundError") return "";
+    if (error?.code === "FILE_NOT_FOUND") return "";
     console.warn(`Failed to load ${AI_AGENTS_FILE_NAME}:`, error);
     return "";
   }
@@ -5402,8 +5742,27 @@ function setStatus(left, right) {
 
 function reportError(messageKey, error) {
   console.error(tr(messageKey), error);
-  setStatus(tr(messageKey), error.message || "");
-  showAlert(`${tr(messageKey)}: ${error.message || error}`, { tone: "danger" });
+  const message = formatFileOperationError(error);
+  setStatus(tr(messageKey), message);
+  showAlert(`${tr(messageKey)}: ${message}`, { tone: "danger" });
+}
+
+function reportFileOperationError(error) {
+  console.error("File operation failed", error);
+  const message = formatFileOperationError(error);
+  setStatus(message, "");
+  void showAlert(message, { tone: "danger" });
+}
+
+function formatFileOperationError(error) {
+  if (error instanceof FileTooLargeError || error?.code === "FILE_TOO_LARGE") {
+    return tr("error.fileTooLarge", {
+      path: error.path || "",
+      size: FileUtils.formatFileSize(error.size),
+      limit: FileUtils.formatFileSize(error.maxSize),
+    });
+  }
+  return error?.message || String(error);
 }
 
 function beforeUnload(event) {
@@ -5500,6 +5859,8 @@ function normalizeSettings(value = {}) {
   const ai = { ...defaultAiSettings, ...(savedSettings.ai || {}) };
   const backend = { ...defaultBackendSettings, ...(savedSettings.backend || {}) };
   const ssh = { ...defaultSshSettings, ...(savedSettings.ssh || {}) };
+  savedSettings.maxMemoryReadBytes = normalizeMemoryLimit(savedSettings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES);
+  savedSettings.maxMemoryWriteBytes = normalizeMemoryLimit(savedSettings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES);
   if (!aiReasoningEfforts.includes(ai.reasoningEffort)) ai.reasoningEffort = defaultAiSettings.reasoningEffort;
   backend.enabled = Boolean(backend.enabled);
   backend.baseUrl = normalizeBackendBaseUrlValue(backend.baseUrl) || defaultBackendSettings.baseUrl;
@@ -5576,17 +5937,75 @@ function persistSettings() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
 }
 
+function normalizeMemoryLimit(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 1 ? Math.round(number) : fallback;
+}
+
+function bytesToMegabytes(value) {
+  return Math.max(1, Number((normalizeMemoryLimit(value, MEBIBYTE) / MEBIBYTE).toFixed(2)));
+}
+
+function megabytesToBytes(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 1 ? Math.round(number * MEBIBYTE) : fallback;
+}
+
+function createFileOperationPolicy() {
+  return new FileOperationPolicy({
+    maxMemoryReadBytes: settings.maxMemoryReadBytes,
+    maxMemoryWriteBytes: settings.maxMemoryWriteBytes,
+    maxListEntries: Number.MAX_SAFE_INTEGER,
+    maxWalkEntries: Number.MAX_SAFE_INTEGER,
+  });
+}
+
+function syncFileOperationPolicy() {
+  if (!fileSystem.value) return;
+  fileSystem.value.policy.maxMemoryReadBytes = normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES);
+  fileSystem.value.policy.maxMemoryWriteBytes = normalizeMemoryLimit(settings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES);
+}
+
 function shouldHideName(name) {
   return name === ".git" || name === "node_modules" || name === ".DS_Store";
 }
 
-function isReadableTextFile(file) {
-  return file.size <= WORKSPACE_MODEL_MAX_FILE_SIZE && FileUtils.isTextFile(file);
+function isImageEntry(entry) {
+  return FileUtils.isImageFile({ name: entry?.name, type: entry?.mimeType || entry?.type || "" });
+}
+
+function isReadableTextEntry(entry) {
+  if (!entry || entry.kind === "directory" || isImageEntry(entry)) return false;
+  const readable = FileUtils.isTextFile({ name: entry.name, type: entry.mimeType || entry.type || "" });
+  return readable && (!Number.isFinite(entry.size) || entry.size <= fileSystem.value.policy.maxMemoryReadBytes);
+}
+
+function assertReadableTextEntry(entry) {
+  if (!entry || entry.kind === "directory" || isImageEntry(entry) || !FileUtils.isTextFile({ name: entry.name, type: entry.mimeType || entry.type || "" })) {
+    throw new Error(`File is not readable text: ${entry?.path || entry?.name || ""}`);
+  }
+  fileSystem.value.policy.assertMemoryRead(entry.path || entry.name, entry.size);
+}
+
+function assertOpenFileMemoryRead(file) {
+  if (isTextFileState(file)) {
+    fileSystem.value.policy.assertMemoryRead(file.path, fileSystem.value.policy.getTextSize(file.model.getValue()));
+  } else if (file?.fileType === "image") {
+    const blob = getActiveImageBlob(file);
+    if (blob) fileSystem.value.policy.assertMemoryRead(file.path, blob.size);
+  }
+}
+
+function assertSpecialReadSize(path, size, businessLimit, operation) {
+  const maxSize = Math.min(businessLimit, fileSystem.value.policy.maxMemoryReadBytes);
+  if (Number.isFinite(size) && size > maxSize) throw new FileTooLargeError(path, { size, maxSize, operation });
 }
 
 function normalizeWorkspacePath(path) {
-  const normalized = decodeWorkspacePath(path).trim().replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/");
-  if (!normalized || normalized.split("/").some((part) => part === "..")) throw new Error(tr("error.invalidPath"));
+  const value = decodeWorkspacePath(path).trim().replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/");
+  if (!value || value.split("/").some((part) => part === "..")) throw new Error(tr("error.invalidPath"));
+  const normalized = normalizeFilePath(value);
+  if (!normalized) throw new Error(tr("error.invalidPath"));
   return normalized;
 }
 
@@ -5632,6 +6051,7 @@ async function ensureFileState(path, options = {}) {
   const existing = openFiles.get(normalized);
   if (existing) {
     if (!isTextFileState(existing)) throw new Error(`File is not readable text: ${normalized}`);
+    assertOpenFileMemoryRead(existing);
     existing.fileType = "text";
     return existing;
   }
@@ -5640,16 +6060,15 @@ async function ensureFileState(path, options = {}) {
     if (options.create) return createVirtualFileState(normalized, options);
     throw new Error(`File not found: ${normalized}`);
   }
-  const file = await node.handle.getFile();
-  if (!isReadableTextFile(file)) throw new Error(`File is not readable text: ${normalized}`);
-  const content = await file.text();
+  assertReadableTextEntry(node);
+  const content = await fileSession.value.readText(normalized, { adoptBase: true });
   const language = getLanguageId(node.name);
   const monacoLanguage = getMonacoLanguageId(language);
   const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
   workspaceModelPaths.delete(node.path);
   const originalModel = createOriginalModel(content, monacoLanguage, node.path);
-  const fileState = { name: node.name, path: node.path, handle: markRaw(node.handle), fileType: "text", model, originalModel, savedValue: content, dirty: false, closed: options.closed ?? true, language, monacoLanguage, isNew: false, deleted: false };
-  fileState.modelContentDisposable = model.onDidChangeContent(() => updateDirtyState(fileState));
+  const fileState = { name: node.name, path: node.path, fileType: "text", model, originalModel, savedValue: content, lastLegalValue: content, lastStagedValue: content, dirty: false, closed: options.closed ?? true, language, monacoLanguage, isNew: false, persisted: true, deleted: false, size: node.size, mimeType: node.mimeType || getMimeType(node.path), version: node.version };
+  attachTextModelListener(fileState);
   openFiles.set(node.path, fileState);
   touchDirtyState();
   return fileState;
@@ -5672,13 +6091,12 @@ async function ensureAnyFileState(path, options = {}) {
     if (options.create) return createVirtualFileState(normalized, options);
     throw new Error(`File not found: ${normalized}`);
   }
-  const diskFile = await node.handle.getFile();
-  if (FileUtils.isImageFile(diskFile)) return createImageFileState(node, diskFile, options);
-  if (!isReadableTextFile(diskFile)) return createUnsupportedFileState(node, diskFile, options);
+  if (isImageEntry(node)) return createImageFileState(node, await fileSession.value.readBlob(normalized, { adoptBase: true }), options);
+  if (!isReadableTextEntry(node)) return createUnsupportedFileState(node, options);
   return ensureFileState(normalized, options);
 }
 
-function createVirtualFileState(path, options = {}) {
+async function createVirtualFileState(path, options = {}) {
   const name = path.split("/").pop();
   const content = String(options.content ?? "");
   const language = getLanguageId(name);
@@ -5686,9 +6104,19 @@ function createVirtualFileState(path, options = {}) {
   const model = getOrCreateWorkspaceModel(content, monacoLanguage, path, true);
   workspaceModelPaths.delete(path);
   const originalModel = createOriginalModel("", monacoLanguage, path);
-  const fileState = { name, path, handle: null, fileType: "text", model, originalModel, savedValue: "", dirty: true, closed: options.closed ?? true, language, monacoLanguage, isNew: true, deleted: false };
-  fileState.modelContentDisposable = model.onDidChangeContent(() => updateDirtyState(fileState));
+  const fileState = { name, path, fileType: "text", model, originalModel, savedValue: "", lastLegalValue: content, lastStagedValue: "", dirty: true, closed: options.closed ?? true, language, monacoLanguage, isNew: true, persisted: false, deleted: false, size: fileSystem.value.policy.getTextSize(content), mimeType: getMimeType(path, "text/plain;charset=utf-8"), version: null };
+  attachTextModelListener(fileState);
   openFiles.set(path, fileState);
+  try {
+    await queueFileStage(fileState, (session) => session.stageText(path, content, {
+      mimeType: fileState.mimeType,
+      createOnly: true,
+    }));
+    fileState.lastStagedValue = content;
+  } catch (error) {
+    removeFileState(path);
+    throw error;
+  }
   touchDirtyState();
   return fileState;
 }
@@ -5724,17 +6152,17 @@ async function aiToolReadImage(path) {
   const opened = openFiles.get(normalized);
   let file;
   if (opened) {
-    if (opened.fileType !== "image") throw new Error(`File is not an image: ${normalized}`);
+    if (opened.fileType !== "image" || opened.deleted) throw new Error(`File is not an image: ${normalized}`);
     file = getActiveImageBlob(opened);
     if (!file) throw new Error(`Image data is unavailable: ${normalized}`);
   } else {
     const node = findNodeByPath(tree.value, normalized);
     if (!node || node.kind !== "file") throw new Error(`File not found: ${normalized}`);
-    file = await node.handle.getFile();
+    file = await fileSession.value.readBlob(normalized);
   }
-  if (!FileUtils.isImageFile(file)) throw new Error(`File is not an image: ${normalized}`);
-  if (file.size > AI_IMAGE_MAX_FILE_SIZE) throw new Error(`Image is too large: ${normalized}`);
-  const mimeType = FileUtils.getImageMimeType(file.name || normalized, file.type);
+  if (!FileUtils.isImageFile(new File([file], normalized.split("/").pop(), { type: file.type }))) throw new Error(`File is not an image: ${normalized}`);
+  assertSpecialReadSize(normalized, file.size, AI_IMAGE_MAX_FILE_SIZE, "AI image read");
+  const mimeType = FileUtils.getImageMimeType(normalized, file.type);
   const dataUrl = FileUtils.normalizeImageDataUrl(await FileUtils.readFileAsDataUrl(file), mimeType);
   return { path: normalized, mimeType, size: file.size, dataUrl };
 }
@@ -5766,12 +6194,19 @@ async function aiToolGenerateOrEditImage({ prompt, output_path: outputPath, inpu
     quality: String(quality || "auto"),
     background: String(background || "auto"),
     outputFormat: format,
+    outputPath: normalizedOutputPath,
   }, signal);
   throwIfAiAborted(signal);
   const dimensions = await readImageDimensions(blob);
   throwIfAiAborted(signal);
   const operation = input ? "edited" : "generated";
-  const file = await stageImageFile({ path: normalizedOutputPath, blob, session, signal });
+  const file = await stageImageFile({
+    path: normalizedOutputPath,
+    blob,
+    session,
+    signal,
+    createOnly: !existingTarget && !overwrite,
+  });
   const summary = tr(input ? "ai.imageEdited" : "ai.imageGenerated", { path: file.path });
   setStatus(summary, tr("status.unsaved"));
   return {
@@ -5807,18 +6242,18 @@ async function getWorkspaceImageSource(path, options = {}) {
     blob = getActiveImageBlob(opened);
   } else {
     const node = findNodeByPath(tree.value, normalized);
-    if (!node || node.kind !== "file" || !node.handle) throw new Error(`File not found: ${normalized}`);
-    blob = await node.handle.getFile();
+    if (!node || node.kind !== "file") throw new Error(`File not found: ${normalized}`);
+    blob = await fileSession.value.readBlob(normalized);
     name = node.name;
   }
   if (!blob || !FileUtils.isImageFile(new File([blob], name, { type: blob.type }))) throw new Error(`File is not an image: ${normalized}`);
   const mimeType = FileUtils.getImageMimeType(name, blob.type);
   if (options.mask) {
     if (mimeType !== "image/png") throw new Error(`Mask must be a PNG image: ${normalized}`);
-    if (blob.size > AI_IMAGE_MASK_MAX_FILE_SIZE) throw new Error(`Mask exceeds ${FileUtils.formatFileSize(AI_IMAGE_MASK_MAX_FILE_SIZE)}: ${normalized}`);
+    assertSpecialReadSize(normalized, blob.size, AI_IMAGE_MASK_MAX_FILE_SIZE, "AI image mask read");
   } else {
     if (!["image/png", "image/jpeg", "image/webp"].includes(mimeType)) throw new Error(`Image edit input must be PNG, JPEG, or WebP: ${normalized}`);
-    if (blob.size > AI_IMAGE_MAX_FILE_SIZE) throw new Error(`Image is too large: ${normalized}`);
+    assertSpecialReadSize(normalized, blob.size, AI_IMAGE_MAX_FILE_SIZE, "AI image input read");
   }
   const dimensions = await readImageDimensions(blob);
   return { path: normalized, name, blob, mimeType, ...dimensions };
@@ -5836,23 +6271,32 @@ async function readImageDimensions(blob) {
   }
 }
 
-async function stageImageFile({ path, blob, session, signal }) {
+async function stageImageFile({ path, blob, session, signal, createOnly = false }) {
   throwIfAiAborted(signal);
   let file = openFiles.get(path);
+  let createdState = false;
   if (!file) {
     const node = findNodeByPath(tree.value, path);
     if (node) {
-      const diskFile = await node.handle.getFile();
+      const diskFile = await fileSession.value.readBlob(path, { view: "base" });
       throwIfAiAborted(signal);
       if (!FileUtils.isImageFile(diskFile)) throw new Error(`Output file is not an image: ${path}`);
       file = createImageFileState(node, diskFile, { closed: false });
     } else {
       file = createVirtualImageFileState(path, blob);
+      createdState = true;
     }
   }
   throwIfAiAborted(signal);
   if (file.fileType !== "image") throw new Error(`Output file is not an image: ${path}`);
-  if (file.blob !== blob) setImageFileBlob(file, blob);
+  try {
+    if (file.blob !== blob || !fileSession.value.hasChange(path)) {
+      await stageImageFileBlob(file, blob, { createOnly });
+    }
+  } catch (error) {
+    if (createdState) removeFileState(path);
+    throw error;
+  }
   file.deleted = false;
   file.closed = false;
   if (file.isNew) file.aiCreated = true;
@@ -5865,7 +6309,7 @@ async function stageImageFile({ path, blob, session, signal }) {
 function createVirtualImageFileState(path, blob) {
   const name = path.split("/").pop();
   const imageBlob = markRaw(blob);
-  const fileState = { name, path, handle: null, fileType: "image", blob: imageBlob, savedBlob: null, objectUrl: URL.createObjectURL(imageBlob), size: imageBlob.size, mimeType: imageBlob.type || FileUtils.getImageMimeType(name), dirty: true, closed: false, language: "plaintext", monacoLanguage: "plaintext", isNew: true, deleted: false };
+  const fileState = { name, path, fileType: "image", blob: imageBlob, savedBlob: null, objectUrl: URL.createObjectURL(imageBlob), size: imageBlob.size, mimeType: imageBlob.type || FileUtils.getImageMimeType(name), dirty: true, closed: false, language: "plaintext", monacoLanguage: "plaintext", isNew: true, persisted: false, deleted: false, version: null };
   fileState.model = getOrCreatePreviewModel(getReadonlyPreviewContent(fileState), path);
   openFiles.set(path, fileState);
   touchDirtyState();
@@ -6058,7 +6502,7 @@ function safeValue(value, depth = 0, seen = []) {
     return output;
   }
   if (value instanceof Map) {
-    const entries = Array.from(value.entries()).slice(0, MAX_COLLECTION_ITEMS).map(([key, item]) => [safeValue(key, depth + 1, nextSeen), safeValue(item, depth + 1, nextSeen)]);
+    const entries = Array.from(value).slice(0, MAX_COLLECTION_ITEMS).map(([key, item]) => [safeValue(key, depth + 1, nextSeen), safeValue(item, depth + 1, nextSeen)]);
     return { type: "Map", size: value.size, entries };
   }
   if (value instanceof Set) {
@@ -6125,7 +6569,7 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, fol
     signal,
   });
   const text = await response.text();
-  const responseHeaders = Object.fromEntries(response.headers.entries());
+  const responseHeaders = Object.fromEntries(response.headers);
   const contentType = response.headers.get("content-type") || "";
   const filterScriptText = String(filterScript || "").trim();
   const filtered = Boolean(filterScriptText);
@@ -6363,7 +6807,7 @@ async function aiToolReplaceInFile({ path, old_text: oldText, new_text: newText 
   const content = file.model.getValue();
   const index = content.indexOf(oldText);
   if (index === -1) throw new Error(`Text not found in ${file.path}`);
-  file.model.setValue(`${content.slice(0, index)}${newText}${content.slice(index + oldText.length)}`);
+  await replaceTextFileContent(file, `${content.slice(0, index)}${newText}${content.slice(index + oldText.length)}`);
   markAiTouchedFile(file, session);
   updateDirtyState(file);
   setStatus(tr("status.aiChangedFile", { path: file.path }), tr("status.unsaved"));
@@ -6373,7 +6817,7 @@ async function aiToolReplaceInFile({ path, old_text: oldText, new_text: newText 
 async function aiToolReplaceInFiles({ edits } = {}, session = getActiveAiSession()) {
   if (!Array.isArray(edits) || !edits.length) throw new Error("edits is required");
   const results = [];
-  for (const [index, edit] of edits.slice(0, 50).entries()) {
+  for (const [index, edit] of edits.slice(0, 50).map((edit, index) => [index, edit])) {
     const editNumber = index + 1;
     try {
       results.push({ index, edit_number: editNumber, ok: true, ...(await aiToolReplaceInFile(edit, session)) });
@@ -6399,8 +6843,7 @@ async function aiToolWriteFile({ path, content }, session = getActiveAiSession()
   markAiTouchedFile(file, session);
   if (created) file.aiCreated = true;
   file.deleted = false;
-  file.model.setValue(String(content ?? ""));
-  updateDirtyState(file);
+  await replaceTextFileContent(file, String(content ?? ""));
   setStatus(tr("status.aiChangedFile", { path: file.path }), tr("status.unsaved"));
   return { summary: `${created ? "Created" : "Changed"} ${file.path}`, path: file.path, dirty: file.dirty, created };
 }
@@ -6408,7 +6851,9 @@ async function aiToolWriteFile({ path, content }, session = getActiveAiSession()
 async function aiToolDeleteFile(path, session = getActiveAiSession()) {
   const normalized = normalizeWorkspacePath(path);
   const file = openFiles.get(normalized);
-  if (file?.isNew && !file.handle) {
+  if (file?.isNew && !file.persisted) {
+    await file.stagePromise?.catch(() => {});
+    fileSession.value.revert(normalized);
     removeFileState(normalized);
     setStatus(tr("status.deleted", { path: normalized }), tr("status.unsaved"));
     return { summary: `Removed unsaved new file ${normalized}`, path: normalized, deleted: true, pending: false };
@@ -6433,14 +6878,21 @@ async function aiToolShowDiff(path) {
 
 async function markFileDeleted(path, options = {}) {
   const file = await ensureAnyFileState(path, { closed: options.closed ?? true });
-  if (file.isNew && !file.handle) {
+  await file.stagePromise?.catch(() => {});
+  if (file.isNew && !file.persisted) {
+    fileSession.value.revert(file.path);
     removeFileState(file.path);
     return file;
   }
+  await queueFileStage(file, (session) => session.stageDelete(file.path));
   file.deleted = true;
   file.isNew = false;
   file.closed = options.closed ?? file.closed;
-  if (isTextFileState(file)) file.model.setValue("");
+  if (isTextFileState(file)) {
+    file.suppressStage = true;
+    file.model.setValue("");
+    file.suppressStage = false;
+  }
   else refreshReadonlyPreviewModel(file);
   file.dirty = true;
   openFiles.set(file.path, file);
@@ -6450,35 +6902,13 @@ async function markFileDeleted(path, options = {}) {
   return file;
 }
 
-async function removeFileFromDisk(path) {
-  const normalized = normalizeWorkspacePath(path);
-  const parts = normalized.split("/");
-  const fileName = parts.pop();
-  const directory = await getDirectoryByParts(parts, false);
-  await directory.removeEntry(fileName);
-}
-
 async function createFileOnDisk(path) {
-  const handle = await getFileHandleForPath(path, true);
-  const writable = await handle.createWritable();
-  await writable.write("");
-  await writable.close();
-}
-
-async function getFileHandleForPath(path, create) {
   const normalized = normalizeWorkspacePath(path);
-  const parts = normalized.split("/");
-  const fileName = parts.pop();
-  const directory = await getDirectoryByParts(parts, create);
-  return markRaw(await directory.getFileHandle(fileName, { create }));
-}
-
-async function getDirectoryByParts(parts, create) {
-  let directory = rootHandle.value;
-  for (const part of parts) {
-    if (part) directory = await directory.getDirectoryHandle(part, { create });
-  }
-  return directory;
+  await fileSystem.value.writeText(normalized, "", {
+    expectedVersion: null,
+    createParents: true,
+    mimeType: getMimeType(normalized, "text/plain;charset=utf-8"),
+  });
 }
 
 function getOpenFilesUnderPath(path) {
@@ -6487,6 +6917,7 @@ function getOpenFilesUnderPath(path) {
 
 function closeOpenFilesUnderPath(path) {
   getOpenFilesUnderPath(path).forEach((file) => {
+    fileSession.value?.revert(file.path);
     disposeFileModels(file, { force: true });
     openFiles.delete(file.path);
   });
