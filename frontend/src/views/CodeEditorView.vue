@@ -660,8 +660,8 @@ import {
 const STORAGE_KEY = "browser-code-editor-settings";
 const SETTINGS_URL_PARAM = "settings";
 const MEBIBYTE = 1024 * 1024;
-const DEFAULT_MAX_MEMORY_READ_BYTES = 20 * MEBIBYTE;
-const DEFAULT_MAX_MEMORY_WRITE_BYTES = 25 * MEBIBYTE;
+const DEFAULT_MAX_MEMORY_READ_BYTES = 50 * MEBIBYTE;
+const DEFAULT_MAX_MEMORY_WRITE_BYTES = 50 * MEBIBYTE;
 const REQUEST_PROXY_PATH = "/api/requestProxy";
 const SSH_WEBSOCKET_PATH = "/api/ssh/ws";
 const SFTP_UPLOAD_PATH = "/api/ssh/sftp/upload";

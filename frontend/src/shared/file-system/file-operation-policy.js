@@ -5,8 +5,8 @@ const MEBIBYTE = 1024 * 1024;
 
 class FileOperationPolicy {
     constructor({
-        maxMemoryReadBytes = 20 * MEBIBYTE,
-        maxMemoryWriteBytes = 25 * MEBIBYTE,
+        maxMemoryReadBytes = 50 * MEBIBYTE,
+        maxMemoryWriteBytes = 50 * MEBIBYTE,
         maxListEntries = 1000,
         maxWalkEntries = 3000,
     } = {}) {

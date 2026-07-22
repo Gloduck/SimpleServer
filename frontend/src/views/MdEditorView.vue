@@ -315,7 +315,7 @@ import {
 import { enableEditorPwa } from '@/shared/pwa-install.js';
 
 const VDITOR_CDN_BASE = CdnUtils.vditor.base;
-const MAX_MEMORY_WRITE_BYTES = 25 * 1024 * 1024;
+const MAX_MEMORY_WRITE_BYTES = 50 * 1024 * 1024;
 
 function loadVditor() {
     return CdnUtils.loadVditor();

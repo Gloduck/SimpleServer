@@ -34,6 +34,12 @@ test('场景：规范化根目录相对路径并拒绝越过根目录', () => {
     assert.throws(() => normalizeFilePath('../../secret'), {code: 'INVALID_FILE_PATH'});
 });
 
+test('场景：默认内存读取和写入限制均为 50 MiB', () => {
+    const policy = new FileOperationPolicy();
+    assert.equal(policy.maxMemoryReadBytes, 50 * 1024 * 1024);
+    assert.equal(policy.maxMemoryWriteBytes, 50 * 1024 * 1024);
+});
+
 test('场景：UTF-8 内存读写限制生效且流式读取不受内存限制', async () => {
     const provider = new FakeProvider({
         'four.txt': {text: 'éé', version: 'v1'},
