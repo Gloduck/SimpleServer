@@ -179,6 +179,46 @@ test('FileSession create-only staging never overwrites an existing file', async 
     assert.equal(session.hasChange('alpha.txt'), false);
 });
 
+test('场景：overwrite 为假时已保存文件会保持原内容并返回文件已存在错误', async () => {
+    const {provider, session} = createSession();
+
+    await assert.rejects(
+        session.stageText('alpha.txt', '不应写入', {createOnly: true}),
+        FileAlreadyExistsError,
+    );
+
+    assert.equal(await provider.readText('alpha.txt'), 'alpha');
+    assert.equal(session.hasChange('alpha.txt'), false);
+});
+
+test('场景：overwrite 为真时会替换未保存文本但磁盘基线保持不变', async () => {
+    const {session} = createSession();
+
+    await session.stageText('alpha.txt', '用户未保存内容');
+    await session.stageText('alpha.txt', 'AI 输出内容');
+
+    assert.equal(await session.readText('alpha.txt', {view: 'effective'}), 'AI 输出内容');
+    assert.equal(await session.readText('alpha.txt', {view: 'base'}), 'alpha');
+    assert.equal(session.getChange('alpha.txt').status, 'modified');
+});
+
+test('场景：overwrite 为真时会取消待删除状态并写入新的文本或二进制内容', async () => {
+    const {session} = createSession();
+
+    await session.stageDelete('alpha.txt');
+    await session.stageText('alpha.txt', '恢复后的内容');
+    assert.equal(await session.readText('alpha.txt'), '恢复后的内容');
+    assert.equal(session.getChange('alpha.txt').status, 'modified');
+
+    await session.stageDelete('delete.txt');
+    await session.stageBlob('delete.txt', new Blob([new Uint8Array([1, 2, 3])], {type: 'application/octet-stream'}));
+    assert.deepEqual(
+        new Uint8Array(await (await session.readBlob('delete.txt')).arrayBuffer()),
+        new Uint8Array([1, 2, 3]),
+    );
+    assert.equal(session.getChange('delete.txt').status, 'modified');
+});
+
 test('FileSession refreshes a conflicted change base without losing staged content', async () => {
     const {provider, session} = createSession();
     await session.stageText('alpha.txt', 'local edit');

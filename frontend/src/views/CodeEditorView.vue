@@ -637,6 +637,18 @@ import {
 import { MarkdownUtils } from "@/shared/markdown-utils.js";
 import { enableEditorPwa } from "@/shared/pwa-install.js";
 import {
+  AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS,
+  AI_JAVASCRIPT_MAX_FILE_COUNT,
+  AI_JAVASCRIPT_MAX_TIMEOUT_MS,
+  createAiJavaScriptWorkerSource,
+  evaluateAiJavaScriptSize,
+  getAiJavaScriptOutputConflict,
+  normalizeAiJavaScriptTimeout,
+  requiresAiJavaScriptWorkspace,
+  resolveAiJavaScriptOutputPolicy,
+  serializeAiJavaScriptError,
+} from "@/shared/ai-javascript-runtime.js";
+import {
   createFileSystem,
   FileConflictError,
   FileOperationPolicy,
@@ -686,8 +698,6 @@ const AI_IMAGE_MAX_FILE_SIZE = 20 * 1024 * 1024;
 const AI_IMAGE_MASK_MAX_FILE_SIZE = 4 * 1024 * 1024;
 const AI_IMAGE_OUTPUT_MAX_FILE_SIZE = 25 * 1024 * 1024;
 const PREVIEW_INLINE_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
-const AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS = 2000;
-const AI_JAVASCRIPT_MAX_TIMEOUT_MS = 5000;
 const AI_JAVASCRIPT_MAX_CODE_CHARS = 20000;
 const AI_JAVASCRIPT_MAX_LOGS = 100;
 const AI_AGENTS_FILE_NAME = "AGENTS.md";
@@ -2142,7 +2152,7 @@ function getPreviewFileContent(file) {
 
 async function getPreviewBlobUrl(file, objectUrls) {
   if (objectUrls.has(file.path)) return objectUrls.get(file.path);
-  const source = file.fileType === "image" ? getActiveImageBlob(file) : null;
+  const source = getActiveBlobFile(file);
   if (source) fileSystem.value.policy.assertMemoryRead(file.path, source.size);
   const blob = source || await fileSession.value.readBlob(file.path);
   const objectUrl = URL.createObjectURL(blob);
@@ -3604,6 +3614,10 @@ function getActiveImageBlob(file) {
   return file?.fileType === "image" ? file.blob || null : null;
 }
 
+function getActiveBlobFile(file) {
+  return file?.blob instanceof Blob ? file.blob : null;
+}
+
 function setImageFileBlob(file, blob) {
   if (file?.fileType !== "image" || !(blob instanceof Blob)) throw new Error("Image data is not a Blob");
   if (file.objectUrl) URL.revokeObjectURL(file.objectUrl);
@@ -3611,6 +3625,14 @@ function setImageFileBlob(file, blob) {
   file.objectUrl = URL.createObjectURL(blob);
   file.size = blob.size;
   file.mimeType = blob.type || FileUtils.getImageMimeType(file.name);
+  refreshReadonlyPreviewModel(file);
+}
+
+function setBinaryFileBlob(file, blob) {
+  if (file?.fileType !== "unsupported" || !(blob instanceof Blob)) throw new Error("Binary data is not a Blob");
+  file.blob = markRaw(blob);
+  file.size = blob.size;
+  file.mimeType = blob.type || getMimeType(file.name);
   refreshReadonlyPreviewModel(file);
 }
 
@@ -3628,8 +3650,31 @@ async function stageImageFileBlob(file, blob, options = {}) {
   updateDirtyState(file);
 }
 
+async function stageBinaryFileBlob(file, blob, options = {}) {
+  const workspace = options.workspace || captureWorkspace();
+  assertCurrentWorkspace(workspace);
+  workspace.fileSystem.policy.assertMemoryWrite(file.path, blob.size);
+  await queueFileStage(file, (session) => session.stageBlob(file.path, blob, {
+    mimeType: blob.type || file.mimeType,
+    createOnly: options.createOnly === true,
+  }), workspace);
+  assertCurrentWorkspace(workspace);
+  setBinaryFileBlob(file, blob);
+  file.deleted = false;
+  updateDirtyState(file);
+}
+
 function createUnsupportedFileState(node, options = {}) {
   const fileState = { name: node.name, path: node.path, fileType: "unsupported", size: node.size, mimeType: node.mimeType, dirty: false, closed: options.closed ?? true, language: "plaintext", monacoLanguage: "plaintext", isNew: false, persisted: true, deleted: false, version: node.version };
+  fileState.model = getOrCreatePreviewModel(getReadonlyPreviewContent(fileState), node.path);
+  openFiles.set(node.path, fileState);
+  touchDirtyState();
+  return fileState;
+}
+
+function createBinaryFileState(node, blob, options = {}) {
+  const binaryBlob = markRaw(blob);
+  const fileState = { name: node.name, path: node.path, fileType: "unsupported", blob: binaryBlob, savedBlob: binaryBlob, size: binaryBlob.size, mimeType: binaryBlob.type || node.mimeType || getMimeType(node.path), dirty: false, closed: options.closed ?? true, language: "plaintext", monacoLanguage: "plaintext", isNew: false, persisted: true, deleted: false, version: node.version };
   fileState.model = getOrCreatePreviewModel(getReadonlyPreviewContent(fileState), node.path);
   openFiles.set(node.path, fileState);
   touchDirtyState();
@@ -3768,7 +3813,7 @@ async function saveFile(file, options = {}) {
   const refresh = options.refresh ?? true;
   const updateStatus = options.status ?? true;
   await awaitLatestStage(file);
-  if (!file.deleted && !isTextFileState(file) && file.fileType !== "image") {
+  if (!file.deleted && !isTextFileState(file) && !getActiveBlobFile(file)) {
     if (updateStatus) setStatus(tr("error.unsupportedFile"), file.path);
     return false;
   }
@@ -3795,8 +3840,8 @@ async function saveFile(file, options = {}) {
     if (updateStatus) setStatus(tr("status.deleted", { path }), new Date().toLocaleTimeString(settings.locale));
     return true;
   }
-  if (file.fileType === "image") {
-    file.savedBlob = committedChange?.dataType === "blob" ? committedChange.value : getActiveImageBlob(file);
+  if (getActiveBlobFile(file)) {
+    file.savedBlob = committedChange?.dataType === "blob" ? committedChange.value : getActiveBlobFile(file);
   } else {
     file.savedValue = committedChange?.dataType === "text" ? committedChange.value : file.model.getValue();
     if (!hasPendingChange) {
@@ -3849,7 +3894,7 @@ async function refreshConflictedFileBase(file) {
     if (isTextFileState(file)) {
       file.savedValue = "";
       file.originalModel?.setValue("");
-    } else if (file.fileType === "image") {
+    } else if (getActiveBlobFile(file)) {
       file.savedBlob = null;
     }
   } else {
@@ -3859,7 +3904,7 @@ async function refreshConflictedFileBase(file) {
     if (isTextFileState(file)) {
       file.savedValue = latestValue;
       file.originalModel?.setValue(latestValue);
-    } else if (file.fileType === "image") {
+    } else if (getActiveBlobFile(file)) {
       file.savedBlob = markRaw(latestValue);
     }
   }
@@ -3884,9 +3929,9 @@ function changeActiveLanguage() {
 }
 
 function updateDirtyState(file) {
-  const imageChanged = file.fileType === "image" && file.blob !== file.savedBlob;
+  const blobChanged = Boolean(getActiveBlobFile(file)) && file.blob !== file.savedBlob;
   if (isTextFileState(file)) file.size = fileSystem.value.policy.getTextSize(file.model.getValue());
-  file.dirty = Boolean(file.isNew || file.deleted || imageChanged) || (isTextFileState(file) && file.model.getValue() !== file.savedValue);
+  file.dirty = Boolean(file.isNew || file.deleted || blobChanged) || (isTextFileState(file) && file.model.getValue() !== file.savedValue);
   openFiles.set(file.path, file);
   touchDirtyState();
 }
@@ -4460,6 +4505,8 @@ async function revertFile(path, options = {}) {
     file.originalModel?.setValue(file.savedValue);
   } else if (file.fileType === "image") {
     setImageFileBlob(file, file.savedBlob);
+  } else if (getActiveBlobFile(file)) {
+    setBinaryFileBlob(file, file.savedBlob);
   } else {
     refreshReadonlyPreviewModel(file);
   }
@@ -5612,11 +5659,29 @@ function getAiAllToolDefinitions() {
       "All tools are visible to you, but tools with unmet requirements will fail if called. Prefer checking availability before using tools that depend on workspace, backend, or exposed SSH settings."
     ), parameters: { type: "object", properties: { names: { type: "array", items: { type: "string" }, description: "Optional tool names to check. Omit to return all tools." } } } },
     { type: "function", name: "run_javascript", description: aiToolDescription(
-      "Execute a JavaScript snippet in an isolated browser Web Worker for deterministic calculations, parsing, or transforming data supplied in input.",
-      "The code is the body of an async function with an input variable available; use return to produce the result. Console logs are captured and returned.",
-      "No DOM, editor, workspace filesystem, network, or host access is available. Pass every required value through input. Do not use this as a substitute for workspace file tools or SSH tools.",
-      "Limits: code is capped, output is sanitized/truncated, timeout defaults to 2000ms and is capped at 5000ms."
-    ), parameters: { type: "object", properties: { code: { type: "string", description: "JavaScript async function body. Example: return input.items.map(x => x * 2);" }, input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." }, timeout_ms: { type: "number", description: "Optional timeout in milliseconds. Defaults to 2000, max 5000." } }, required: ["code"] } },
+      "Execute JavaScript in an isolated browser Web Worker for calculations, parsing, data transformation, bounded HTTP requests, and declared workspace file processing.",
+      "The code is the body of an async function with input and runtime variables available. Use return for the normal result. runtime.request({ url, method, headers, body, responseType: 'text'|'json'|'bytes', followRedirect, timeoutMs }) returns { status, statusText, ok, headers, body, size, proxied, url }. Requests run inside the Worker and automatically use the backend proxy when enabled; runtime.network.proxy reports only whether proxying is active.",
+      "Declare every readable file in input_files. Declare exact output files in output_files or allowed dynamic output roots in output_directories. Use await runtime.files.readText(path), await runtime.files.readBytes(path), runtime.files.stat(path), runtime.files.writeText(path, content, mimeType), and runtime.files.writeBytes(path, bytes, mimeType). Paths are workspace-relative and there are no file aliases. File operations require an open workspace; plain scripts and direct network requests do not.",
+      "All file and response data is memory-bounded. Oversized input, downloads, or output fail without truncation or temporary storage. timeout_ms defaults to 30000ms, must be positive, and is capped at 3600000ms."
+    ), parameters: { type: "object", properties: {
+      code: { type: "string", description: "JavaScript async function body. Example: return input.items.map(x => x * 2);" },
+      input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." },
+      input_files: { type: "array", description: "Workspace files made readable to the script. Paths must be workspace-relative.", items: { type: "object", properties: {
+        path: { type: "string" },
+        type: { type: "string", enum: ["text", "bytes"], description: "How runtime.files reads this input. Defaults to text." },
+        view: { type: "string", enum: ["effective", "base"], description: "effective includes unsaved editor changes; base reads the saved file. Defaults to effective." }
+      }, required: ["path"] } },
+      output_files: { type: "array", description: "Exact workspace files the script may write.", items: { type: "object", properties: {
+        path: { type: "string" },
+        type: { type: "string", enum: ["text", "bytes"], description: "Optional required output type. When omitted, writeText or writeBytes determines it." },
+        overwrite: { type: "boolean", description: "Allow replacing existing saved or unsaved content. Defaults to false." }
+      }, required: ["path"] } },
+      output_directories: { type: "array", description: "Workspace directories under which the script may dynamically create files, for example extracted archive entries.", items: { type: "object", properties: {
+        path: { type: "string" },
+        overwrite: { type: "boolean", description: "Allow replacing existing saved or unsaved files under this directory. Defaults to false." }
+      }, required: ["path"] } },
+      timeout_ms: { type: "number", description: `Optional positive timeout in milliseconds. Defaults to ${AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS}, max ${AI_JAVASCRIPT_MAX_TIMEOUT_MS}.` }
+    }, required: ["code"] } },
     { type: "function", name: "list_files", requirements: ["workspace"], description: aiToolDescription("List workspace files and directories.", "Use path relative to workspace root. Use an empty path or '.' for the workspace root. By default only the first level is listed; set recursive to true for descendants. Use max_items to keep output concise."), parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root. '.' means workspace root." }, max_items: { type: "number", description: "Maximum items to return. Capped internally." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
     { type: "function", name: "refresh_tree", requirements: ["workspace"], description: aiToolDescription("Refresh the workspace file tree from disk.", "Use this before locating files that may have been created, deleted, renamed, downloaded, or externally changed."), parameters: { type: "object", properties: { collapse_all: { type: "boolean", description: "Whether to collapse all directories after refreshing. Defaults to false." } } } },
     { type: "function", name: "read_file", requirements: ["workspace"], description: aiToolDescription("Read a workspace text file.", "Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads. This tool only reads text-like files; binary or unsupported files will fail.", "Use max_chars to keep large files concise; default is intentionally limited."), parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "number", description: "Optional 1-based starting line number. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return." }, max_chars: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["path"] } },
@@ -5673,6 +5738,7 @@ function aiToolGetToolAvailability({ names } = {}) {
       found: true,
       available: availability.available,
       unavailable_reason: availability.reason || "",
+      ...(tool.name === "run_javascript" ? { capabilities: { files: isWorkspaceLoaded(), direct_network: true, proxy_network: isBackendEnabled() } } : {}),
       requirements: (tool.requirements || []).map((requirement) => {
         const status = getAiRequirementStatus(requirement);
         return { name: requirement, available: status.met, reason: status.met ? "" : status.reason };
@@ -5781,7 +5847,7 @@ async function runAiToolCall(call, args = {}, session = getActiveAiSession(), si
       case "read_files": return okTool(await aiToolReadFiles(args));
       case "generate_or_edit_image": return okTool(await aiToolGenerateOrEditImage(args, session, signal));
       case "search_text": return okTool(await aiToolSearchText(args));
-      case "run_javascript": return await aiToolRunJavaScript(args, signal);
+      case "run_javascript": return await aiToolRunJavaScript(args, signal, session);
       case "request_proxy": return okTool(await aiToolRequestProxy(args, signal));
       case "get_ssh_connections": return okTool(aiToolGetSshConnections());
       case "open_ssh_connection": return okTool(await aiToolOpenSshConnection(args.connection));
@@ -6201,8 +6267,8 @@ function assertReadableTextEntry(entry) {
 function assertOpenFileMemoryRead(file) {
   if (isTextFileState(file)) {
     fileSystem.value.policy.assertMemoryRead(file.path, fileSystem.value.policy.getTextSize(file.model.getValue()));
-  } else if (file?.fileType === "image") {
-    const blob = getActiveImageBlob(file);
+  } else {
+    const blob = getActiveBlobFile(file);
     if (blob) fileSystem.value.policy.assertMemoryRead(file.path, blob.size);
   }
 }
@@ -6538,7 +6604,7 @@ async function readImageDimensions(blob) {
   }
 }
 
-async function stageImageFile({ path, blob, session, signal, createOnly = false, workspace = captureWorkspace() }) {
+async function stageImageFile({ path, blob, session, signal, createOnly = false, activate = true, workspace = captureWorkspace() }) {
   assertCurrentWorkspace(workspace);
   assertFilePathAncestors(path);
   if (isExternalWritePath(path, workspace.generation)) throw new Error(`File operation is already in progress: ${path}`);
@@ -6570,11 +6636,52 @@ async function stageImageFile({ path, blob, session, signal, createOnly = false,
     throw error;
   }
   file.deleted = false;
-  file.closed = false;
+  if (activate) file.closed = false;
+  else if (createdState) file.closed = true;
   if (file.isNew) file.aiCreated = true;
   markAiTouchedFile(file, session);
   updateDirtyState(file);
-  activateFile(file.path);
+  if (activate) activateFile(file.path);
+  return file;
+}
+
+async function stageBinaryFile({ path, blob, session, signal, workspace = captureWorkspace() }) {
+  assertCurrentWorkspace(workspace);
+  assertFilePathAncestors(path);
+  if (isExternalWritePath(path, workspace.generation)) throw new Error(`File operation is already in progress: ${path}`);
+  throwIfAiAborted(signal);
+  let file = openFiles.get(path);
+  let createdState = false;
+  if (!file) {
+    const node = findNodeByPath(tree.value, path);
+    if (node) {
+      if (node.kind !== "file" || isReadableTextEntry(node) || isImageEntry(node)) throw new Error(`Output file type does not match binary content: ${path}`);
+      const diskFile = await trackFileLoad(workspace, path, () => workspace.session.readBlob(path, { view: "base" }));
+      throwIfAiAborted(signal);
+      assertCurrentWorkspace(workspace);
+      file = createBinaryFileState(node, diskFile, { closed: true });
+    } else {
+      file = createVirtualBinaryFileState(path, blob, workspace);
+      createdState = true;
+    }
+  } else if (file.fileType === "unsupported" && !getActiveBlobFile(file)) {
+    const diskFile = await trackFileLoad(workspace, path, () => workspace.session.readBlob(path, { view: "base" }));
+    throwIfAiAborted(signal);
+    assertCurrentWorkspace(workspace);
+    file.blob = markRaw(diskFile);
+    file.savedBlob = markRaw(diskFile);
+  }
+  if (file.fileType !== "unsupported" || !getActiveBlobFile(file)) throw new Error(`Output file type does not match binary content: ${path}`);
+  try {
+    await stageBinaryFileBlob(file, blob, { createOnly: createdState, workspace });
+  } catch (error) {
+    if (createdState) removeFileState(path);
+    throw error;
+  }
+  file.deleted = false;
+  if (file.isNew) file.aiCreated = true;
+  markAiTouchedFile(file, session);
+  updateDirtyState(file);
   return file;
 }
 
@@ -6585,6 +6692,19 @@ function createVirtualImageFileState(path, blob, workspace = captureWorkspace())
   const name = path.split("/").pop();
   const imageBlob = markRaw(blob);
   const fileState = { name, path, fileType: "image", blob: imageBlob, savedBlob: null, objectUrl: URL.createObjectURL(imageBlob), size: imageBlob.size, mimeType: imageBlob.type || FileUtils.getImageMimeType(name), dirty: true, closed: false, language: "plaintext", monacoLanguage: "plaintext", isNew: true, persisted: false, deleted: false, version: null };
+  fileState.model = getOrCreatePreviewModel(getReadonlyPreviewContent(fileState), path);
+  openFiles.set(path, fileState);
+  touchDirtyState();
+  return fileState;
+}
+
+function createVirtualBinaryFileState(path, blob, workspace = captureWorkspace()) {
+  assertCurrentWorkspace(workspace);
+  assertFilePathAncestors(path);
+  if (isExternalWritePath(path, workspace.generation)) throw new Error(`File operation is already in progress: ${path}`);
+  const name = path.split("/").pop();
+  const binaryBlob = markRaw(blob);
+  const fileState = { name, path, fileType: "unsupported", blob: binaryBlob, savedBlob: null, size: binaryBlob.size, mimeType: binaryBlob.type || getMimeType(name), dirty: true, closed: true, language: "plaintext", monacoLanguage: "plaintext", isNew: true, persisted: false, deleted: false, version: null };
   fileState.model = getOrCreatePreviewModel(getReadonlyPreviewContent(fileState), path);
   openFiles.set(path, fileState);
   touchDirtyState();
@@ -6654,14 +6774,62 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
   return { summary: `${results.length} match(es)`, results };
 }
 
-async function aiToolRunJavaScript({ code, input = {}, timeout_ms: timeoutMs, result_mode: resultMode, max_output_chars: maxOutputChars } = {}, signal) {
+async function aiToolRunJavaScript({ code, input = {}, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs, result_mode: resultMode, max_output_chars: maxOutputChars } = {}, signal, session = getActiveAiSession()) {
   throwIfAiAborted(signal);
   const script = String(code || "");
-  if (!script.trim()) return { ok: false, summary: "JavaScript code is required" };
-  if (script.length > AI_JAVASCRIPT_MAX_CODE_CHARS) return { ok: false, summary: `JavaScript code is too large: ${script.length} chars` };
-  if (!window.Worker || !window.Blob || !window.URL) return { ok: false, summary: "Web Worker is not available in this browser" };
+  if (!script.trim()) return aiJavaScriptErrorResult(createAiJavaScriptError("SCRIPT_REQUIRED", "JavaScript code is required"));
+  if (script.length > AI_JAVASCRIPT_MAX_CODE_CHARS) return aiJavaScriptErrorResult(createAiJavaScriptError("SCRIPT_TOO_LARGE", `JavaScript code is too large: ${script.length} chars`, { size: script.length, maxSize: AI_JAVASCRIPT_MAX_CODE_CHARS }));
+  if (!window.Worker || !window.Blob || !window.URL) return aiJavaScriptErrorResult(createAiJavaScriptError("WORKER_UNAVAILABLE", "Web Worker is not available in this browser"));
 
-  const timeout = Math.max(100, Math.min(Number(timeoutMs) || AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS, AI_JAVASCRIPT_MAX_TIMEOUT_MS));
+  let timeout;
+  let normalizedInputs;
+  let normalizedOutputFiles;
+  let normalizedOutputDirectories;
+  try {
+    timeout = normalizeAiJavaScriptTimeout(timeoutMs);
+    normalizedInputs = normalizeAiJavaScriptInputs(inputFiles);
+    normalizedOutputFiles = normalizeAiJavaScriptOutputFiles(outputFiles);
+    normalizedOutputDirectories = normalizeAiJavaScriptOutputDirectories(outputDirectories);
+  } catch (error) {
+    return aiJavaScriptErrorResult(error);
+  }
+
+  const usesWorkspace = requiresAiJavaScriptWorkspace({ inputFiles: normalizedInputs, outputFiles: normalizedOutputFiles, outputDirectories: normalizedOutputDirectories });
+  if (usesWorkspace && !isWorkspaceLoaded()) {
+    return aiJavaScriptErrorResult(createAiJavaScriptError("WORKSPACE_REQUIRED", "File operations require an open workspace", { phase: "preflight" }));
+  }
+
+  const workspace = usesWorkspace ? captureWorkspace() : null;
+  const maxReadBytes = workspace?.fileSystem?.policy.maxMemoryReadBytes ?? normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES);
+  const maxWriteBytes = workspace?.fileSystem?.policy.maxMemoryWriteBytes ?? normalizeMemoryLimit(settings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES);
+  const limits = {
+    maxInputFileBytes: maxReadBytes,
+    maxInputTotalBytes: maxReadBytes,
+    maxDownloadBytes: maxReadBytes,
+    maxDownloadTotalBytes: maxReadBytes,
+    maxOutputFileBytes: maxWriteBytes,
+    maxOutputTotalBytes: maxWriteBytes,
+  };
+
+  let loadedInputs;
+  try {
+    if (workspace) {
+      validateAiJavaScriptOutputDeclarations(normalizedOutputFiles, normalizedOutputDirectories, workspace);
+      loadedInputs = await loadAiJavaScriptInputs(normalizedInputs, workspace, limits, signal);
+    } else {
+      loadedInputs = [];
+    }
+  } catch (error) {
+    return aiJavaScriptErrorResult(error);
+  }
+
+  const proxy = isBackendEnabled();
+  let backendBaseUrl = "";
+  try {
+    if (proxy) backendBaseUrl = getBackendBaseUrl();
+  } catch (error) {
+    return aiJavaScriptErrorResult(error);
+  }
   const logs = [];
   const startedAt = performance.now();
 
@@ -6671,156 +6839,340 @@ async function aiToolRunJavaScript({ code, input = {}, timeout_ms: timeoutMs, re
     let timer = 0;
     let settled = false;
 
-    const finish = (result) => {
-      if (settled) return;
-      settled = true;
+    const cleanup = () => {
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
       worker?.terminate();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
+      worker = null;
+      objectUrl = "";
+    };
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       resolve({ elapsed_ms: Math.round(performance.now() - startedAt), logs, ...result });
     };
 
     const abort = () => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      worker?.terminate();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      cleanup();
       reject(createAiAbortError());
     };
 
     try {
       signal?.addEventListener("abort", abort, { once: true });
       throwIfAiAborted(signal);
-      objectUrl = URL.createObjectURL(new Blob([createAiJavaScriptWorkerSource()], { type: "application/javascript" }));
+      objectUrl = URL.createObjectURL(new Blob([createAiJavaScriptWorkerSource({
+        maxLogs: AI_JAVASCRIPT_MAX_LOGS,
+        maxStringLength: AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS,
+        maxOutputStringLength: AI_TOOL_OUTPUT_HARD_MAX_CHARS,
+      })], { type: "application/javascript" }));
       worker = new Worker(objectUrl);
-      worker.onmessage = (event) => {
+      worker.onmessage = async (event) => {
         const data = event.data || {};
         if (data.type === "log") {
           logs.push(data.log);
           if (logs.length > AI_JAVASCRIPT_MAX_LOGS) logs.shift();
           return;
         }
-        if (data.type !== "done") return;
-        if (data.ok) {
-          finish({ ok: true, summary: `JavaScript completed in ${data.elapsed_ms}ms`, result: data.result });
-          return;
+        if (data.type !== "done" || settled) return;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+        worker?.terminate();
+        worker = null;
+        try {
+          if (!data.ok) {
+            finish({ ok: false, summary: `JavaScript failed: ${data.error?.message || "Unknown error"}`, error: serializeAiJavaScriptError(data.error) });
+            return;
+          }
+          const validatedOutputs = workspace
+            ? validateAiJavaScriptOutputs(data.outputFiles, normalizedOutputFiles, normalizedOutputDirectories, workspace, limits)
+            : [];
+          const stagedFiles = workspace
+            ? await stageAiJavaScriptOutputs(validatedOutputs, workspace, session)
+            : [];
+          finish({ ok: true, summary: `JavaScript completed in ${data.elapsedMs || 0}ms${stagedFiles.length ? ` and produced ${stagedFiles.length} file(s)` : ""}`, result: data.result, files: stagedFiles });
+        } catch (error) {
+          finish(aiJavaScriptErrorResult(error));
         }
-        finish({ ok: false, summary: `JavaScript failed: ${data.error?.message || "Unknown error"}`, error: data.error });
       };
       worker.onerror = (event) => {
         event.preventDefault?.();
-        finish({ ok: false, summary: `JavaScript worker error: ${event.message || "Unknown error"}`, error: { message: event.message, filename: event.filename, lineno: event.lineno, colno: event.colno } });
+        finish(aiJavaScriptErrorResult(createAiJavaScriptError("WORKER_ERROR", event.message || "Unknown JavaScript worker error", { filename: event.filename, lineno: event.lineno, colno: event.colno })));
       };
       timer = window.setTimeout(() => {
-        finish({ ok: false, summary: `JavaScript timed out after ${timeout}ms`, error: { message: `Timed out after ${timeout}ms` } });
+        finish(aiJavaScriptErrorResult(createAiJavaScriptError("SCRIPT_TIMEOUT", `JavaScript timed out after ${timeout}ms`, { phase: "execution" })));
       }, timeout);
-      worker.postMessage({ code: script, input, result_mode: resultMode, max_output_chars: maxOutputChars });
+      const transfer = loadedInputs.filter((file) => file.type === "bytes").map((file) => file.content);
+      worker.postMessage({
+        type: "run",
+        code: script,
+        input,
+        inputFiles: loadedInputs,
+        outputFiles: normalizedOutputFiles,
+        outputDirectories: normalizedOutputDirectories,
+        limits,
+        network: {
+          proxy,
+          backendBaseUrl,
+          requestTimeoutMs: Math.min(AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS, timeout),
+          maxRequestTimeoutMs: timeout,
+        },
+        resultMode,
+        maxOutputChars,
+      }, transfer);
     } catch (error) {
       if (error.name === "AbortError") {
         abort();
         return;
       }
-      finish({ ok: false, summary: error.message || String(error), error: { message: error.message || String(error) } });
+      finish(aiJavaScriptErrorResult(error));
     }
   });
 }
 
-function createAiJavaScriptWorkerSource() {
-  return String.raw`
-const MAX_LOGS = ${AI_JAVASCRIPT_MAX_LOGS};
-const MAX_STRING_LENGTH = ${AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS};
-const MAX_OUTPUT_STRING_LENGTH = ${AI_TOOL_OUTPUT_HARD_MAX_CHARS};
-const MAX_COLLECTION_ITEMS = 100;
-const MAX_DEPTH = 5;
-const nativePostMessage = self.postMessage.bind(self);
-
-Object.defineProperty(self, "postMessage", {
-  value() { throw new Error("postMessage is disabled in run_javascript"); },
-  configurable: false,
-});
-
-function clipString(value, maxLength = MAX_STRING_LENGTH) {
-  const text = String(value);
-  const limit = Math.max(1, Math.min(Number(maxLength) || MAX_STRING_LENGTH, MAX_OUTPUT_STRING_LENGTH));
-  return { text: text.slice(0, limit), text_chars: text.length, returned_chars: Math.min(text.length, limit), truncated: text.length > limit };
+function createAiJavaScriptError(code, message, details = {}) {
+  const error = new Error(message);
+  error.code = code;
+  Object.entries(details).forEach(([key, value]) => {
+    if (value !== undefined) error[key] = value;
+  });
+  return error;
 }
 
-function formatTextResult(value) {
-  if (value === undefined) return "";
-  if (typeof value === "string") return value;
+function aiJavaScriptErrorResult(error) {
+  const serialized = serializeAiJavaScriptError(error);
+  return { ok: false, summary: serialized.message, error: serialized, files_written: [] };
+}
+
+function normalizeAiJavaScriptArray(value, field) {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw createAiJavaScriptError("INVALID_ARGUMENT", `${field} must be an array`, { phase: "preflight" });
+  if (value.length > AI_JAVASCRIPT_MAX_FILE_COUNT) throw createAiJavaScriptError("FILE_COUNT_EXCEEDED", `${field} exceeds ${AI_JAVASCRIPT_MAX_FILE_COUNT} entries`, { phase: "preflight", size: value.length, maxSize: AI_JAVASCRIPT_MAX_FILE_COUNT });
+  return value;
+}
+
+function normalizeAiJavaScriptPath(value, phase = "preflight") {
+  const raw = String(value || "").trim();
+  if (/^(?:[\\/]|[A-Za-z]:[\\/])/.test(raw)) throw createAiJavaScriptError("INVALID_FILE_PATH", `Absolute file paths are not allowed: ${raw}`, { phase, path: raw });
   try {
-    const json = JSON.stringify(value, null, 2);
-    return json === undefined ? String(value) : json;
-  } catch {
-    return String(value);
-  }
-}
-
-function safeValue(value, depth = 0, seen = []) {
-  if (value == null || typeof value === "number" || typeof value === "boolean") return value;
-  if (typeof value === "string") return clipString(value);
-  if (typeof value === "bigint") return value.toString() + "n";
-  if (typeof value === "symbol") return String(value);
-  if (typeof value === "function") return "[Function" + (value.name ? " " + value.name : "") + "]";
-  if (value instanceof Error) return { name: value.name, message: value.message, stack: clipString(value.stack || "") };
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? "Invalid Date" : value.toISOString();
-  if (depth >= MAX_DEPTH) return "[MaxDepth]";
-  if (seen.includes(value)) return "[Circular]";
-
-  const nextSeen = seen.concat(value);
-  if (Array.isArray(value)) {
-    const output = value.slice(0, MAX_COLLECTION_ITEMS).map((item) => safeValue(item, depth + 1, nextSeen));
-    if (value.length > MAX_COLLECTION_ITEMS) output.push("[" + (value.length - MAX_COLLECTION_ITEMS) + " more items]");
-    return output;
-  }
-  if (value instanceof Map) {
-    const entries = Array.from(value).slice(0, MAX_COLLECTION_ITEMS).map(([key, item]) => [safeValue(key, depth + 1, nextSeen), safeValue(item, depth + 1, nextSeen)]);
-    return { type: "Map", size: value.size, entries };
-  }
-  if (value instanceof Set) {
-    const values = Array.from(value.values()).slice(0, MAX_COLLECTION_ITEMS).map((item) => safeValue(item, depth + 1, nextSeen));
-    return { type: "Set", size: value.size, values };
-  }
-
-  const output = {};
-  const entries = Object.entries(value);
-  entries.slice(0, MAX_COLLECTION_ITEMS).forEach(([key, item]) => { output[key] = safeValue(item, depth + 1, nextSeen); });
-  if (entries.length > MAX_COLLECTION_ITEMS) output.__truncated_keys = entries.length - MAX_COLLECTION_ITEMS;
-  return output;
-}
-
-const logs = [];
-function emitLog(level, args) {
-  const log = { level, args: args.map((arg) => safeValue(arg)) };
-  logs.push(log);
-  if (logs.length > MAX_LOGS) logs.shift();
-  nativePostMessage({ type: "log", log });
-}
-
-["debug", "log", "info", "warn", "error"].forEach((level) => {
-  console[level] = (...args) => emitLog(level, args);
-});
-
-self.onmessage = async (event) => {
-  const startedAt = performance.now();
-  try {
-    const payload = event.data || {};
-    const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
-    const run = new AsyncFunction("input", "\"use strict\";\n" + String(payload.code || ""));
-    const result = await run(payload.input);
-    if (payload.result_mode === "text") {
-      nativePostMessage({ type: "done", ok: true, result: clipString(formatTextResult(result), payload.max_output_chars), elapsed_ms: Math.round(performance.now() - startedAt) });
-      return;
-    }
-    nativePostMessage({ type: "done", ok: true, result: safeValue(result), elapsed_ms: Math.round(performance.now() - startedAt) });
+    return normalizeWorkspacePath(raw);
   } catch (error) {
-    nativePostMessage({ type: "done", ok: false, error: safeValue(error), elapsed_ms: Math.round(performance.now() - startedAt) });
+    if (!error.code) error.code = "INVALID_FILE_PATH";
+    if (!error.phase) error.phase = phase;
+    if (!error.path) error.path = raw;
+    throw error;
   }
-};
-`;
+}
+
+function normalizeAiJavaScriptInputs(value) {
+  const paths = new Set();
+  return normalizeAiJavaScriptArray(value, "input_files").map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw createAiJavaScriptError("INVALID_ARGUMENT", "Each input_files entry must be an object", { phase: "preflight" });
+    const path = normalizeAiJavaScriptPath(item.path);
+    if (paths.has(path)) throw createAiJavaScriptError("DUPLICATE_FILE_PATH", `Duplicate input file: ${path}`, { phase: "preflight", path });
+    paths.add(path);
+    const type = String(item.type || "text").toLowerCase();
+    const view = String(item.view || "effective").toLowerCase();
+    if (!["text", "bytes"].includes(type)) throw createAiJavaScriptError("INVALID_FILE_TYPE", `Unsupported input type for ${path}: ${type}`, { phase: "preflight", path });
+    if (!["effective", "base"].includes(view)) throw createAiJavaScriptError("INVALID_FILE_VIEW", `Unsupported input view for ${path}: ${view}`, { phase: "preflight", path });
+    return { path, type, view };
+  });
+}
+
+function normalizeAiJavaScriptOutputFiles(value) {
+  const paths = new Set();
+  return normalizeAiJavaScriptArray(value, "output_files").map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw createAiJavaScriptError("INVALID_ARGUMENT", "Each output_files entry must be an object", { phase: "preflight" });
+    const path = normalizeAiJavaScriptPath(item.path);
+    if (paths.has(path)) throw createAiJavaScriptError("DUPLICATE_FILE_PATH", `Duplicate output file: ${path}`, { phase: "preflight", path });
+    paths.add(path);
+    const type = item.type == null ? "" : String(item.type).toLowerCase();
+    if (type && !["text", "bytes"].includes(type)) throw createAiJavaScriptError("INVALID_FILE_TYPE", `Unsupported output type for ${path}: ${type}`, { phase: "preflight", path });
+    return { path, type, overwrite: item.overwrite === true };
+  });
+}
+
+function normalizeAiJavaScriptOutputDirectories(value) {
+  const paths = new Set();
+  return normalizeAiJavaScriptArray(value, "output_directories").map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw createAiJavaScriptError("INVALID_ARGUMENT", "Each output_directories entry must be an object", { phase: "preflight" });
+    const path = normalizeAiJavaScriptPath(item.path);
+    if (paths.has(path)) throw createAiJavaScriptError("DUPLICATE_FILE_PATH", `Duplicate output directory: ${path}`, { phase: "preflight", path });
+    paths.add(path);
+    return { path, overwrite: item.overwrite === true };
+  }).sort((left, right) => right.path.length - left.path.length);
+}
+
+function validateAiJavaScriptOutputDeclarations(outputFiles, outputDirectories, workspace) {
+  assertCurrentWorkspace(workspace);
+  const exactPaths = new Set(outputFiles.map((item) => item.path));
+  outputDirectories.forEach((directory) => {
+    if (exactPaths.has(directory.path)) throw createAiJavaScriptError("OUTPUT_PATH_CONFLICT", `Output path is declared as both file and directory: ${directory.path}`, { phase: "preflight", path: directory.path });
+    const node = findNodeByPath(tree.value, directory.path);
+    if (node?.kind === "file") throw createAiJavaScriptError("OUTPUT_PATH_TYPE_CONFLICT", `Output directory path is a file: ${directory.path}`, { phase: "preflight", path: directory.path });
+    assertFilePathAncestors(directory.path);
+  });
+  outputFiles.forEach((file) => {
+    const node = findNodeByPath(tree.value, file.path);
+    if (node?.kind === "directory") throw createAiJavaScriptError("OUTPUT_PATH_TYPE_CONFLICT", `Output file path is a directory: ${file.path}`, { phase: "preflight", path: file.path });
+    assertFilePathAncestors(file.path);
+  });
+}
+
+async function loadAiJavaScriptInputs(inputs, workspace, limits, signal) {
+  const loaded = [];
+  let totalSize = 0;
+  for (const input of inputs) {
+    throwIfAiAborted(signal);
+    assertCurrentWorkspace(workspace);
+    const opened = openFiles.get(input.path);
+    const node = findNodeByPath(tree.value, input.path) || findNodeByPath(diskTree.value, input.path);
+    if (!opened && (!node || node.kind !== "file")) throw createAiJavaScriptError("FILE_NOT_FOUND", `File not found: ${input.path}`, { phase: "input", path: input.path });
+    let content;
+    let size;
+    let mimeType;
+    try {
+      if (input.type === "text") {
+        if (input.view === "effective") {
+          const file = await ensureFileState(input.path, { closed: true, workspace });
+          if (file.deleted) throw createAiJavaScriptError("FILE_NOT_FOUND", `File is marked for deletion: ${input.path}`, { phase: "input", path: input.path });
+          content = file.model.getValue();
+          size = workspace.fileSystem.policy.getTextSize(content);
+          mimeType = file.mimeType || getMimeType(input.path, "text/plain;charset=utf-8");
+          workspace.fileSystem.policy.assertMemoryRead(input.path, size);
+        } else {
+          content = await workspace.session.readText(input.path, { view: "base" });
+          size = workspace.fileSystem.policy.getTextSize(content);
+          mimeType = getMimeType(input.path, "text/plain;charset=utf-8");
+        }
+      } else {
+        const blob = await readAiJavaScriptInputBlob(input.path, input.view, workspace);
+        size = blob.size;
+        mimeType = blob.type || getMimeType(input.path);
+        content = await blob.arrayBuffer();
+      }
+    } catch (error) {
+      if (error?.code === FileTooLargeError.code && !error.phase) error.phase = "input";
+      throw error;
+    }
+    const budget = evaluateAiJavaScriptSize({ itemSize: size, currentTotal: totalSize, itemLimit: limits.maxInputFileBytes, totalLimit: limits.maxInputTotalBytes, phase: "input" });
+    totalSize = budget.total;
+    if (budget.violation) throw new FileTooLargeError(input.path, { ...budget.violation, operation: budget.violation.phase === "input" ? "run_javascript input" : "run_javascript total input" });
+    loaded.push({ ...input, content, size, mimeType });
+  }
+  return loaded;
+}
+
+async function readAiJavaScriptInputBlob(path, view, workspace) {
+  assertCurrentWorkspace(workspace);
+  if (view === "base") return workspace.session.readBlob(path, { view: "base" });
+  const opened = openFiles.get(path);
+  if (opened) {
+    if (opened.deleted) throw createAiJavaScriptError("FILE_NOT_FOUND", `File is marked for deletion: ${path}`, { phase: "input", path });
+    if (isTextFileState(opened)) {
+      assertOpenFileMemoryRead(opened);
+      return new Blob([opened.model.getValue()], { type: opened.mimeType || getMimeType(path, "text/plain;charset=utf-8") });
+    }
+    const blob = getActiveBlobFile(opened);
+    if (blob) {
+      workspace.fileSystem.policy.assertMemoryRead(path, blob.size);
+      return blob;
+    }
+  }
+  const node = findNodeByPath(tree.value, path);
+  if (!node || node.kind !== "file") throw createAiJavaScriptError("FILE_NOT_FOUND", `File not found: ${path}`, { phase: "input", path });
+  return workspace.session.readBlob(path, { view: "effective" });
+}
+
+function getAiJavaScriptExistingPath(path) {
+  const file = openFiles.get(path);
+  const node = findNodeByPath(tree.value, path) || findNodeByPath(diskTree.value, path);
+  if (node?.kind === "directory") return { exists: true, kind: "directory", file, node };
+  if (file || node?.kind === "file") return { exists: true, kind: "file", file, node };
+  return { exists: false, kind: "", file: null, node: null };
+}
+
+function validateAiJavaScriptOutputs(workerOutputs, outputFiles, outputDirectories, workspace, limits) {
+  assertCurrentWorkspace(workspace);
+  if (!Array.isArray(workerOutputs)) throw createAiJavaScriptError("INVALID_WORKER_OUTPUT", "Worker output_files must be an array", { phase: "output" });
+  if (workerOutputs.length > AI_JAVASCRIPT_MAX_FILE_COUNT) throw createAiJavaScriptError("OUTPUT_FILE_COUNT_EXCEEDED", `Output exceeds ${AI_JAVASCRIPT_MAX_FILE_COUNT} files`, { phase: "output", size: workerOutputs.length, maxSize: AI_JAVASCRIPT_MAX_FILE_COUNT });
+  const paths = new Set();
+  const validated = [];
+  let totalSize = 0;
+  for (const output of workerOutputs) {
+    if (!output || typeof output !== "object") throw createAiJavaScriptError("INVALID_WORKER_OUTPUT", "Invalid Worker output file", { phase: "output" });
+    const path = normalizeAiJavaScriptPath(output.path, "output");
+    if (paths.has(path)) throw createAiJavaScriptError("DUPLICATE_FILE_PATH", `Duplicate Worker output: ${path}`, { phase: "output", path });
+    paths.add(path);
+    const declaration = resolveAiJavaScriptOutputPolicy(path, outputFiles, outputDirectories);
+    if (!declaration) throw createAiJavaScriptError("OUTPUT_PATH_NOT_DECLARED", `Output path is not declared: ${path}`, { phase: "output", path });
+    const type = String(output.type || "").toLowerCase();
+    if (!["text", "bytes"].includes(type)) throw createAiJavaScriptError("INVALID_FILE_TYPE", `Invalid output type for ${path}: ${type}`, { phase: "output", path });
+    if (declaration.type && declaration.type !== type) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Output type does not match declaration: ${path}`, { phase: "output", path });
+    let content;
+    let size;
+    let mimeType = String(output.mimeType || getMimeType(path, type === "text" ? "text/plain;charset=utf-8" : "application/octet-stream"));
+    if (type === "text") {
+      content = String(output.content ?? "");
+      size = workspace.fileSystem.policy.getTextSize(content);
+    } else {
+      if (!(output.content instanceof Uint8Array) && !(output.content instanceof ArrayBuffer)) throw createAiJavaScriptError("INVALID_BINARY_DATA", `Invalid binary output: ${path}`, { phase: "output", path });
+      content = output.content instanceof Uint8Array ? output.content : new Uint8Array(output.content);
+      size = content.byteLength;
+    }
+    const budget = evaluateAiJavaScriptSize({ itemSize: size, currentTotal: totalSize, itemLimit: limits.maxOutputFileBytes, totalLimit: limits.maxOutputTotalBytes, phase: "output" });
+    totalSize = budget.total;
+    if (budget.violation) throw new FileTooLargeError(path, { ...budget.violation, operation: budget.violation.phase === "output" ? "run_javascript output" : "run_javascript total output" });
+    const existing = getAiJavaScriptExistingPath(path);
+    const conflict = getAiJavaScriptOutputConflict({ existingKind: existing.kind, overwrite: declaration.overwrite === true });
+    if (conflict === "OUTPUT_PATH_TYPE_CONFLICT") throw createAiJavaScriptError(conflict, `Output file path is a directory: ${path}`, { phase: "output", path });
+    if (conflict === "FILE_ALREADY_EXISTS") throw createAiJavaScriptError(conflict, `Output file already exists: ${path}`, { phase: "output", path });
+    if (existing.exists && type === "text" && existing.file && !isTextFileState(existing.file)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is not text: ${path}`, { phase: "output", path });
+    if (existing.exists && type === "text" && !existing.file && existing.node && !isReadableTextEntry(existing.node)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is not text: ${path}`, { phase: "output", path });
+    if (existing.exists && type === "bytes" && existing.file && isTextFileState(existing.file)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is text: ${path}`, { phase: "output", path });
+    if (existing.exists && type === "bytes" && !existing.file && existing.node && isReadableTextEntry(existing.node)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is text: ${path}`, { phase: "output", path });
+    if (existing.exists && type === "bytes") {
+      const existingIsImage = existing.file?.fileType === "image" || (!existing.file && isImageEntry(existing.node));
+      const outputIsImage = FileUtils.isImageFile({ name: path, type: mimeType });
+      if (existingIsImage !== outputIsImage) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file binary type does not match: ${path}`, { phase: "output", path });
+    }
+    validated.push({ path, type, content, size, mimeType, overwrite: declaration.overwrite === true, created: !existing.exists });
+  }
+  validated.forEach((output) => {
+    let parent = getParentFilePath(output.path);
+    while (parent) {
+      if (paths.has(parent)) throw createAiJavaScriptError("OUTPUT_PATH_TYPE_CONFLICT", `Output file is also a parent path: ${parent}`, { phase: "output", path: parent });
+      if (getAiJavaScriptExistingPath(parent).kind === "file") throw createAiJavaScriptError("OUTPUT_PATH_TYPE_CONFLICT", `Output parent path is a file: ${parent}`, { phase: "output", path: parent });
+      parent = getParentFilePath(parent);
+    }
+  });
+  return validated;
+}
+
+async function stageAiJavaScriptOutputs(outputs, workspace, session, signal) {
+  const files = [];
+  for (const output of outputs) {
+    throwIfAiAborted(signal);
+    assertCurrentWorkspace(workspace);
+    let file;
+    if (output.type === "text") {
+      const result = await aiToolWriteFile({ path: output.path, content: output.content }, session);
+      files.push({ path: output.path, type: "text", size: output.size, mime_type: output.mimeType, created: result.created, dirty: true });
+      continue;
+    }
+    const blob = new Blob([output.content], { type: output.mimeType });
+    if (FileUtils.isImageFile({ name: output.path, type: output.mimeType })) {
+      file = await stageImageFile({ path: output.path, blob, session, signal, createOnly: output.created, activate: false, workspace });
+    } else {
+      file = await stageBinaryFile({ path: output.path, blob, session, signal, workspace });
+    }
+    files.push({ path: output.path, type: "bytes", size: output.size, mime_type: output.mimeType, created: output.created, dirty: file.dirty });
+  }
+  return files;
 }
 
 async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, follow_redirect: followRedirect = true, enable_cors: enableCors = true, include_headers: includeHeaders = false, filter_script: filterScript, max_chars: maxChars } = {}, signal) {
