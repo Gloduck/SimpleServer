@@ -130,6 +130,11 @@ class FileSystemProvider {
     async isCopyDestinationInside(sourcePath, destinationProvider, destinationPath, options = {}) {
         return false;
     }
+
+    /** @param {string} path @param {unknown} target @param {FileSystemOperationOptions} options */
+    async isSameFileTarget(path, target, options = {}) {
+        return false;
+    }
 }
 
 function unsupported(operation, path) {

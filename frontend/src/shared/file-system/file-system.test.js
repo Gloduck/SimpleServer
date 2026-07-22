@@ -322,6 +322,42 @@ test('FileSystem keeps directory relationship checks behind the provider boundar
     assert.equal(await sourceFileSystem.isCopyDestinationInside('', destinationFileSystem, ''), true);
 });
 
+test('BrowserHandleProvider rejects a virtual directory copied onto its nominal source path', async () => {
+    const root = {
+        kind: 'directory',
+        name: 'root',
+        async resolve(handle) {
+            return handle === root ? [] : null;
+        },
+    };
+    const sourceFileSystem = new FileSystem({provider: new BrowserHandleProvider({root})});
+    const destinationFileSystem = new FileSystem({provider: new BrowserHandleProvider({root})});
+
+    assert.equal(await sourceFileSystem.isCopyDestinationInside('virtual', destinationFileSystem, 'virtual'), true);
+});
+
+test('FileSystem keeps file target identity checks behind the provider boundary', async () => {
+    const sourceFile = {kind: 'file', name: 'copy.txt'};
+    const root = {
+        kind: 'directory',
+        name: 'source',
+        async getFileHandle(name) {
+            assert.equal(name, sourceFile.name);
+            return sourceFile;
+        },
+    };
+    const target = {
+        kind: 'file',
+        name: sourceFile.name,
+        async isSameEntry(handle) {
+            return handle === sourceFile;
+        },
+    };
+    const fileSystem = new FileSystem({provider: new BrowserHandleProvider({root})});
+
+    assert.equal(await fileSystem.isSameFileTarget(sourceFile.name, target), true);
+});
+
 test('createFileSystem hides provider construction behind registered source types', () => {
     const handle = {kind: 'directory', name: 'root'};
     const fileSystem = createFileSystem({type: 'local', config: {directoryHandle: handle}});

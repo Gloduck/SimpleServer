@@ -489,12 +489,10 @@
     <div v-show="contextMenu.visible" class="context-menu visible" role="menu" :aria-label="tr('menu.fileTree')" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @click.stop>
       <button type="button" role="menuitem" @click="runContextAction('new-file')">{{ tr('action.newFile') }}</button>
       <button type="button" role="menuitem" @click="runContextAction('new-folder')">{{ tr('action.newFolder') }}</button>
-      <button type="button" role="menuitem" @click="runContextAction('new-file-pending')">{{ tr('action.newFilePending') }}</button>
       <div class="context-separator" aria-hidden="true"></div>
-      <button type="button" role="menuitem" :disabled="!contextMenu.node || isPathPendingDelete(contextMenu.node.path)" @click="runContextAction('save-as')">{{ tr('action.saveAs') }}</button>
+      <button type="button" role="menuitem" :disabled="!contextMenu.node" @click="runContextAction('save-as')">{{ tr('action.saveAs') }}</button>
       <div class="context-separator" aria-hidden="true"></div>
       <button type="button" role="menuitem" class="danger" :disabled="!contextMenu.node" @click="runContextAction('delete')">{{ tr('action.delete') }}</button>
-      <button type="button" role="menuitem" class="danger" :disabled="!contextMenu.node || contextMenu.node.kind !== 'file'" @click="runContextAction('delete-pending')">{{ tr('action.deletePending') }}</button>
       <div class="context-separator" aria-hidden="true"></div>
       <button type="button" role="menuitem" @click="runContextAction('refresh')">{{ tr('action.refreshTree') }}</button>
     </div>
@@ -512,9 +510,16 @@
           <h2 id="editor-dialog-title">{{ dialogState.title }}</h2>
         </div>
         <p class="editor-dialog-message">{{ dialogState.message }}</p>
-        <label v-if="dialogState.mode === 'prompt'" class="editor-dialog-input-row">
-          <span>{{ tr('dialog.inputLabel') }}</span>
+        <label v-if="isPromptDialogMode(dialogState.mode)" class="editor-dialog-input-row">
+          <span>{{ dialogState.inputLabel }}</span>
           <input ref="dialogInput" v-model="dialogState.value" type="text" :placeholder="dialogState.placeholder" autocomplete="off" spellcheck="false" />
+        </label>
+        <label v-if="dialogState.optionLabel" class="editor-dialog-option" :class="{ disabled: dialogState.optionDisabled }">
+          <input ref="dialogOptionInput" v-model="dialogState.optionChecked" type="checkbox" :disabled="dialogState.optionDisabled" />
+          <span class="editor-dialog-option-copy">
+            <strong>{{ dialogState.optionLabel }}</strong>
+            <small v-if="dialogState.optionHint">{{ dialogState.optionHint }}</small>
+          </span>
         </label>
         <div class="editor-dialog-actions">
           <button v-if="dialogState.mode !== 'alert'" type="button" @click="cancelDialog">{{ dialogState.cancelLabel }}</button>
@@ -625,6 +630,7 @@ import {
   FileUtils,
   getMimeType,
   getParentFilePath,
+  isPathUnder,
   joinFilePath,
   normalizeFilePath,
 } from "@/shared/file-utils.js";
@@ -732,9 +738,7 @@ const messages = {
     "action.saveAs": "另存为",
     "action.newFile": "新建文件",
     "action.newFolder": "新建文件夹",
-    "action.newFilePending": "新建文件（待保存）",
     "action.delete": "删除",
-    "action.deletePending": "删除文件（待保存）",
     "action.revert": "回滚更改",
     "action.refreshTree": "刷新文件树",
     "action.close": "关闭",
@@ -751,6 +755,8 @@ const messages = {
     "dialog.cancel": "取消",
     "dialog.close": "关闭",
     "dialog.inputLabel": "内容",
+    "dialog.filePath": "文件路径",
+    "dialog.folderPath": "文件夹路径",
     "settings.theme": "主题",
     "settings.locale": "界面语言",
     "settings.ai": "AI",
@@ -976,7 +982,7 @@ const messages = {
     "confirm.binary": "“{name}” 可能不是文本文件或体积较大，仍要尝试打开吗？",
     "confirm.delete": "确定删除“{path}”吗？{folderHint}{dirtyHint}",
     "confirm.deleteFolderHint": "\n\n该文件夹会被递归删除。",
-    "confirm.deleteDirtyHint": "\n\n包含 {count} 个未保存标签，删除后这些修改会丢失。",
+    "confirm.deleteDirtyHint": "\n\n包含 {count} 个未保存文件，删除后这些修改会丢失。",
     "confirm.revert": "确定回滚“{path}”的未保存修改吗？",
     "confirm.revertSelected": "确定回滚所选 {count} 个未保存变更吗？",
     "confirm.clearBrowserFolder": "确定清空浏览器文件夹（OPFS）吗？其中的全部文件和文件夹都会被永久删除。",
@@ -997,10 +1003,22 @@ const messages = {
     "preview.openNewTab": "在新页签中打开",
     "prompt.newFile": "输入新文件路径",
     "prompt.newFolder": "输入新文件夹路径",
+    "fileAction.applyImmediately": "立即应用到磁盘",
+    "fileAction.createImmediateHint": "取消选中后，文件会作为未保存的新建变更，保存时才写入磁盘。",
+    "fileAction.deleteImmediateHint": "取消选中后，文件会标记为待删除，保存时才从磁盘删除。",
+    "fileAction.directoryDeleteImmediateHint": "文件夹变更暂不支持暂存，必须立即从磁盘删除。",
+    "fileAction.unsavedItemDeleteHint": "该项目尚未写入磁盘，删除只会丢弃其中的未保存内容。",
+    "saveAs.message": "选择要另存为的内容版本。",
+    "saveAs.includeUnsaved": "包含未保存的变更",
+    "saveAs.includeUnsavedHint": "包含未保存的新建和修改，并排除待删除文件。",
+    "saveAs.includeUnsavedRequired": "该项目仅存在于未保存变更中，必须包含未保存内容。",
+    "saveAs.pendingDelete": "该文件已标记删除，只能另存磁盘中的已保存版本。",
+    "saveAs.noUnsaved": "当前项目没有未保存变更，将使用磁盘内容。",
     "error.unsupportedBrowser": "当前浏览器不支持 File System Access API。请使用 Chrome、Edge 或 Arc，并通过 localhost 或 HTTPS 打开页面。",
     "error.opfsUnsupported": "当前环境不支持 OPFS。OPFS 需要支持该 API 的浏览器，并通过 localhost 或 HTTPS 等安全上下文打开页面。",
     "error.clearBrowserFolder": "清空浏览器文件夹失败",
     "error.saveAs": "另存为失败",
+    "error.saveAsSource": "不能另存回原文件，请使用保存操作。",
     "error.destinationInsideSource": "不能把文件夹另存到它自身或其子文件夹中。",
     "error.createFile": "新建文件失败",
     "error.createFolder": "新建文件夹失败",
@@ -1048,9 +1066,7 @@ const messages = {
     "action.saveAs": "Save As",
     "action.newFile": "New File",
     "action.newFolder": "New Folder",
-    "action.newFilePending": "New File (Pending Save)",
     "action.delete": "Delete",
-    "action.deletePending": "Delete File (Pending Save)",
     "action.revert": "Revert Changes",
     "action.refreshTree": "Refresh Tree",
     "action.close": "Close",
@@ -1067,6 +1083,8 @@ const messages = {
     "dialog.cancel": "Cancel",
     "dialog.close": "Close",
     "dialog.inputLabel": "Value",
+    "dialog.filePath": "File path",
+    "dialog.folderPath": "Folder path",
     "settings.theme": "Theme",
     "settings.locale": "Display Language",
     "settings.ai": "AI",
@@ -1292,7 +1310,7 @@ const messages = {
     "confirm.binary": "“{name}” may be a binary or large file. Try opening it anyway?",
     "confirm.delete": "Delete “{path}”?{folderHint}{dirtyHint}",
     "confirm.deleteFolderHint": "\n\nThis folder will be deleted recursively.",
-    "confirm.deleteDirtyHint": "\n\nIt contains {count} unsaved tab(s). Those changes will be lost.",
+    "confirm.deleteDirtyHint": "\n\nIt contains {count} unsaved file(s). Those changes will be lost.",
     "confirm.revert": "Revert unsaved changes in “{path}”?",
     "confirm.revertSelected": "Revert {count} selected unsaved change(s)?",
     "confirm.clearBrowserFolder": "Clear the browser folder (OPFS)? All files and folders in it will be permanently deleted.",
@@ -1313,10 +1331,22 @@ const messages = {
     "preview.openNewTab": "Open in New Tab",
     "prompt.newFile": "Enter new file path",
     "prompt.newFolder": "Enter new folder path",
+    "fileAction.applyImmediately": "Apply immediately to disk",
+    "fileAction.createImmediateHint": "Clear this option to keep the file as an unsaved creation until it is saved.",
+    "fileAction.deleteImmediateHint": "Clear this option to mark the file for deletion and remove it from disk only when saved.",
+    "fileAction.directoryDeleteImmediateHint": "Folder changes cannot be staged yet, so this folder must be deleted from disk immediately.",
+    "fileAction.unsavedItemDeleteHint": "This item has not been written to disk. Deleting it will only discard its unsaved content.",
+    "saveAs.message": "Choose which version of the content to save as.",
+    "saveAs.includeUnsaved": "Include unsaved changes",
+    "saveAs.includeUnsavedHint": "Includes unsaved creations and modifications and excludes files marked for deletion.",
+    "saveAs.includeUnsavedRequired": "This item exists only in unsaved changes, so unsaved content must be included.",
+    "saveAs.pendingDelete": "This file is marked for deletion, so only its saved disk version can be saved as.",
+    "saveAs.noUnsaved": "This item has no unsaved changes. Disk content will be used.",
     "error.unsupportedBrowser": "This browser does not support the File System Access API. Use Chrome, Edge, or Arc, and open the page from localhost or HTTPS.",
     "error.opfsUnsupported": "OPFS is unavailable in this environment. Use a browser that supports it and open the page in a secure context such as localhost or HTTPS.",
     "error.clearBrowserFolder": "Failed to clear browser folder",
     "error.saveAs": "Failed to save as",
+    "error.saveAsSource": "Cannot save as the original file. Use Save instead.",
     "error.destinationInsideSource": "A folder cannot be saved inside itself or one of its subfolders.",
     "error.createFile": "Failed to create file",
     "error.createFolder": "Failed to create folder",
@@ -1492,12 +1522,14 @@ const rootHandle = shallowRef(null);
 const fileSystem = shallowRef(null);
 const fileSession = shallowRef(null);
 let workspaceGeneration = 0;
+let refreshTreeSerial = 0;
 const rootName = ref("");
 const rootKind = ref("");
 const diskTree = shallowRef([]);
 const collapsedPaths = reactive(new Set());
 const openFiles = reactive(new Map());
-const externalWritePaths = new Set();
+const externalWritePaths = new Map();
+const pendingFileLoads = new Set();
 const selectedChangePaths = reactive(new Set());
 const activePath = ref("");
 const activeDiffPath = ref("");
@@ -1525,8 +1557,9 @@ const status = reactive({ left: "Ready", right: "Monaco Editor" });
 const contextMenu = reactive({ visible: false, x: 0, y: 0, node: null });
 const changesContextMenu = reactive({ visible: false, x: 0, y: 0, file: null });
 const dialogInput = ref(null);
+const dialogOptionInput = ref(null);
 const dialogPrimaryButton = ref(null);
-const dialogState = reactive({ visible: false, mode: "alert", title: "", message: "", value: "", placeholder: "", confirmLabel: "", cancelLabel: "", tone: "default", selectOnFocus: false, closeOnBackdrop: true });
+const dialogState = reactive({ visible: false, mode: "alert", title: "", message: "", value: "", inputLabel: "", placeholder: "", optionLabel: "", optionHint: "", optionChecked: false, optionDisabled: false, confirmLabel: "", cancelLabel: "", tone: "default", selectOnFocus: false, closeOnBackdrop: true });
 const settings = reactive(loadSettings());
 const maxMemoryReadMb = computed({
   get: () => bytesToMegabytes(settings.maxMemoryReadBytes),
@@ -1622,11 +1655,11 @@ const activeSshTerminal = computed(() => {
   sshRevision.value;
   return activeSshTerminalId.value ? sshSessions.get(activeSshTerminalId.value) || null : null;
 });
-const dialogIconClass = computed(() => ({
-  alert: dialogState.tone === "danger" ? "codicon-error" : "codicon-info",
-  confirm: dialogState.tone === "danger" ? "codicon-warning" : "codicon-question",
-  prompt: "codicon-edit",
-}[dialogState.mode] || "codicon-info"));
+const dialogIconClass = computed(() => {
+  if (isPromptDialogMode(dialogState.mode)) return "codicon-edit";
+  if (dialogState.mode.startsWith("confirm")) return dialogState.tone === "danger" ? "codicon-warning" : "codicon-question";
+  return dialogState.tone === "danger" ? "codicon-error" : "codicon-info";
+});
 
 watch(() => settings.locale, () => { document.documentElement.lang = settings.locale; });
 watch(() => settings.ai.agentModels, syncSelectedAgentModel);
@@ -2160,8 +2193,16 @@ function showConfirm(message, options = {}) {
   return showDialog({ mode: "confirm", message, title: options.title || tr("dialog.confirmTitle"), tone: options.tone, confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), closeOnBackdrop: options.closeOnBackdrop });
 }
 
+function showConfirmWithOption(message, option, options = {}) {
+  return showDialog({ mode: "confirm-option", message, option, title: options.title || tr("dialog.confirmTitle"), tone: options.tone, confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), closeOnBackdrop: options.closeOnBackdrop });
+}
+
 function showPrompt(message, defaultValue = "", options = {}) {
-  return showDialog({ mode: "prompt", message, value: defaultValue, title: options.title || tr("dialog.promptTitle"), placeholder: options.placeholder || "", confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), selectOnFocus: options.selectOnFocus, closeOnBackdrop: options.closeOnBackdrop });
+  return showDialog({ mode: "prompt", message, value: defaultValue, title: options.title || tr("dialog.promptTitle"), inputLabel: options.inputLabel, placeholder: options.placeholder || "", confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), selectOnFocus: options.selectOnFocus, closeOnBackdrop: options.closeOnBackdrop });
+}
+
+function showPromptWithOption(message, defaultValue, option, options = {}) {
+  return showDialog({ mode: "prompt-option", message, value: defaultValue, option, title: options.title || tr("dialog.promptTitle"), inputLabel: options.inputLabel, placeholder: options.placeholder || "", confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), selectOnFocus: options.selectOnFocus, closeOnBackdrop: options.closeOnBackdrop });
 }
 
 function showDialog(options) {
@@ -2181,7 +2222,12 @@ function openNextDialog() {
     title: nextDialog.options.title || tr("dialog.alertTitle"),
     message: nextDialog.options.message || "",
     value: nextDialog.options.value || "",
+    inputLabel: nextDialog.options.inputLabel || tr("dialog.inputLabel"),
     placeholder: nextDialog.options.placeholder || "",
+    optionLabel: nextDialog.options.option?.label || "",
+    optionHint: nextDialog.options.option?.hint || "",
+    optionChecked: Boolean(nextDialog.options.option?.checked),
+    optionDisabled: Boolean(nextDialog.options.option?.disabled),
     confirmLabel: nextDialog.options.confirmLabel || tr("dialog.ok"),
     cancelLabel: nextDialog.options.cancelLabel || tr("dialog.cancel"),
     tone: nextDialog.options.tone || "default",
@@ -2189,9 +2235,13 @@ function openNextDialog() {
     closeOnBackdrop: nextDialog.options.closeOnBackdrop !== false,
   });
   nextTick(() => {
-    if (dialogState.mode === "prompt") {
+    if (isPromptDialogMode(dialogState.mode)) {
       dialogInput.value?.focus();
       if (dialogState.selectOnFocus) dialogInput.value?.select();
+      return;
+    }
+    if (isOptionDialogMode(dialogState.mode) && !dialogState.optionDisabled) {
+      dialogOptionInput.value?.focus();
       return;
     }
     dialogPrimaryButton.value?.focus();
@@ -2199,11 +2249,20 @@ function openNextDialog() {
 }
 
 function confirmDialog() {
-  settleDialog(dialogState.mode === "prompt" ? dialogState.value : true);
+  const value = isPromptDialogMode(dialogState.mode) ? dialogState.value : true;
+  settleDialog(isOptionDialogMode(dialogState.mode) ? { value, checked: dialogState.optionChecked } : value);
 }
 
 function cancelDialog() {
-  settleDialog(dialogState.mode === "prompt" ? null : false);
+  settleDialog(isOptionDialogMode(dialogState.mode) ? null : (isPromptDialogMode(dialogState.mode) ? null : false));
+}
+
+function isPromptDialogMode(mode) {
+  return mode === "prompt" || mode === "prompt-option";
+}
+
+function isOptionDialogMode(mode) {
+  return mode === "confirm-option" || mode === "prompt-option";
 }
 
 function settleDialog(result) {
@@ -2777,9 +2836,8 @@ function uploadSftpBody(config, remotePath, body, size, task, externalSignal) {
 async function downloadSftpToWorkspace(config, remotePath, localPath, task, externalSignal, workspace) {
   const targetFile = isCurrentWorkspace(workspace) ? openFiles.get(localPath) : null;
   if (targetFile?.dirty) throw new Error(`Local file has unsaved changes: ${localPath}`);
-  const writeKey = getExternalWriteKey(localPath, workspace.generation);
-  if (externalWritePaths.has(writeKey)) throw new Error(`Local file is already being replaced: ${localPath}`);
-  externalWritePaths.add(writeKey);
+  if (isExternalWritePath(localPath, workspace.generation)) throw new Error(`Local file is already being replaced: ${localPath}`);
+  const writeKey = acquireExternalWritePath(localPath, workspace.generation);
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (externalSignal) {
@@ -2823,7 +2881,7 @@ async function downloadSftpToWorkspace(config, remotePath, localPath, task, exte
     }
     return loaded;
   } finally {
-    externalWritePaths.delete(writeKey);
+    releaseExternalWritePath(writeKey);
     if (externalSignal) externalSignal.removeEventListener("abort", abort);
   }
 }
@@ -3120,6 +3178,7 @@ function resetWorkspaceEditorState() {
   openFiles.forEach((file) => disposeFileModels(file, { force: true }));
   openFiles.clear();
   disposeWorkspaceModels({ force: true });
+  workspaceModelPromises.clear();
   diskTree.value = [];
   registerWorkspaceFileActions();
   activePath.value = "";
@@ -3137,19 +3196,26 @@ function resetWorkspaceState() {
 }
 
 async function refreshTree(options = {}) {
-  if (!fileSystem.value) return;
+  const workspace = options.workspace || captureWorkspace();
+  const refreshSerial = ++refreshTreeSerial;
+  if (!workspace.fileSystem || !isCurrentWorkspace(workspace)) return false;
   try {
-    diskTree.value = await readDirectory("");
-    await refreshAgentsMdContext();
-    pruneWorkspaceModels(diskTree.value);
+    const nextDiskTree = await readDirectory("", { count: 0 }, workspace.fileSystem);
+    const nextAgentsMdContent = await readRootAgentsMdFromDisk(workspace);
+    if (!isCurrentWorkspace(workspace) || refreshSerial !== refreshTreeSerial) return false;
+    diskTree.value = nextDiskTree;
+    agentsMdContent.value = nextAgentsMdContent;
+    pruneWorkspaceModels(nextDiskTree);
     registerWorkspaceFileActions();
     if (options.collapseAll) {
       collapsedPaths.clear();
-      collectDirectoryPaths(diskTree.value).forEach((path) => collapsedPaths.add(path));
+      collectDirectoryPaths(nextDiskTree).forEach((path) => collapsedPaths.add(path));
     }
-    setStatus(tr("status.refreshed", { name: rootName.value }), tr("status.itemCount", { count: countTreeNodes(diskTree.value) }));
+    setStatus(tr("status.refreshed", { name: rootName.value }), tr("status.itemCount", { count: countTreeNodes(nextDiskTree) }));
+    return true;
   } catch (error) {
-    reportError("error.refreshTree", error);
+    if (isCurrentWorkspace(workspace) && refreshSerial === refreshTreeSerial) reportError("error.refreshTree", error);
+    return false;
   }
 }
 
@@ -3395,6 +3461,8 @@ function getOrCreatePreviewModel(content, path) {
 
 async function ensureWorkspaceModelForNode(node, token) {
   if (token?.isCancellationRequested || !node || node.kind !== "file") return null;
+  const workspace = captureWorkspace();
+  if (!isCurrentWorkspace(workspace) || isExternalWritePath(node.path, workspace.generation)) return null;
   const openFileState = openFiles.get(node.path);
   if (openFileState && !openFileState.deleted) {
     if (!isTextFileState(openFileState)) return null;
@@ -3413,14 +3481,16 @@ async function ensureWorkspaceModelForNode(node, token) {
     return existing;
   }
   if (workspaceModelPromises.has(node.path)) return workspaceModelPromises.get(node.path);
-  const promise = (async () => {
-    const content = await fileSession.value.readText(node.path);
-    if (token?.isCancellationRequested) return null;
+  const promise = trackFileLoad(workspace, node.path, async () => {
+    const content = await workspace.session.readText(node.path);
+    if (token?.isCancellationRequested || !isCurrentWorkspace(workspace) || isExternalWritePath(node.path, workspace.generation)) return null;
     const monacoLanguage = getMonacoLanguageId(getLanguageId(node.name));
     const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
     workspaceModelPaths.add(node.path);
     return model;
-  })().catch(() => null).finally(() => workspaceModelPromises.delete(node.path));
+  }).catch(() => null).finally(() => {
+    if (workspaceModelPromises.get(node.path) === promise) workspaceModelPromises.delete(node.path);
+  });
   workspaceModelPromises.set(node.path, promise);
   return promise;
 }
@@ -3477,13 +3547,13 @@ function sortTreeNodes(nodes) {
   nodes.forEach((node) => { if (node.children?.length) sortTreeNodes(node.children); });
 }
 
-async function readDirectory(basePath, state = { count: 0 }) {
+async function readDirectory(basePath, state = { count: 0 }, sourceFileSystem = fileSystem.value) {
   const nodes = [];
-  const entries = await fileSystem.value.list(basePath);
+  const entries = await sourceFileSystem.list(basePath);
   for (const entry of entries) {
     if (shouldHideName(entry.name)) continue;
     state.count += 1;
-    if (state.count > fileSystem.value.policy.maxWalkEntries) break;
+    if (state.count > sourceFileSystem.policy.maxWalkEntries) break;
     const node = {
       name: entry.name,
       path: entry.path,
@@ -3494,7 +3564,7 @@ async function readDirectory(basePath, state = { count: 0 }) {
       version: entry.version ?? null,
       children: [],
     };
-    if (entry.kind === "directory") node.children = await readDirectory(entry.path, state);
+    if (entry.kind === "directory") node.children = await readDirectory(entry.path, state, sourceFileSystem);
     nodes.push(node);
   }
   sortTreeNodes(nodes);
@@ -3502,38 +3572,23 @@ async function readDirectory(basePath, state = { count: 0 }) {
 }
 
 async function openFile(node) {
+  const workspace = captureWorkspace();
   try {
-    if (openFiles.has(node.path)) {
-      openFiles.get(node.path).closed = false;
-      touchDirtyState();
-      activateFile(node.path);
-      return openFiles.get(node.path);
-    }
-    if (isImageEntry(node)) return openImageFile(node, await fileSession.value.readBlob(node.path, { adoptBase: true }));
-    if (!isReadableTextEntry(node)) return openUnsupportedFile(node);
-    const content = await fileSession.value.readText(node.path, { adoptBase: true });
-    const language = getLanguageId(node.name);
-    const monacoLanguage = getMonacoLanguageId(language);
-    const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
-    workspaceModelPaths.delete(node.path);
-    const originalModel = createOriginalModel(content, monacoLanguage, node.path);
-    const fileState = { name: node.name, path: node.path, fileType: "text", model, originalModel, savedValue: content, lastLegalValue: content, lastStagedValue: content, dirty: false, closed: false, language, monacoLanguage, isNew: false, persisted: true, deleted: false, size: node.size, mimeType: node.mimeType || getMimeType(node.path), version: node.version };
-    attachTextModelListener(fileState);
-    openFiles.set(node.path, fileState);
-    activateFile(node.path);
-    setStatus(tr("status.openedFile", { name: node.name }), getLanguageLabel(language));
-    return fileState;
+    const file = await ensureAnyFileState(node.path, { closed: false, workspace });
+    if (!isCurrentWorkspace(workspace)) return null;
+    file.closed = false;
+    activateFile(file.path);
+    const detail = file.fileType === "image"
+      ? `${tr("imagePreview.type")} | ${FileUtils.formatFileSize(file.size)}`
+      : file.fileType === "unsupported"
+        ? `${tr("unsupportedFile.type")} | ${FileUtils.formatFileSize(file.size)}`
+        : getLanguageLabel(file.language);
+    setStatus(tr("status.openedFile", { name: file.name }), detail);
+    return file;
   } catch (error) {
-    reportError("error.openFile", error);
+    if (isCurrentWorkspace(workspace)) reportError("error.openFile", error);
     return null;
   }
-}
-
-function openImageFile(node, file) {
-  const fileState = createImageFileState(node, file, { closed: false });
-  activateFile(node.path);
-  setStatus(tr("status.openedFile", { name: node.name }), `${tr("imagePreview.type")} | ${FileUtils.formatFileSize(file.size)}`);
-  return fileState;
 }
 
 function createImageFileState(node, file, options = {}) {
@@ -3560,21 +3615,17 @@ function setImageFileBlob(file, blob) {
 }
 
 async function stageImageFileBlob(file, blob, options = {}) {
-  fileSystem.value.policy.assertMemoryWrite(file.path, blob.size);
+  const workspace = options.workspace || captureWorkspace();
+  assertCurrentWorkspace(workspace);
+  workspace.fileSystem.policy.assertMemoryWrite(file.path, blob.size);
   await queueFileStage(file, (session) => session.stageBlob(file.path, blob, {
     mimeType: blob.type || file.mimeType,
     createOnly: options.createOnly === true,
-  }));
+  }), workspace);
+  assertCurrentWorkspace(workspace);
   setImageFileBlob(file, blob);
   file.deleted = false;
   updateDirtyState(file);
-}
-
-function openUnsupportedFile(node) {
-  const fileState = createUnsupportedFileState(node, { closed: false });
-  activateFile(node.path);
-  setStatus(tr("status.openedFile", { name: node.name }), `${tr("unsupportedFile.type")} | ${FileUtils.formatFileSize(node.size)}`);
-  return fileState;
 }
 
 function createUnsupportedFileState(node, options = {}) {
@@ -3843,9 +3894,9 @@ function updateDirtyState(file) {
 function attachTextModelListener(file) {
   file.modelContentDisposable = file.model.onDidChangeContent(() => {
     if (file.suppressStage || file.deleted) return;
-    if (externalWritePaths.has(getExternalWriteKey(file.path))) {
+    if (isExternalWritePath(file.path)) {
       restoreLastLegalText(file);
-      reportFileOperationError(new Error(`File is being replaced by a download: ${file.path}`));
+      reportFileOperationError(new Error(`File operation is already in progress: ${file.path}`));
       return;
     }
     const value = file.model.getValue();
@@ -3884,22 +3935,22 @@ function restoreLastLegalText(file) {
   updateDirtyState(file);
 }
 
-function queueFileStage(file, operation) {
-  if (externalWritePaths.has(getExternalWriteKey(file.path))) {
-    const error = new Error(`File is being replaced by a download: ${file.path}`);
-    reportFileOperationError(error);
+function queueFileStage(file, operation, workspace = captureWorkspace()) {
+  if (isExternalWritePath(file.path, workspace.generation)) {
+    const error = new Error(`File operation is already in progress: ${file.path}`);
+    if (isCurrentWorkspace(workspace)) reportFileOperationError(error);
     return Promise.reject(error);
   }
-  const activeSession = fileSession.value;
+  const activeSession = workspace.session;
   const previous = file.stagePromise || Promise.resolve();
   const promise = previous.catch(() => {}).then(() => {
-    if (!activeSession || activeSession !== fileSession.value) throw new Error("Workspace session changed");
+    if (!activeSession || !isCurrentWorkspace(workspace)) throw new Error("Workspace session changed");
     return operation(activeSession);
   });
   file.stagePromise = promise;
   promise.catch((error) => {
     file.stageError = error;
-    reportFileOperationError(error);
+    if (isCurrentWorkspace(workspace)) reportFileOperationError(error);
   });
   promise.then(() => {
     if (file.stagePromise === promise) file.stageError = null;
@@ -3921,12 +3972,80 @@ function isCurrentWorkspace(workspace) {
     && workspace.session === fileSession.value;
 }
 
+function assertCurrentWorkspace(workspace) {
+  if (isCurrentWorkspace(workspace)) return;
+  const error = new Error("Workspace session changed");
+  error.name = "AbortError";
+  throw error;
+}
+
 function getExternalWriteKey(path, generation = workspaceGeneration) {
   return `${generation}:${path}`;
 }
 
+function isExternalWritePath(path, generation = workspaceGeneration) {
+  let candidate = normalizeFilePath(path);
+  while (true) {
+    if (externalWritePaths.has(getExternalWriteKey(candidate, generation))) return true;
+    if (!candidate) return false;
+    candidate = getParentFilePath(candidate);
+  }
+}
+
+function hasExternalWriteUnder(path, generation = workspaceGeneration) {
+  const normalizedPath = normalizeFilePath(path);
+  const keyPrefix = `${generation}:`;
+  for (const key of externalWritePaths.keys()) {
+    if (!key.startsWith(keyPrefix)) continue;
+    if (isPathUnder(key.slice(keyPrefix.length), normalizedPath)) return true;
+  }
+  return false;
+}
+
+function acquireExternalWritePath(path, generation = workspaceGeneration) {
+  const key = getExternalWriteKey(normalizeFilePath(path), generation);
+  externalWritePaths.set(key, (externalWritePaths.get(key) || 0) + 1);
+  return key;
+}
+
+function releaseExternalWritePath(key) {
+  const count = externalWritePaths.get(key) || 0;
+  if (count <= 1) externalWritePaths.delete(key);
+  else externalWritePaths.set(key, count - 1);
+}
+
+async function trackFileLoad(workspace, path, operation) {
+  const record = {
+    generation: workspace.generation,
+    path: normalizeFilePath(path),
+    promise: null,
+  };
+  record.promise = Promise.resolve().then(operation);
+  pendingFileLoads.add(record);
+  try {
+    return await record.promise;
+  } finally {
+    pendingFileLoads.delete(record);
+  }
+}
+
+async function awaitPendingFileLoads(workspace, path) {
+  const normalizedPath = normalizeFilePath(path);
+  while (true) {
+    const pending = Array.from(pendingFileLoads)
+      .filter((record) => record.generation === workspace.generation && isPathUnder(record.path, normalizedPath))
+      .map((record) => record.promise);
+    if (!pending.length) return;
+    await Promise.allSettled(pending);
+  }
+}
+
 async function awaitLatestStage(file) {
-  if (file?.stagePromise) await file.stagePromise;
+  let pendingStage = null;
+  do {
+    pendingStage = file?.stagePromise || null;
+    if (pendingStage) await pendingStage;
+  } while (file?.stagePromise && file.stagePromise !== pendingStage);
   if (file?.stageError) throw file.stageError;
 }
 
@@ -4011,7 +4130,7 @@ function showContextMenu(event, node) {
   contextMenu.visible = true;
   nextTick(() => {
     const width = 190;
-    const height = 270;
+    const height = 220;
     contextMenu.x = Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8));
     contextMenu.y = Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8));
   });
@@ -4031,10 +4150,8 @@ async function runContextAction(action) {
   hideContextMenu();
   if (action === "new-file") await createFileFromContext(node);
   if (action === "new-folder") await createFolderFromContext(node);
-  if (action === "new-file-pending") await createPendingFileFromContext(node);
   if (action === "save-as") await saveNodeAs(node);
   if (action === "delete") await deleteNode(node);
-  if (action === "delete-pending") await markNodeDeleted(node);
   if (action === "refresh") await refreshTree();
 }
 
@@ -4054,42 +4171,80 @@ function getDirectoryPath(path) {
 }
 
 async function saveNodeAs(node) {
-  if (!node || isPathPendingDelete(node.path)) return;
+  if (!node) return;
+  const workspace = captureWorkspace();
+  const persistedNode = findNodeByPath(diskTree.value, node.path);
+  const hasUnsavedChanges = getOpenFilesUnderPath(node.path).some((file) => file.dirty);
+  const requiresUnsavedChanges = !persistedNode;
+  const pendingDelete = isPathPendingDelete(node.path);
+  const selection = await showConfirmWithOption(tr("saveAs.message"), {
+    label: tr("saveAs.includeUnsaved"),
+    checked: pendingDelete ? false : (requiresUnsavedChanges || hasUnsavedChanges),
+    disabled: pendingDelete || requiresUnsavedChanges || !hasUnsavedChanges,
+    hint: pendingDelete
+      ? tr("saveAs.pendingDelete")
+      : requiresUnsavedChanges
+        ? tr("saveAs.includeUnsavedRequired")
+        : hasUnsavedChanges
+          ? tr("saveAs.includeUnsavedHint")
+          : tr("saveAs.noUnsaved"),
+  }, {
+    title: tr("action.saveAs"),
+    confirmLabel: tr("action.saveAs"),
+  });
+  if (!selection || !isCurrentWorkspace(workspace)) return;
+  const includeUnsaved = selection.checked;
+  const sourceNode = includeUnsaved ? node : persistedNode;
+  if (!sourceNode) return;
+
   try {
-    if (node.kind === "file") {
+    if (sourceNode.kind === "file") {
       if (!window.showSaveFilePicker) {
-        downloadFile(await getNodeExportBlob(node), node.name);
+        downloadFile(await getNodeExportBlob(sourceNode, { includeUnsaved, workspace }), sourceNode.name);
       } else {
-        const destination = await window.showSaveFilePicker({ suggestedName: node.name });
-        const source = await openEffectiveRead(node.path);
+        const destination = await window.showSaveFilePicker({ suggestedName: sourceNode.name });
+        assertCurrentWorkspace(workspace);
+        if (await workspace.fileSystem.isSameFileTarget(sourceNode.path, destination)) throw new Error(tr("error.saveAsSource"));
+        const source = await openSaveAsRead(sourceNode.path, { includeUnsaved, workspace });
         await writeFileTarget(destination, source.stream);
       }
-      setStatus(tr("status.savedAs", { name: node.name }), node.path);
+      assertCurrentWorkspace(workspace);
+      setStatus(tr("status.savedAs", { name: sourceNode.name }), sourceNode.path);
       return;
     }
     if (!window.showDirectoryPicker) {
-      const archiveName = `${node.name}.zip`;
-      setStatus(tr("status.packagingFolder", { name: node.name }), archiveName);
-      downloadFile(await createFolderZip(node), archiveName);
+      const archiveName = `${sourceNode.name}.zip`;
+      setStatus(tr("status.packagingFolder", { name: sourceNode.name }), archiveName);
+      downloadFile(await createFolderZip(sourceNode, { includeUnsaved, workspace }), archiveName);
+      assertCurrentWorkspace(workspace);
       setStatus(tr("status.savedAs", { name: archiveName }), node.path);
       return;
     }
     const destinationParent = markRaw(await window.showDirectoryPicker({ mode: "readwrite" }));
+    assertCurrentWorkspace(workspace);
     const destinationFileSystem = markRaw(createFileSystem({
       type: "local",
       config: { handle: destinationParent },
       policy: createFileOperationPolicy(),
     }));
     await destinationFileSystem.checkAccess("", { writable: true, request: true });
-    const destinationPath = normalizeFilePath(node.name);
-    if (await fileSystem.value.isCopyDestinationInside(node.path, destinationFileSystem, destinationPath)) throw new Error(tr("error.destinationInsideSource"));
+    assertCurrentWorkspace(workspace);
+    const destinationPath = normalizeFilePath(sourceNode.name);
+    if (await workspace.fileSystem.isCopyDestinationInside(sourceNode.path, destinationFileSystem, destinationPath)) throw new Error(tr("error.destinationInsideSource"));
+    assertCurrentWorkspace(workspace);
     const existing = await fileExists(destinationFileSystem, destinationPath);
-    if (existing && !await showConfirm(tr("confirm.mergeSaveFolder", { name: node.name }), { title: tr("action.saveAs") })) return;
+    assertCurrentWorkspace(workspace);
+    if (existing) {
+      const merge = await showConfirm(tr("confirm.mergeSaveFolder", { name: sourceNode.name }), { title: tr("action.saveAs") });
+      if (!merge || !isCurrentWorkspace(workspace)) return;
+    }
     if (!existing) await destinationFileSystem.createDirectory(destinationPath);
-    await copyTreeNodes(node.children || [], destinationFileSystem, destinationPath);
-    setStatus(tr("status.savedAs", { name: node.name }), node.path);
+    assertCurrentWorkspace(workspace);
+    await copyTreeNodes(sourceNode.children || [], destinationFileSystem, destinationPath, { includeUnsaved, workspace });
+    assertCurrentWorkspace(workspace);
+    setStatus(tr("status.savedAs", { name: sourceNode.name }), sourceNode.path);
   } catch (error) {
-    if (error.name !== "AbortError") reportError("error.saveAs", error);
+    if (error.name !== "AbortError" && isCurrentWorkspace(workspace)) reportError("error.saveAs", error);
   }
 }
 
@@ -4097,23 +4252,29 @@ function isPathPendingDelete(path) {
   return Boolean(path && openFiles.get(path)?.deleted);
 }
 
-async function getNodeExportBlob(node) {
+async function getNodeExportBlob(node, { includeUnsaved = true, workspace = captureWorkspace() } = {}) {
+  assertCurrentWorkspace(workspace);
   const fileState = openFiles.get(node.path);
-  if (fileState?.deleted) throw new Error(`File is marked for deletion: ${node.path}`);
-  if (fileState) await awaitLatestStage(fileState);
-  return fileSession.value.readBlob(node.path, { view: "effective" });
+  if (includeUnsaved) {
+    if (fileState?.deleted) throw new Error(`File is marked for deletion: ${node.path}`);
+    if (fileState) await awaitLatestStage(fileState);
+    assertCurrentWorkspace(workspace);
+    return workspace.session.readBlob(node.path, { view: "effective" });
+  }
+  return workspace.fileSystem.readBlob(node.path);
 }
 
-async function copyTreeNodes(nodes, destinationFileSystem, destinationPath) {
+async function copyTreeNodes(nodes, destinationFileSystem, destinationPath, { includeUnsaved = true, workspace = captureWorkspace() } = {}) {
   for (const node of nodes) {
-    if (openFiles.get(node.path)?.deleted) continue;
+    assertCurrentWorkspace(workspace);
+    if (includeUnsaved && openFiles.get(node.path)?.deleted) continue;
     if (node.kind === "directory") {
       const childDestination = joinFilePath(destinationPath, node.name);
       await destinationFileSystem.createDirectory(childDestination, { recursive: true });
-      await copyTreeNodes(node.children || [], destinationFileSystem, childDestination);
+      await copyTreeNodes(node.children || [], destinationFileSystem, childDestination, { includeUnsaved, workspace });
       continue;
     }
-    const source = await openEffectiveRead(node.path);
+    const source = await openSaveAsRead(node.path, { includeUnsaved, workspace });
     await destinationFileSystem.writeStream(joinFilePath(destinationPath, node.name), source.stream, {
       createParents: true,
       size: source.size,
@@ -4121,33 +4282,37 @@ async function copyTreeNodes(nodes, destinationFileSystem, destinationPath) {
   }
 }
 
-async function createFolderZip(node) {
+async function createFolderZip(node, { includeUnsaved = true, workspace = captureWorkspace() } = {}) {
   const { zip } = await import("fflate");
   const archive = Object.create(null);
-  archive[node.name] = await buildZipTree(node.children || []);
+  archive[node.name] = await buildZipTree(node.children || [], { includeUnsaved, workspace });
   const data = await new Promise((resolve, reject) => {
     zip(archive, { level: 6 }, (error, result) => error ? reject(error) : resolve(result));
   });
   return new Blob([data], { type: "application/zip" });
 }
 
-async function buildZipTree(nodes) {
+async function buildZipTree(nodes, { includeUnsaved = true, workspace = captureWorkspace() } = {}) {
   const entries = Object.create(null);
   for (const node of nodes) {
-    if (openFiles.get(node.path)?.deleted) continue;
+    assertCurrentWorkspace(workspace);
+    if (includeUnsaved && openFiles.get(node.path)?.deleted) continue;
     if (node.kind === "directory") {
-      entries[node.name] = await buildZipTree(node.children || []);
+      entries[node.name] = await buildZipTree(node.children || [], { includeUnsaved, workspace });
       continue;
     }
-    entries[node.name] = new Uint8Array(await (await getNodeExportBlob(node)).arrayBuffer());
+    entries[node.name] = new Uint8Array(await (await getNodeExportBlob(node, { includeUnsaved, workspace })).arrayBuffer());
   }
   return entries;
 }
 
-async function openEffectiveRead(path) {
+async function openSaveAsRead(path, { includeUnsaved = true, workspace = captureWorkspace() } = {}) {
+  assertCurrentWorkspace(workspace);
+  if (!includeUnsaved) return workspace.fileSystem.openRead(path);
   const file = openFiles.get(path);
   if (file) await awaitLatestStage(file);
-  return fileSession.value.openRead(path, { view: "effective" });
+  assertCurrentWorkspace(workspace);
+  return workspace.session.openRead(path, { view: "effective" });
 }
 
 function downloadFile(file, name) {
@@ -4171,58 +4336,83 @@ async function fileExists(targetFileSystem, path) {
 }
 
 async function createFileFromContext(node) {
-  const name = await showPrompt(tr("prompt.newFile"));
-  if (!name) return;
-  try {
-    const path = joinWorkspacePath(getContextDirectoryPath(node), name);
-    if (findNodeByPath(diskTree.value, path) || openFiles.has(path)) throw new Error(`File already exists: ${path}`);
-    await createFileOnDisk(path);
-    await refreshTree();
-    const createdNode = findNodeByPath(diskTree.value, path);
-    if (createdNode) await openFile(createdNode);
-  } catch (error) {
-    reportError("error.createFile", error);
-  }
-}
-
-async function createPendingFileFromContext(node) {
-  const name = await showPrompt(tr("prompt.newFile"));
-  if (!name) return;
+  const workspace = captureWorkspace();
+  const selection = await showPromptWithOption(tr("prompt.newFile"), "", {
+    label: tr("fileAction.applyImmediately"),
+    checked: true,
+    hint: tr("fileAction.createImmediateHint"),
+  }, {
+    title: tr("action.newFile"),
+    inputLabel: tr("dialog.filePath"),
+    confirmLabel: tr("action.newFile"),
+  });
+  const name = selection?.value;
+  if (!name || !isCurrentWorkspace(workspace)) return;
   try {
     const path = joinWorkspacePath(getContextDirectoryPath(node), name);
     if (findNodeByPath(tree.value, path) || openFiles.has(path)) throw new Error(`File already exists: ${path}`);
-    const file = await createVirtualFileState(path, { closed: false });
-    activateFile(file.path);
-    setStatus(tr("status.pendingCreate", { path: file.path }), tr("status.unsaved"));
+    assertFilePathAncestors(path);
+    if (selection.checked) {
+      await createFileOnDisk(path, workspace);
+      if (!isCurrentWorkspace(workspace)) return;
+      if (!await refreshTree()) return;
+      const createdNode = findNodeByPath(diskTree.value, path);
+      if (createdNode) await openFile(createdNode);
+    } else {
+      const file = await createVirtualFileState(path, { closed: false, workspace });
+      if (!isCurrentWorkspace(workspace)) return;
+      activateFile(file.path);
+      setStatus(tr("status.pendingCreate", { path: file.path }), tr("status.unsaved"));
+    }
   } catch (error) {
-    reportError("error.createFile", error);
+    if (isCurrentWorkspace(workspace)) reportError("error.createFile", error);
   }
 }
 
 async function createFolderFromContext(node) {
-  const name = await showPrompt(tr("prompt.newFolder"));
+  const workspace = captureWorkspace();
+  const name = await showPrompt(tr("prompt.newFolder"), "", {
+    title: tr("action.newFolder"),
+    inputLabel: tr("dialog.folderPath"),
+    confirmLabel: tr("action.newFolder"),
+  });
   if (!name) return;
   try {
     const path = joinWorkspacePath(getContextDirectoryPath(node), name);
-    await fileSystem.value.createDirectory(path, { recursive: true });
-    await refreshTree();
+    if (!isCurrentWorkspace(workspace)) return;
+    if (findNodeByPath(tree.value, path)) throw new Error(`File already exists: ${path}`);
+    assertFilePathAncestors(path);
+    if (isExternalWritePath(path)) throw new Error(`File operation is already in progress: ${path}`);
+    await workspace.fileSystem.createDirectory(path, { recursive: true });
+    if (!isCurrentWorkspace(workspace) || !await refreshTree()) return;
     setStatus(tr("status.refreshed", { name: rootName.value }), path);
   } catch (error) {
-    reportError("error.createFolder", error);
+    if (isCurrentWorkspace(workspace)) reportError("error.createFolder", error);
   }
 }
 
-async function markNodeDeleted(node) {
-  if (!node || node.kind !== "file") return;
+function assertFilePathAncestors(path) {
+  let parentPath = getParentFilePath(path);
+  while (parentPath) {
+    if (findNodeByPath(tree.value, parentPath)?.kind === "file") {
+      throw new Error(`Parent path is a file: ${parentPath}`);
+    }
+    parentPath = getParentFilePath(parentPath);
+  }
+}
+
+async function markNodeDeleted(node, workspace = captureWorkspace()) {
+  if (!node || node.kind !== "file" || !isCurrentWorkspace(workspace)) return;
   const file = openFiles.get(node.path);
   if (file?.isNew && !file.persisted) {
-    await file.stagePromise?.catch(() => {});
-    fileSession.value.revert(node.path);
+    await awaitLatestStage(file).catch(() => {});
+    if (!isCurrentWorkspace(workspace)) return;
+    workspace.session.revert(node.path);
     removeFileState(node.path);
     setStatus(tr("status.deleted", { path: node.path }), tr("status.unsaved"));
     return;
   }
-  await markFileDeleted(node.path, { closed: true });
+  await markFileDeleted(node.path, { closed: true }, workspace);
 }
 
 function showChangesContextMenu(event, file) {
@@ -4287,30 +4477,78 @@ async function revertFile(path, options = {}) {
 
 async function deleteNode(node) {
   if (!node || !rootHandle.value) return;
-  const pendingFile = openFiles.get(node.path);
-  if (node.kind === "file" && pendingFile?.isNew && !pendingFile.persisted) {
-    await pendingFile.stagePromise?.catch(() => {});
-    fileSession.value.revert(node.path);
-    removeFileState(node.path);
-    setStatus(tr("status.deleted", { path: node.path }), tr("status.unsaved"));
-    return;
-  }
+  const workspace = captureWorkspace();
+  const persistedNode = findNodeByPath(diskTree.value, node.path);
+  const memoryOnlyNode = !persistedNode;
+  const immediateOnly = node.kind === "directory" && !memoryOnlyNode;
   const dirtyFiles = getOpenFilesUnderPath(node.path).filter((file) => file.dirty);
-  const confirmed = await showConfirm(tr("confirm.delete", {
+  const selection = await showConfirmWithOption(tr("confirm.delete", {
     path: node.path,
     folderHint: node.kind === "directory" ? tr("confirm.deleteFolderHint") : "",
     dirtyHint: dirtyFiles.length ? tr("confirm.deleteDirtyHint", { count: dirtyFiles.length }) : "",
-  }), { title: tr("action.delete"), tone: "danger" });
-  if (!confirmed) return;
+  }), {
+    label: tr("fileAction.applyImmediately"),
+    checked: immediateOnly || !memoryOnlyNode,
+    disabled: immediateOnly || memoryOnlyNode,
+    hint: immediateOnly
+      ? tr("fileAction.directoryDeleteImmediateHint")
+      : memoryOnlyNode
+        ? tr("fileAction.unsavedItemDeleteHint")
+        : tr("fileAction.deleteImmediateHint"),
+  }, {
+    title: tr("action.delete"),
+    tone: "danger",
+    confirmLabel: tr("action.delete"),
+  });
+  if (!selection || !isCurrentWorkspace(workspace)) return;
   try {
-    await fileSystem.value.remove(node.path, { recursive: node.kind === "directory" });
-    closeOpenFilesUnderPath(node.path);
+    if (memoryOnlyNode) {
+      await discardMemoryOnlyNode(node, workspace);
+      return;
+    }
+    if (!selection.checked) {
+      await markNodeDeleted(node, workspace);
+      return;
+    }
+    if (hasExternalWriteUnder(node.path, workspace.generation)) throw new Error(`File operation is already in progress: ${node.path}`);
+    const operationKey = acquireExternalWritePath(node.path, workspace.generation);
+    try {
+      await awaitPendingFileLoads(workspace, node.path);
+      const affectedFiles = getOpenFilesUnderPath(node.path);
+      await Promise.all(affectedFiles.map((file) => awaitLatestStage(file).catch(() => {})));
+      if (!isCurrentWorkspace(workspace)) return;
+      await workspace.fileSystem.remove(node.path, { recursive: node.kind === "directory" });
+      if (!isCurrentWorkspace(workspace)) return;
+      closeOpenFilesUnderPath(node.path);
+    } finally {
+      releaseExternalWritePath(operationKey);
+    }
     collapsedPaths.delete(node.path);
-    await refreshTree();
+    if (!await refreshTree()) return;
     setStatus(tr("status.deleted", { path: node.path }), "");
   } catch (error) {
-    reportError("error.delete", error);
+    if (isCurrentWorkspace(workspace)) reportError("error.delete", error);
   }
+}
+
+async function discardMemoryOnlyNode(node, workspace) {
+  if (hasExternalWriteUnder(node.path, workspace.generation)) throw new Error(`File operation is already in progress: ${node.path}`);
+  const operationKey = acquireExternalWritePath(node.path, workspace.generation);
+  try {
+    await awaitPendingFileLoads(workspace, node.path);
+    const files = getOpenFilesUnderPath(node.path);
+    await Promise.all(files.map((file) => awaitLatestStage(file).catch(() => {})));
+    if (!isCurrentWorkspace(workspace)) return;
+    files.forEach((file) => {
+      workspace.session.revert(file.path);
+      removeFileState(file.path);
+    });
+  } finally {
+    releaseExternalWritePath(operationKey);
+  }
+  if (!isCurrentWorkspace(workspace)) return;
+  collapsedPaths.delete(node.path);
+  setStatus(tr("status.deleted", { path: node.path }), tr("status.unsaved"));
 }
 
 function applyTheme() {
@@ -5208,10 +5446,6 @@ function getAgentInstructions() {
   return instructions.join(" ");
 }
 
-async function refreshAgentsMdContext() {
-  agentsMdContent.value = await readRootAgentsMdFromDisk();
-}
-
 function getRootAgentsMdContent() {
   dirtyRevision.value;
   const opened = openFiles.get(AI_AGENTS_FILE_NAME);
@@ -5219,12 +5453,12 @@ function getRootAgentsMdContent() {
   return agentsMdContent.value;
 }
 
-async function readRootAgentsMdFromDisk() {
-  if (!fileSession.value) return "";
+async function readRootAgentsMdFromDisk(workspace = captureWorkspace()) {
+  if (!workspace.session) return "";
   try {
-    const entry = await fileSession.value.stat(AI_AGENTS_FILE_NAME);
+    const entry = await workspace.session.stat(AI_AGENTS_FILE_NAME);
     if (!isReadableTextEntry(entry)) return "";
-    return await fileSession.value.readText(AI_AGENTS_FILE_NAME);
+    return await workspace.session.readText(AI_AGENTS_FILE_NAME);
   } catch (error) {
     if (error?.code === "FILE_NOT_FOUND") return "";
     console.warn(`Failed to load ${AI_AGENTS_FILE_NAME}:`, error);
@@ -6024,7 +6258,10 @@ function isTextFileState(file) {
 }
 
 async function ensureFileState(path, options = {}) {
+  const workspace = options.workspace || captureWorkspace();
+  assertCurrentWorkspace(workspace);
   const normalized = normalizeWorkspacePath(path);
+  if (isExternalWritePath(normalized, workspace.generation)) throw new Error(`File operation is already in progress: ${normalized}`);
   const existing = openFiles.get(normalized);
   if (existing) {
     if (!isTextFileState(existing)) throw new Error(`File is not readable text: ${normalized}`);
@@ -6032,27 +6269,52 @@ async function ensureFileState(path, options = {}) {
     existing.fileType = "text";
     return existing;
   }
-  const node = findNodeByPath(tree.value, normalized);
-  if (!node || node.kind !== "file") {
-    if (options.create) return createVirtualFileState(normalized, options);
-    throw new Error(`File not found: ${normalized}`);
-  }
-  assertReadableTextEntry(node);
-  const content = await fileSession.value.readText(normalized, { adoptBase: true });
-  const language = getLanguageId(node.name);
-  const monacoLanguage = getMonacoLanguageId(language);
-  const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
-  workspaceModelPaths.delete(node.path);
-  const originalModel = createOriginalModel(content, monacoLanguage, node.path);
-  const fileState = { name: node.name, path: node.path, fileType: "text", model, originalModel, savedValue: content, lastLegalValue: content, lastStagedValue: content, dirty: false, closed: options.closed ?? true, language, monacoLanguage, isNew: false, persisted: true, deleted: false, size: node.size, mimeType: node.mimeType || getMimeType(node.path), version: node.version };
-  attachTextModelListener(fileState);
-  openFiles.set(node.path, fileState);
-  touchDirtyState();
-  return fileState;
+  return trackFileLoad(workspace, normalized, async () => {
+    assertCurrentWorkspace(workspace);
+    if (isExternalWritePath(normalized, workspace.generation)) throw new Error(`File operation is already in progress: ${normalized}`);
+    const loaded = openFiles.get(normalized);
+    if (loaded) {
+      if (!isTextFileState(loaded)) throw new Error(`File is not readable text: ${normalized}`);
+      assertOpenFileMemoryRead(loaded);
+      return loaded;
+    }
+
+    const node = findNodeByPath(tree.value, normalized);
+    if (!node || node.kind !== "file") {
+      if (options.create) {
+        assertFilePathAncestors(normalized);
+        return createVirtualFileState(normalized, {...options, workspace});
+      }
+      throw new Error(`File not found: ${normalized}`);
+    }
+    assertReadableTextEntry(node);
+    const content = await workspace.session.readText(normalized, { adoptBase: true });
+    assertCurrentWorkspace(workspace);
+    if (isExternalWritePath(normalized, workspace.generation)) throw new Error(`File operation is already in progress: ${normalized}`);
+    const concurrent = openFiles.get(normalized);
+    if (concurrent) {
+      if (!isTextFileState(concurrent)) throw new Error(`File is not readable text: ${normalized}`);
+      return concurrent;
+    }
+
+    const language = getLanguageId(node.name);
+    const monacoLanguage = getMonacoLanguageId(language);
+    const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
+    workspaceModelPaths.delete(node.path);
+    const originalModel = createOriginalModel(content, monacoLanguage, node.path);
+    const fileState = { name: node.name, path: node.path, fileType: "text", model, originalModel, savedValue: content, lastLegalValue: content, lastStagedValue: content, dirty: false, closed: options.closed ?? true, language, monacoLanguage, isNew: false, persisted: true, deleted: false, size: node.size, mimeType: node.mimeType || getMimeType(node.path), version: node.version };
+    attachTextModelListener(fileState);
+    openFiles.set(node.path, fileState);
+    touchDirtyState();
+    return fileState;
+  });
 }
 
 async function ensureAnyFileState(path, options = {}) {
+  const workspace = options.workspace || captureWorkspace();
+  assertCurrentWorkspace(workspace);
   const normalized = normalizeWorkspacePath(path);
+  if (isExternalWritePath(normalized, workspace.generation)) throw new Error(`File operation is already in progress: ${normalized}`);
   const existing = openFiles.get(normalized);
   if (existing) {
     const nextClosed = options.closed ?? existing.closed;
@@ -6065,15 +6327,29 @@ async function ensureAnyFileState(path, options = {}) {
   }
   const node = findNodeByPath(tree.value, normalized);
   if (!node || node.kind !== "file") {
-    if (options.create) return createVirtualFileState(normalized, options);
+    if (options.create) return ensureFileState(normalized, {...options, workspace});
     throw new Error(`File not found: ${normalized}`);
   }
-  if (isImageEntry(node)) return createImageFileState(node, await fileSession.value.readBlob(normalized, { adoptBase: true }), options);
-  if (!isReadableTextEntry(node)) return createUnsupportedFileState(node, options);
-  return ensureFileState(normalized, options);
+  if (isImageEntry(node)) {
+    return trackFileLoad(workspace, normalized, async () => {
+      const blob = await workspace.session.readBlob(normalized, { adoptBase: true });
+      assertCurrentWorkspace(workspace);
+      if (isExternalWritePath(normalized, workspace.generation)) throw new Error(`File operation is already in progress: ${normalized}`);
+      return openFiles.get(normalized) || createImageFileState(node, blob, options);
+    });
+  }
+  if (!isReadableTextEntry(node)) {
+    assertCurrentWorkspace(workspace);
+    return createUnsupportedFileState(node, options);
+  }
+  return ensureFileState(normalized, {...options, workspace});
 }
 
 async function createVirtualFileState(path, options = {}) {
+  const workspace = options.workspace || captureWorkspace();
+  if (!isCurrentWorkspace(workspace)) throw new Error("Workspace session changed");
+  if (isExternalWritePath(path, workspace.generation)) throw new Error(`File operation is already in progress: ${path}`);
+  assertFilePathAncestors(path);
   const name = path.split("/").pop();
   const content = String(options.content ?? "");
   const language = getLanguageId(name);
@@ -6081,20 +6357,20 @@ async function createVirtualFileState(path, options = {}) {
   const model = getOrCreateWorkspaceModel(content, monacoLanguage, path, true);
   workspaceModelPaths.delete(path);
   const originalModel = createOriginalModel("", monacoLanguage, path);
-  const fileState = { name, path, fileType: "text", model, originalModel, savedValue: "", lastLegalValue: content, lastStagedValue: "", dirty: true, closed: options.closed ?? true, language, monacoLanguage, isNew: true, persisted: false, deleted: false, size: fileSystem.value.policy.getTextSize(content), mimeType: getMimeType(path, "text/plain;charset=utf-8"), version: null };
+  const fileState = { name, path, fileType: "text", model, originalModel, savedValue: "", lastLegalValue: content, lastStagedValue: "", dirty: true, closed: options.closed ?? true, language, monacoLanguage, isNew: true, persisted: false, deleted: false, size: workspace.fileSystem.policy.getTextSize(content), mimeType: getMimeType(path, "text/plain;charset=utf-8"), version: null };
   attachTextModelListener(fileState);
   openFiles.set(path, fileState);
   try {
     await queueFileStage(fileState, (session) => session.stageText(path, content, {
       mimeType: fileState.mimeType,
       createOnly: true,
-    }));
+    }), workspace);
     fileState.lastStagedValue = content;
   } catch (error) {
-    removeFileState(path);
+    if (isCurrentWorkspace(workspace)) removeFileState(path);
     throw error;
   }
-  touchDirtyState();
+  if (isCurrentWorkspace(workspace)) touchDirtyState();
   return fileState;
 }
 
@@ -6145,20 +6421,25 @@ async function aiToolReadImage(path) {
 }
 
 async function aiToolGenerateOrEditImage({ prompt, output_path: outputPath, input_path: inputPath, mask_path: maskPath, size = "auto", quality = "auto", background = "auto", output_format: outputFormat, overwrite = false } = {}, session = getActiveAiSession(), signal) {
+  const workspace = captureWorkspace();
+  assertCurrentWorkspace(workspace);
   throwIfAiAborted(signal);
   const normalizedPrompt = String(prompt || "").trim();
   if (!normalizedPrompt) throw new Error("prompt is required");
   const normalizedOutputPath = normalizeWorkspacePath(outputPath);
   const format = normalizeImageOutputFormat(outputFormat, normalizedOutputPath);
   const normalizedInputPath = inputPath ? normalizeWorkspacePath(inputPath) : "";
+  assertFilePathAncestors(normalizedOutputPath);
+  if (isExternalWritePath(normalizedOutputPath, workspace.generation)) throw new Error(`File operation is already in progress: ${normalizedOutputPath}`);
   if (maskPath && !normalizedInputPath) throw new Error("mask_path requires input_path");
   const existingTarget = openFiles.get(normalizedOutputPath) || findNodeByPath(tree.value, normalizedOutputPath);
   if (existingTarget?.kind === "directory") throw new Error(`Output path is a directory: ${normalizedOutputPath}`);
   if (existingTarget && normalizedOutputPath !== normalizedInputPath && !overwrite) throw new Error(`File already exists: ${normalizedOutputPath}`);
   if (openFiles.get(normalizedOutputPath) && openFiles.get(normalizedOutputPath).fileType !== "image") throw new Error(`Output file is not an image: ${normalizedOutputPath}`);
 
-  const input = normalizedInputPath ? await getWorkspaceImageSource(normalizedInputPath) : null;
-  const mask = maskPath ? await getWorkspaceImageSource(maskPath, { mask: true }) : null;
+  const input = normalizedInputPath ? await getWorkspaceImageSource(normalizedInputPath, { workspace }) : null;
+  const mask = maskPath ? await getWorkspaceImageSource(maskPath, { mask: true, workspace }) : null;
+  assertCurrentWorkspace(workspace);
   throwIfAiAborted(signal);
   if (input && mask && input.width && mask.width && (input.width !== mask.width || input.height !== mask.height)) throw new Error("mask_path dimensions must match input_path");
   const blob = await callOpenAiImage({
@@ -6174,16 +6455,20 @@ async function aiToolGenerateOrEditImage({ prompt, output_path: outputPath, inpu
     outputPath: normalizedOutputPath,
   }, signal);
   throwIfAiAborted(signal);
+  assertCurrentWorkspace(workspace);
   const dimensions = await readImageDimensions(blob);
   throwIfAiAborted(signal);
+  assertCurrentWorkspace(workspace);
   const operation = input ? "edited" : "generated";
-  const file = await stageImageFile({
+  const file = await trackFileLoad(workspace, normalizedOutputPath, () => stageImageFile({
     path: normalizedOutputPath,
     blob,
     session,
     signal,
     createOnly: !existingTarget && !overwrite,
-  });
+    workspace,
+  }));
+  assertCurrentWorkspace(workspace);
   const summary = tr(input ? "ai.imageEdited" : "ai.imageGenerated", { path: file.path });
   setStatus(summary, tr("status.unsaved"));
   return {
@@ -6210,7 +6495,10 @@ function normalizeImageOutputFormat(value, path) {
 }
 
 async function getWorkspaceImageSource(path, options = {}) {
+  const workspace = options.workspace || captureWorkspace();
+  assertCurrentWorkspace(workspace);
   const normalized = normalizeWorkspacePath(path);
+  if (isExternalWritePath(normalized, workspace.generation)) throw new Error(`File operation is already in progress: ${normalized}`);
   const opened = openFiles.get(normalized);
   let blob;
   let name = normalized.split("/").pop();
@@ -6220,7 +6508,8 @@ async function getWorkspaceImageSource(path, options = {}) {
   } else {
     const node = findNodeByPath(tree.value, normalized);
     if (!node || node.kind !== "file") throw new Error(`File not found: ${normalized}`);
-    blob = await fileSession.value.readBlob(normalized);
+    blob = await workspace.session.readBlob(normalized);
+    assertCurrentWorkspace(workspace);
     name = node.name;
   }
   if (!blob || !FileUtils.isImageFile(new File([blob], name, { type: blob.type }))) throw new Error(`File is not an image: ${normalized}`);
@@ -6233,6 +6522,7 @@ async function getWorkspaceImageSource(path, options = {}) {
     assertSpecialReadSize(normalized, blob.size, AI_IMAGE_MAX_FILE_SIZE, "AI image input read");
   }
   const dimensions = await readImageDimensions(blob);
+  assertCurrentWorkspace(workspace);
   return { path: normalized, name, blob, mimeType, ...dimensions };
 }
 
@@ -6248,27 +6538,32 @@ async function readImageDimensions(blob) {
   }
 }
 
-async function stageImageFile({ path, blob, session, signal, createOnly = false }) {
+async function stageImageFile({ path, blob, session, signal, createOnly = false, workspace = captureWorkspace() }) {
+  assertCurrentWorkspace(workspace);
+  assertFilePathAncestors(path);
+  if (isExternalWritePath(path, workspace.generation)) throw new Error(`File operation is already in progress: ${path}`);
   throwIfAiAborted(signal);
   let file = openFiles.get(path);
   let createdState = false;
   if (!file) {
     const node = findNodeByPath(tree.value, path);
     if (node) {
-      const diskFile = await fileSession.value.readBlob(path, { view: "base" });
+      const diskFile = await trackFileLoad(workspace, path, () => workspace.session.readBlob(path, { view: "base" }));
       throwIfAiAborted(signal);
+      assertCurrentWorkspace(workspace);
+      if (isExternalWritePath(path, workspace.generation)) throw new Error(`File operation is already in progress: ${path}`);
       if (!FileUtils.isImageFile(diskFile)) throw new Error(`Output file is not an image: ${path}`);
       file = createImageFileState(node, diskFile, { closed: false });
     } else {
-      file = createVirtualImageFileState(path, blob);
+      file = createVirtualImageFileState(path, blob, workspace);
       createdState = true;
     }
   }
   throwIfAiAborted(signal);
   if (file.fileType !== "image") throw new Error(`Output file is not an image: ${path}`);
   try {
-    if (file.blob !== blob || !fileSession.value.hasChange(path)) {
-      await stageImageFileBlob(file, blob, { createOnly });
+    if (file.blob !== blob || !workspace.session.hasChange(path)) {
+      await stageImageFileBlob(file, blob, { createOnly, workspace });
     }
   } catch (error) {
     if (createdState) removeFileState(path);
@@ -6283,7 +6578,10 @@ async function stageImageFile({ path, blob, session, signal, createOnly = false 
   return file;
 }
 
-function createVirtualImageFileState(path, blob) {
+function createVirtualImageFileState(path, blob, workspace = captureWorkspace()) {
+  assertCurrentWorkspace(workspace);
+  assertFilePathAncestors(path);
+  if (isExternalWritePath(path, workspace.generation)) throw new Error(`File operation is already in progress: ${path}`);
   const name = path.split("/").pop();
   const imageBlob = markRaw(blob);
   const fileState = { name, path, fileType: "image", blob: imageBlob, savedBlob: null, objectUrl: URL.createObjectURL(imageBlob), size: imageBlob.size, mimeType: imageBlob.type || FileUtils.getImageMimeType(name), dirty: true, closed: false, language: "plaintext", monacoLanguage: "plaintext", isNew: true, persisted: false, deleted: false, version: null };
@@ -6827,15 +7125,12 @@ async function aiToolWriteFile({ path, content }, session = getActiveAiSession()
 
 async function aiToolDeleteFile(path, session = getActiveAiSession()) {
   const normalized = normalizeWorkspacePath(path);
-  const file = openFiles.get(normalized);
-  if (file?.isNew && !file.persisted) {
-    await file.stagePromise?.catch(() => {});
-    fileSession.value.revert(normalized);
-    removeFileState(normalized);
+  const wasUnsavedNew = Boolean(openFiles.get(normalized)?.isNew && !openFiles.get(normalized)?.persisted);
+  const deletedFile = await markFileDeleted(normalized, { closed: true });
+  if (wasUnsavedNew) {
     setStatus(tr("status.deleted", { path: normalized }), tr("status.unsaved"));
     return { summary: `Removed unsaved new file ${normalized}`, path: normalized, deleted: true, pending: false };
   }
-  const deletedFile = await markFileDeleted(normalized, { closed: true });
   markAiTouchedFile(deletedFile, session);
   return { summary: `Marked ${deletedFile.path} for deletion`, path: deletedFile.path, deleted: true, pending: true, dirty: deletedFile.dirty };
 }
@@ -6853,16 +7148,28 @@ async function aiToolShowDiff(path) {
   return { summary: `Showing diff for ${file.path}`, path: file.path, file_type: file.fileType, dirty: file.dirty };
 }
 
-async function markFileDeleted(path, options = {}) {
-  const file = await ensureAnyFileState(path, { closed: options.closed ?? true });
-  await file.stagePromise?.catch(() => {});
+async function markFileDeleted(path, options = {}, workspace = captureWorkspace()) {
+  if (!isCurrentWorkspace(workspace)) throw new Error("Workspace session changed");
+  const file = await ensureAnyFileState(path, { closed: options.closed ?? true, workspace });
+  if (!isCurrentWorkspace(workspace)) throw new Error("Workspace session changed");
+  await awaitLatestStage(file).catch(() => {});
+  if (!isCurrentWorkspace(workspace)) throw new Error("Workspace session changed");
   if (file.isNew && !file.persisted) {
-    fileSession.value.revert(file.path);
+    workspace.session.revert(file.path);
     removeFileState(file.path);
     return file;
   }
-  await queueFileStage(file, (session) => session.stageDelete(file.path));
   file.deleted = true;
+  try {
+    await queueFileStage(file, (session) => session.stageDelete(file.path), workspace);
+  } catch (error) {
+    if (isCurrentWorkspace(workspace)) {
+      file.deleted = false;
+      updateDirtyState(file);
+    }
+    throw error;
+  }
+  if (!isCurrentWorkspace(workspace)) return file;
   file.isNew = false;
   file.closed = options.closed ?? file.closed;
   if (isTextFileState(file)) {
@@ -6879,9 +7186,11 @@ async function markFileDeleted(path, options = {}) {
   return file;
 }
 
-async function createFileOnDisk(path) {
+async function createFileOnDisk(path, workspace = captureWorkspace()) {
   const normalized = normalizeWorkspacePath(path);
-  await fileSystem.value.writeText(normalized, "", {
+  if (!isCurrentWorkspace(workspace)) throw new Error("Workspace session changed");
+  if (isExternalWritePath(normalized, workspace.generation)) throw new Error(`File operation is already in progress: ${normalized}`);
+  await workspace.fileSystem.writeText(normalized, "", {
     expectedVersion: null,
     createParents: true,
     mimeType: getMimeType(normalized, "text/plain;charset=utf-8"),
@@ -7341,6 +7650,12 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .editor-dialog-input-row { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
 .code-editor-view .editor-dialog-input-row input { width: 100%; border: 1px solid var(--border); border-radius: 5px; background: var(--input); color: var(--text); padding: 8px 9px; }
 .code-editor-view .editor-dialog-input-row input:focus { border-color: var(--accent-strong); outline: none; box-shadow: 0 0 0 1px var(--accent-strong); }
+.code-editor-view .editor-dialog-option { display: flex; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-soft); cursor: pointer; }
+.code-editor-view .editor-dialog-option.disabled { cursor: not-allowed; opacity: 0.62; }
+.code-editor-view .editor-dialog-option > input { flex: 0 0 auto; width: auto; margin: 2px 0 0; accent-color: var(--accent-strong); }
+.code-editor-view .editor-dialog-option-copy { display: grid; min-width: 0; gap: 3px; }
+.code-editor-view .editor-dialog-option-copy strong { color: var(--text); font-size: 13px; font-weight: 600; }
+.code-editor-view .editor-dialog-option-copy small { color: var(--muted); font-size: 11px; line-height: 1.45; }
 .code-editor-view .ssh-dialog { width: min(620px, 100%); max-height: min(760px, calc(100vh - 36px)); overflow: auto; }
 .code-editor-view .ssh-dialog-grid { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 10px; }
 .code-editor-view .editor-dialog-actions { position: sticky; bottom: -18px; display: flex; justify-content: flex-end; gap: 8px; margin: 0 -18px -18px; padding: 12px 18px 18px; border-top: 1px solid var(--border); background: var(--panel); }

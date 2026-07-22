@@ -215,6 +215,14 @@ class FileSystem {
             providerOptions(options),
         );
     }
+
+    async isSameFileTarget(path, target, options = {}) {
+        return this.#provider.isSameFileTarget(
+            normalizeFilePath(path),
+            target,
+            providerOptions(options),
+        );
+    }
 }
 
 function normalizeEntry(entry, fallbackPath, expectedKind) {

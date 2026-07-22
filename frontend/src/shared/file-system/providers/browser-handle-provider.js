@@ -2,6 +2,7 @@ import {
     getFileName,
     getMimeType,
     getParentFilePath,
+    isPathUnder,
     joinFilePath,
     normalizeFilePath,
 } from '../../file-utils.js';
@@ -58,9 +59,19 @@ class BrowserHandleProvider extends FileSystemProvider {
     async isCopyDestinationInside(sourcePath, destinationProvider, destinationPath, options = {}) {
         throwIfAborted(options.signal);
         if (!(destinationProvider instanceof BrowserHandleProvider)) return false;
+        const normalizedSourcePath = normalizeFilePath(sourcePath);
+        const normalizedDestinationPath = normalizeFilePath(destinationPath);
         try {
-            const source = await this.#getDirectory(normalizeFilePath(sourcePath));
-            let candidatePath = normalizeFilePath(destinationPath);
+            if (typeof this.#root.resolve === 'function') {
+                const destinationRootPath = await this.#root.resolve(destinationProvider.#root);
+                if (Array.isArray(destinationRootPath)) {
+                    const resolvedDestinationPath = joinFilePath(...destinationRootPath, normalizedDestinationPath);
+                    if (isPathUnder(resolvedDestinationPath, normalizedSourcePath)) return true;
+                }
+            }
+
+            const source = await this.#getDirectory(normalizedSourcePath);
+            let candidatePath = normalizedDestinationPath;
             let destination = null;
             while (!destination) {
                 try {
@@ -75,7 +86,21 @@ class BrowserHandleProvider extends FileSystemProvider {
             return typeof source.resolve === 'function' && Array.isArray(await source.resolve(destination));
         } catch (error) {
             if (isMissingOrWrongKind(error)) return false;
-            throw translateHandleError(error, sourcePath);
+            throw translateHandleError(error, normalizedSourcePath);
+        }
+    }
+
+    async isSameFileTarget(path, target, options = {}) {
+        throwIfAborted(options.signal);
+        if (!target || target.kind !== 'file' || typeof target.isSameEntry !== 'function') return false;
+        const normalizedPath = normalizeFilePath(path);
+        try {
+            const parent = await this.#getDirectory(getParentFilePath(normalizedPath));
+            const source = await parent.getFileHandle(getFileName(normalizedPath));
+            return Boolean(await target.isSameEntry(source));
+        } catch (error) {
+            if (isMissingOrWrongKind(error)) return false;
+            throw translateHandleError(error, normalizedPath);
         }
     }
 
