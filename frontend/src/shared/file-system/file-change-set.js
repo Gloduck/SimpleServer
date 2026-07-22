@@ -1,4 +1,4 @@
-import {getFileName, isPathUnder, normalizeFilePath} from './file-path.js';
+import {getFileName, getTextByteLength, isPathUnder, normalizeFilePath, toBlob} from '../file-utils.js';
 
 class FileChangeSet {
     constructor(changes = []) {
@@ -17,13 +17,13 @@ class FileChangeSet {
     stageText(path, value, options = {}) {
         const normalizedPath = normalizeFilePath(path);
         const text = String(value);
-        const size = new Blob([text]).size;
+        const size = getTextByteLength(text);
         return this.#stage(normalizedPath, 'text', text, size, options);
     }
 
     stageBlob(path, value, options = {}) {
         const normalizedPath = normalizeFilePath(path);
-        const blob = value instanceof Blob ? value : new Blob([value], {type: options.mimeType});
+        const blob = toBlob(value, options.mimeType);
         return this.#stage(normalizedPath, 'blob', blob, blob.size, {
             ...options,
             mimeType: options.mimeType || blob.type || undefined,

@@ -1,8 +1,10 @@
 class FileSystemError extends Error {
+    static code = 'FILE_SYSTEM_ERROR';
+
     constructor(message, options = {}) {
         super(message, options.cause === undefined ? undefined : {cause: options.cause});
         this.name = this.constructor.name;
-        this.code = options.code || 'FILE_SYSTEM_ERROR';
+        this.code = options.code || this.constructor.code || FileSystemError.code;
 
         for (const [key, value] of Object.entries(options)) {
             if (key !== 'cause' && value !== undefined) this[key] = value;
@@ -13,20 +15,24 @@ class FileSystemError extends Error {
 }
 
 class FileNotFoundError extends FileSystemError {
+    static code = 'FILE_NOT_FOUND';
+
     constructor(path, options = {}) {
         super(options.message || `File not found: ${path}`, {
             ...options,
-            code: 'FILE_NOT_FOUND',
+            code: FileNotFoundError.code,
             path,
         });
     }
 }
 
 class FileAlreadyExistsError extends FileSystemError {
+    static code = 'FILE_ALREADY_EXISTS';
+
     constructor(path, options = {}) {
         super(options.message || `File already exists: ${path}`, {
             ...options,
-            code: 'FILE_ALREADY_EXISTS',
+            code: FileAlreadyExistsError.code,
             path,
         });
     }
@@ -45,12 +51,14 @@ class FileConflictError extends FileSystemError {
 }
 
 class FileTooLargeError extends FileSystemError {
+    static code = 'FILE_TOO_LARGE';
+
     constructor(path, options = {}) {
         const size = options.size;
         const maxSize = options.maxSize;
         super(options.message || `File is too large for ${options.operation || 'this operation'}: ${path} (${size} > ${maxSize} bytes)`, {
             ...options,
-            code: 'FILE_TOO_LARGE',
+            code: FileTooLargeError.code,
             path,
             size,
             maxSize,
@@ -59,30 +67,24 @@ class FileTooLargeError extends FileSystemError {
 }
 
 class FileUnsupportedError extends FileSystemError {
+    static code = 'FILE_UNSUPPORTED';
+
     constructor(operation, options = {}) {
         super(options.message || `File system operation is not supported: ${operation}`, {
             ...options,
-            code: 'FILE_UNSUPPORTED',
+            code: FileUnsupportedError.code,
             operation,
         });
     }
 }
 
 class FilePermissionError extends FileSystemError {
+    static code = 'FILE_PERMISSION_DENIED';
+
     constructor(path, options = {}) {
         super(options.message || `Permission denied: ${path}`, {
             ...options,
-            code: 'FILE_PERMISSION_DENIED',
-            path,
-        });
-    }
-}
-
-class FileAbortedError extends FileSystemError {
-    constructor(path, options = {}) {
-        super(options.message || `File operation was aborted: ${path}`, {
-            ...options,
-            code: 'FILE_ABORTED',
+            code: FilePermissionError.code,
             path,
         });
     }
@@ -96,5 +98,4 @@ export {
     FileTooLargeError,
     FileUnsupportedError,
     FilePermissionError,
-    FileAbortedError,
 };

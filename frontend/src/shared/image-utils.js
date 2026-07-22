@@ -1,3 +1,5 @@
+import {base64ToBlob, readFileAsDataUrl} from './file-utils.js';
+
 const ImageUtils = {
     compressImage: (file, maxWidth = null, maxHeight = null, quality = 0.8) => {
         return new Promise((resolve, reject) => {
@@ -61,24 +63,9 @@ const ImageUtils = {
         });
     },
 
-    imageToBase64: (file) => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-        });
-    },
+    imageToBase64: readFileAsDataUrl,
 
-    base64ToBlob: (base64, mimeType) => {
-        const byteString = atob(base64.split(',')[1]);
-        const ab = new ArrayBuffer(byteString.length);
-        const ia = new Uint8Array(ab);
-        for (let i = 0; i < byteString.length; i++) {
-            ia[i] = byteString.charCodeAt(i);
-        }
-        return new Blob([ab], {type: mimeType});
-    },
+    base64ToBlob,
 
     cropImage: (file, x, y, width, height) => {
         return new Promise((resolve, reject) => {

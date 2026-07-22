@@ -1,3 +1,10 @@
+import {
+    getFileName,
+    getMimeType,
+    getParentFilePath,
+    joinFilePath,
+    normalizeFilePath,
+} from '../../file-utils.js';
 import {FileSystemProvider} from '../file-system-provider.js';
 import {
     FileConflictError,
@@ -6,13 +13,6 @@ import {
     FileSystemError,
     FileUnsupportedError,
 } from '../file-system-errors.js';
-import {
-    getFileName,
-    getMimeType,
-    getParentFilePath,
-    joinFilePath,
-    normalizeFilePath,
-} from '../file-path.js';
 
 class BrowserHandleProvider extends FileSystemProvider {
     #root;
@@ -239,7 +239,7 @@ class BrowserHandleProvider extends FileSystemProvider {
         try {
             actualVersion = (await this.stat(path)).version;
         } catch (error) {
-            if (error?.code !== 'FILE_NOT_FOUND') throw error;
+            if (error?.code !== FileNotFoundError.code) throw error;
             exists = false;
         }
         if (expectedVersion !== undefined && expectedVersion !== actualVersion) {

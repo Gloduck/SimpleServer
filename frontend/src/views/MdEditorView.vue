@@ -304,14 +304,13 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { CommonUtils } from '@/shared/common-utils.js';
 import { CommonComponents } from '@/shared/common-components.js';
 import { CdnUtils } from '@/shared/cdn-utils.js';
-import { FileUtils } from '@/shared/file-utils.js';
+import { FileUtils, normalizeFilePath } from '@/shared/file-utils.js';
 import {
     createFileSystem,
     FileConflictError,
     FileOperationPolicy,
     FileResourceResolver,
     FileSession,
-    normalizeFilePath,
 } from '@/shared/file-system/index.js';
 import { enableEditorPwa } from '@/shared/pwa-install.js';
 

@@ -1,7 +1,16 @@
+import {
+    blobToText,
+    getFileName,
+    joinFilePath,
+    normalizeFilePath,
+    streamToBlob,
+    textToBlob,
+    toBlob,
+    withBlobType,
+} from '../file-utils.js';
 import {FileOperationPolicy} from './file-operation-policy.js';
 import {FileSystemError} from './file-system-errors.js';
 import {DEFAULT_FILE_SYSTEM_CAPABILITIES, FileSystemProvider} from './file-system-provider.js';
-import {getFileName, joinFilePath, normalizeFilePath} from './file-path.js';
 
 class FileSystem {
     #provider;
@@ -101,16 +110,14 @@ class FileSystem {
         const normalizedPath = normalizeFilePath(path);
         const opened = await this.openRead(normalizedPath, options);
         this.policy.assertMemoryRead(normalizedPath, opened.size);
-        const blob = opened.blob || await new Response(opened.stream).blob();
+        const blob = opened.blob || await streamToBlob(opened.stream);
         this.policy.assertMemoryRead(normalizedPath, blob.size);
-        return opened.mimeType && blob.type !== opened.mimeType
-            ? new Blob([blob], {type: opened.mimeType})
-            : blob;
+        return withBlobType(blob, opened.mimeType);
     }
 
     async readText(path, options = {}) {
         const blob = await this.readBlob(path, options);
-        return new TextDecoder('utf-8').decode(await blob.arrayBuffer());
+        return blobToText(blob);
     }
 
     async openWrite(path, options = {}) {
@@ -129,7 +136,7 @@ class FileSystem {
 
     async writeBlob(path, value, options = {}) {
         const normalizedPath = normalizeFilePath(path);
-        const blob = value instanceof Blob ? value : new Blob([value], {type: options.mimeType});
+        const blob = toBlob(value, options.mimeType);
         this.policy.assertMemoryWrite(normalizedPath, blob.size);
 
         const result = await this.#provider.write(normalizedPath, blob, {
@@ -144,9 +151,7 @@ class FileSystem {
         const text = String(value);
         const size = this.policy.getTextSize(text);
         this.policy.assertMemoryWrite(normalizedPath, size);
-        return this.writeBlob(normalizedPath, new Blob([new TextEncoder().encode(text)], {
-            type: options.mimeType || 'text/plain;charset=utf-8',
-        }), options);
+        return this.writeBlob(normalizedPath, textToBlob(text, options.mimeType || 'text/plain;charset=utf-8'), options);
     }
 
     async writeStream(path, source, options = {}) {
@@ -156,7 +161,7 @@ class FileSystem {
 
         if (!this.supports('streamingWrite')) {
             if (Number.isFinite(options.size)) this.policy.assertMemoryWrite(normalizedPath, options.size);
-            const blob = await new Response(stream).blob();
+            const blob = await streamToBlob(stream, options.mimeType);
             return this.writeBlob(normalizedPath, blob, options);
         }
 

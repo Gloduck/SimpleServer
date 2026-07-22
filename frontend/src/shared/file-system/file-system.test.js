@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+    base64ToBytes,
+    getFileName,
+    getParentFilePath,
+    joinFilePath,
+    normalizeFilePath,
+} from '../file-utils.js';
 import {BrowserHandleProvider} from './providers/browser-handle-provider.js';
 import {GithubProvider} from './providers/github-provider.js';
 import {
@@ -14,10 +21,6 @@ import {
     FileSystem,
     FileSystemProvider,
     FileTooLargeError,
-    getFileName,
-    getParentFilePath,
-    joinFilePath,
-    normalizeFilePath,
     writeFileTarget,
 } from './index.js';
 
@@ -346,7 +349,7 @@ test('GithubProvider writes UTF-8 bytes with the caller SHA and does not prefetc
     assert.equal(requests[0].options.method, 'PUT');
     const body = JSON.parse(requests[0].options.body);
     assert.equal(body.sha, 'old-sha');
-    assert.equal(new TextDecoder().decode(decodeBase64(body.content)), '你好');
+    assert.equal(new TextDecoder().decode(base64ToBytes(body.content)), '你好');
 
     requests.length = 0;
     await fileSystem.writeText('created.txt', 'new', {expectedVersion: null});
@@ -554,10 +557,6 @@ function createSession() {
 
 function entrySummary(entry) {
     return [entry.kind, entry.name, entry.status].filter(Boolean).join(':');
-}
-
-function decodeBase64(value) {
-    return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
 }
 
 class FakeProvider extends FileSystemProvider {

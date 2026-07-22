@@ -1,3 +1,4 @@
+import {getTextByteLength} from '../file-utils.js';
 import {FileTooLargeError} from './file-system-errors.js';
 
 const MEBIBYTE = 1024 * 1024;
@@ -16,7 +17,7 @@ class FileOperationPolicy {
     }
 
     getTextSize(value) {
-        return new TextEncoder().encode(String(value)).byteLength;
+        return getTextByteLength(value);
     }
 
     assertMemoryRead(path, size) {

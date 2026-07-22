@@ -1,3 +1,5 @@
+import {formatFileSize} from './file-utils.js';
+
 const CommonUtils = {
     computePath: (basePath, basePathIsFile, expression) => {
         const normalizeSlashes = (p) => p.replace(/\\/g, '/');
@@ -71,13 +73,7 @@ const CommonUtils = {
         }
     },
 
-    formatFileSize: (bytes) => {
-        if (bytes === 0 || !bytes) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    },
+    formatFileSize,
 
     truncateText: function (text, maxLength = 100) {
         if (!text) return text;

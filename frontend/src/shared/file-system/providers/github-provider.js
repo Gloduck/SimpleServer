@@ -1,3 +1,11 @@
+import {
+    base64ToBlob,
+    bytesToBase64,
+    getFileName,
+    getMimeType,
+    joinFilePath,
+    normalizeFilePath,
+} from '../../file-utils.js';
 import {FileSystemProvider} from '../file-system-provider.js';
 import {
     FileConflictError,
@@ -6,7 +14,6 @@ import {
     FileSystemError,
     FileUnsupportedError,
 } from '../file-system-errors.js';
-import {getFileName, getMimeType, joinFilePath, normalizeFilePath} from '../file-path.js';
 
 class GithubProvider extends FileSystemProvider {
     constructor({token, repo, branch = 'main', rootPath = '', proxy = '', apiBase = 'https://api.github.com', fetch: fetchImpl = globalThis.fetch} = {}) {
@@ -54,7 +61,7 @@ class GithubProvider extends FileSystemProvider {
         try {
             await this.#getContent(path, options);
         } catch (error) {
-            if (error?.code !== 'FILE_NOT_FOUND' || !this.branchVerified || !this.rootPath || normalizeFilePath(path) !== '') throw error;
+            if (error?.code !== FileNotFoundError.code || !this.branchVerified || !this.rootPath || normalizeFilePath(path) !== '') throw error;
         }
         return true;
     }
@@ -65,7 +72,7 @@ class GithubProvider extends FileSystemProvider {
         try {
             data = await this.#getContent(normalizedPath, options);
         } catch (error) {
-            if (error?.code === 'FILE_NOT_FOUND' && this.branchVerified && normalizedPath === '' && this.rootPath) {
+            if (error?.code === FileNotFoundError.code && this.branchVerified && normalizedPath === '' && this.rootPath) {
                 return {path: '', name: '', kind: 'directory', size: 0, mimeType: null, version: null};
             }
             throw error;
@@ -90,7 +97,7 @@ class GithubProvider extends FileSystemProvider {
         try {
             data = await this.#getContent(normalizedPath, options);
         } catch (error) {
-            if (error?.code === 'FILE_NOT_FOUND' && this.branchVerified && normalizedPath === '' && this.rootPath) return [];
+            if (error?.code === FileNotFoundError.code && this.branchVerified && normalizedPath === '' && this.rootPath) return [];
             throw error;
         }
         if (!Array.isArray(data)) {
@@ -116,7 +123,7 @@ class GithubProvider extends FileSystemProvider {
         }
 
         if (data.encoding === 'base64' && typeof data.content === 'string') {
-            const blob = new Blob([decodeBase64(data.content)], {type: getMimeType(normalizedPath)});
+            const blob = base64ToBlob(data.content, getMimeType(normalizedPath));
             return {
                 path: normalizedPath,
                 name: getFileName(normalizedPath),
@@ -167,7 +174,7 @@ class GithubProvider extends FileSystemProvider {
         const bytes = new Uint8Array(await blob.arrayBuffer());
         const body = {
             message: options.message || `Update ${normalizedPath}`,
-            content: encodeBase64(bytes),
+            content: bytesToBase64(bytes),
             branch: this.branch,
         };
         if (typeof options.expectedVersion === 'string') body.sha = options.expectedVersion;
@@ -200,7 +207,7 @@ class GithubProvider extends FileSystemProvider {
             try {
                 actualVersion = (await this.stat(normalizedPath, options)).version;
             } catch (error) {
-                if (error?.code === 'FILE_NOT_FOUND') throw error;
+                if (error?.code === FileNotFoundError.code) throw error;
                 throw error;
             }
             throw new FileConflictError(normalizedPath, {expectedVersion: null, actualVersion});
@@ -305,22 +312,6 @@ function githubEntry(path, entry) {
         mimeType: kind === 'file' ? getMimeType(path) : null,
         version: kind === 'file' ? entry.sha || null : null,
     };
-}
-
-function decodeBase64(value) {
-    const binary = globalThis.atob(value.replace(/\s/g, ''));
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
-    return bytes;
-}
-
-function encodeBase64(bytes) {
-    const chunkSize = 0x8000;
-    let binary = '';
-    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-        binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-    }
-    return globalThis.btoa(binary);
 }
 
 export {GithubProvider};

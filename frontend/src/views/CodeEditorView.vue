@@ -621,7 +621,13 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { CdnUtils } from "@/shared/cdn-utils.js";
-import { FileUtils } from "@/shared/file-utils.js";
+import {
+  FileUtils,
+  getMimeType,
+  getParentFilePath,
+  joinFilePath,
+  normalizeFilePath,
+} from "@/shared/file-utils.js";
 import { MarkdownUtils } from "@/shared/markdown-utils.js";
 import { enableEditorPwa } from "@/shared/pwa-install.js";
 import {
@@ -630,10 +636,6 @@ import {
   FileOperationPolicy,
   FileSession,
   FileTooLargeError,
-  getMimeType,
-  getParentFilePath,
-  joinFilePath,
-  normalizeFilePath,
   writeFileTarget,
 } from "@/shared/file-system/index.js";
 
@@ -3776,11 +3778,11 @@ async function refreshConflictedFileBase(file) {
   try {
     const opened = await activeSession.openRead(file.path, { view: "base" });
     activeSession.policy.assertMemoryRead(file.path, opened.size);
-    const blob = opened.blob || await new Response(opened.stream).blob();
+    const blob = opened.blob || await FileUtils.streamToBlob(opened.stream);
     activeSession.policy.assertMemoryRead(file.path, blob.size);
     baseEntry = opened;
     latestValue = isTextFileState(file)
-      ? new TextDecoder("utf-8").decode(await blob.arrayBuffer())
+      ? await FileUtils.blobToText(blob)
       : blob;
   } catch (error) {
     if (error?.code !== "FILE_NOT_FOUND") throw error;
@@ -4577,8 +4579,8 @@ async function callOpenAiImage(options, signal) {
   let blob;
   if (item.b64_json || item.base64) {
     const encoded = item.b64_json || item.base64;
-    assertImageOutputSize(options.outputPath, estimateBase64DecodedSize(encoded));
-    blob = base64ToBlob(encoded, getImageMimeTypeForFormat(options.outputFormat));
+    assertImageOutputSize(options.outputPath, FileUtils.getBase64DecodedSize(encoded));
+    blob = FileUtils.base64ToBlob(encoded, getImageMimeTypeForFormat(options.outputFormat));
   } else if (item.url) {
     const imageResponse = await fetch(item.url, { signal });
     if (!imageResponse.ok) throw new Error(`Failed to download generated image: ${imageResponse.statusText}`);
@@ -4588,14 +4590,9 @@ async function callOpenAiImage(options, signal) {
   } else {
     throw new Error("Image API response did not include b64_json or url");
   }
-  if (!blob.type || blob.type === "application/octet-stream") blob = new Blob([blob], { type: getImageMimeTypeForFormat(options.outputFormat) });
+  if (!blob.type || blob.type === "application/octet-stream") blob = FileUtils.withBlobType(blob, getImageMimeTypeForFormat(options.outputFormat));
   assertImageOutputSize(options.outputPath, blob.size);
   return blob;
-}
-
-function estimateBase64DecodedSize(value) {
-  const base64 = String(value || "").replace(/^data:[^;,]+;base64,/i, "").replace(/\s/g, "");
-  return Math.max(0, Math.floor((base64.length * 3) / 4) - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0));
 }
 
 function assertImageOutputSize(path, size) {
@@ -4646,14 +4643,6 @@ async function readBoundedBlobResponse(response, path, maxSize, operation = "AI 
     reader.releaseLock();
   }
   return new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
-}
-
-function base64ToBlob(value, mimeType) {
-  const base64 = String(value || "").replace(/^data:[^;,]+;base64,/i, "");
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return new Blob([bytes], { type: mimeType });
 }
 
 function getImageMimeTypeForFormat(format) {
@@ -5907,11 +5896,11 @@ function removeSettingsFromUrl() {
 async function encodeSettingsForUrl(value) {
   const json = JSON.stringify(JSON.parse(JSON.stringify(value)));
   const bytes = await transformSettingsBytes(new TextEncoder().encode(json), new CompressionStream("deflate-raw"));
-  return encodeBase64Url(bytes);
+  return FileUtils.bytesToBase64Url(bytes);
 }
 
 async function decodeSettingsFromUrl(value) {
-  const compressed = decodeBase64Url(value);
+  const compressed = FileUtils.base64UrlToBytes(value);
   const bytes = await transformSettingsBytes(compressed, new DecompressionStream("deflate-raw"));
   return new TextDecoder().decode(bytes);
 }
@@ -5919,18 +5908,6 @@ async function decodeSettingsFromUrl(value) {
 async function transformSettingsBytes(bytes, transform) {
   const stream = new Blob([bytes]).stream().pipeThrough(transform);
   return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-
-function encodeBase64Url(bytes) {
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function decodeBase64Url(value) {
-  const base64 = String(value).replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(String(value).length / 4) * 4, "=");
-  const binary = atob(base64);
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
 function persistSettings() {

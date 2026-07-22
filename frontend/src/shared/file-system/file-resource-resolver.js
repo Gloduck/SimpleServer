@@ -1,5 +1,5 @@
+import {normalizeFilePath} from '../file-utils.js';
 import {FileUnsupportedError} from './file-system-errors.js';
-import {normalizeFilePath} from './file-path.js';
 
 class FileResourceResolver {
     #resources = new Map();

@@ -1,12 +1,16 @@
-import {FileChangeSet} from './file-change-set.js';
-import {FileAlreadyExistsError, FileNotFoundError} from './file-system-errors.js';
 import {
+    blobToText,
     getFileName,
     getMimeType,
     isPathUnder,
     joinFilePath,
     normalizeFilePath,
-} from './file-path.js';
+    streamToBlob,
+    toBlob,
+    withBlobType,
+} from '../file-utils.js';
+import {FileChangeSet} from './file-change-set.js';
+import {FileAlreadyExistsError, FileNotFoundError} from './file-system-errors.js';
 
 const FILE_VIEWS = new Set(['effective', 'base', 'changes']);
 
@@ -71,7 +75,7 @@ class FileSession {
         try {
             return this.#rememberBase(await this.#fileSystem.stat(normalizedPath, fileOptions));
         } catch (error) {
-            if (error?.code === 'FILE_NOT_FOUND' && this.#hasVisibleDescendant(normalizedPath, view)) {
+            if (error?.code === FileNotFoundError.code && this.#hasVisibleDescendant(normalizedPath, view)) {
                 return directoryEntry(normalizedPath);
             }
             throw error;
@@ -89,7 +93,7 @@ class FileSession {
             try {
                 for (const entry of this.#rememberBaseList(await this.#fileSystem.list(normalizedPath, fileOptions))) entries.set(entry.name, entry);
             } catch (error) {
-                if (error?.code !== 'FILE_NOT_FOUND' || !this.#hasVisibleDescendant(normalizedPath, view)) throw error;
+                if (error?.code !== FileNotFoundError.code || !this.#hasVisibleDescendant(normalizedPath, view)) throw error;
             }
         }
 
@@ -163,16 +167,14 @@ class FileSession {
         const normalizedPath = normalizeFilePath(path);
         const opened = await this.openRead(normalizedPath, options);
         this.#fileSystem.policy.assertMemoryRead(normalizedPath, opened.size);
-        const blob = opened.blob || await new Response(opened.stream).blob();
+        const blob = opened.blob || await streamToBlob(opened.stream);
         this.#fileSystem.policy.assertMemoryRead(normalizedPath, blob.size);
-        return opened.mimeType && blob.type !== opened.mimeType
-            ? new Blob([blob], {type: opened.mimeType})
-            : blob;
+        return withBlobType(blob, opened.mimeType);
     }
 
     async readText(path, options = {}) {
         const blob = await this.readBlob(path, options);
-        return new TextDecoder('utf-8').decode(await blob.arrayBuffer());
+        return blobToText(blob);
     }
 
     async stageText(path, value, options = {}) {
@@ -193,7 +195,7 @@ class FileSession {
 
     async stageBlob(path, value, options = {}) {
         const normalizedPath = normalizeFilePath(path);
-        const blob = value instanceof Blob ? value : new Blob([value], {type: options.mimeType});
+        const blob = toBlob(value, options.mimeType);
         this.#fileSystem.policy.assertMemoryWrite(normalizedPath, blob.size);
         const {createOnly = false, ...changeOptions} = options;
         const base = createOnly
@@ -321,7 +323,7 @@ class FileSession {
                     observation: 'content',
                 });
             } catch (error) {
-                if (error?.code !== 'FILE_NOT_FOUND') throw error;
+                if (error?.code !== FileNotFoundError.code) throw error;
             }
         }
         const change = this.#changes.get(normalizedPath);
@@ -384,7 +386,7 @@ class FileSession {
                 mimeType: entry.mimeType,
             };
         } catch (error) {
-            if (error?.code !== 'FILE_NOT_FOUND') throw error;
+            if (error?.code !== FileNotFoundError.code) throw error;
             return {status: 'created', baseVersion: null, baseSize: null};
         }
     }
@@ -400,7 +402,7 @@ class FileSession {
             this.#rememberBase(await this.#fileSystem.stat(path));
             throw new FileAlreadyExistsError(path);
         } catch (error) {
-            if (error?.code !== 'FILE_NOT_FOUND') throw error;
+            if (error?.code !== FileNotFoundError.code) throw error;
             return {status: 'created', baseVersion: null, baseSize: null};
         }
     }
@@ -467,7 +469,7 @@ function normalizeView(view = 'effective') {
 function changeToBlob(change) {
     return change.dataType === 'blob'
         ? change.value
-        : new Blob([change.value], {type: change.mimeType});
+        : toBlob(change.value, change.mimeType);
 }
 
 function changeToEntry(change) {

@@ -14,13 +14,4 @@ export {
     FileTooLargeError,
     FileUnsupportedError,
     FilePermissionError,
-    FileAbortedError,
 } from './file-system-errors.js';
-export {
-    normalizeFilePath,
-    joinFilePath,
-    getParentFilePath,
-    getFileName,
-    isPathUnder,
-    getMimeType,
-} from './file-path.js';
