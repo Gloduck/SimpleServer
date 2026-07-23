@@ -181,13 +181,13 @@
             <div class="ai-chat-options">
               <label>
                 <span>{{ tr('ai.agentModel') }}</span>
-                <select v-model="settings.ai.agentModel" :disabled="aiBusy">
+                <select v-model="aiSessionAgentModel" :disabled="aiBusy">
                   <option v-for="model in aiAgentModelOptions" :key="`chat-agent-${model}`" :value="model">{{ model }}</option>
                 </select>
               </label>
               <label>
                 <span>{{ tr('ai.reasoningEffort') }}</span>
-                <select v-model="settings.ai.reasoningEffort" :disabled="aiBusy">
+                <select v-model="aiSessionReasoningEffort" :disabled="aiBusy">
                   <option v-for="effort in aiReasoningEfforts" :key="effort" :value="effort">{{ tr(`ai.reasoning.${effort}`) }}</option>
                 </select>
               </label>
@@ -1599,6 +1599,14 @@ const aiPrompt = computed({
   get: () => activeAiSession.value?.prompt || "",
   set: (value) => { getActiveAiSession().prompt = value; },
 });
+const aiSessionAgentModel = computed({
+  get: () => activeAiSession.value?.agentModel || settings.ai.agentModel,
+  set: (value) => { getActiveAiSession().agentModel = String(value || "").trim(); },
+});
+const aiSessionReasoningEffort = computed({
+  get: () => activeAiSession.value?.reasoningEffort || settings.ai.reasoningEffort,
+  set: (value) => { getActiveAiSession().reasoningEffort = aiReasoningEfforts.includes(value) ? value : defaultAiSettings.reasoningEffort; },
+});
 const aiBusy = computed(() => Boolean(activeAiSession.value?.busy));
 const aiAvailableModels = ref([]);
 const aiModelsLoading = ref(false);
@@ -1613,7 +1621,10 @@ const searchSearched = ref(false);
 let searchSerial = 0;
 const aiAgentModelOptions = computed(() => {
   const configured = parseCommaList(settings.ai.agentModels);
-  return uniqueStrings(configured.length ? configured : [settings.ai.agentModel, defaultAiSettings.agentModel]);
+  return uniqueStrings([
+    ...(configured.length ? configured : [settings.ai.agentModel, defaultAiSettings.agentModel]),
+    ...aiSessions.map((session) => session.agentModel),
+  ]);
 });
 const aiModelOptions = computed(() => uniqueStrings([settings.ai.completionModel, settings.ai.imageModel, ...aiAgentModelOptions.value, defaultAiSettings.completionModel, defaultAiSettings.imageModel, ...aiAvailableModels.value]));
 const aiContextLength = computed(() => formatAiUsage(activeAiSession.value?.contextUsage));
@@ -5038,11 +5049,14 @@ function extractFunctionCalls(response) {
   return (response.output || []).filter((item) => item.type === "function_call" && item.name);
 }
 
-function createAiSession() {
+function createAiSession(options = {}) {
   aiSessionSerial += 1;
+  const reasoningEffort = options.reasoningEffort || settings.ai.reasoningEffort;
   return {
     id: `ai-session-${Date.now()}-${aiSessionSerial}`,
     title: tr("ai.defaultSessionTitle", { count: aiSessionSerial }),
+    agentModel: String(options.agentModel || settings.ai.agentModel || defaultAiSettings.agentModel).trim(),
+    reasoningEffort: aiReasoningEfforts.includes(reasoningEffort) ? reasoningEffort : defaultAiSettings.reasoningEffort,
     prompt: "",
     messages: [],
     touchedPaths: new Set(),
@@ -5323,8 +5337,8 @@ async function sendAiPrompt() {
   const session = getActiveAiSession();
   const prompt = session.prompt.trim();
   if (!prompt || session.busy) return;
-  const model = settings.ai.agentModel.trim();
-  const reasoningEffort = settings.ai.reasoningEffort;
+  const model = session.agentModel.trim();
+  const reasoningEffort = session.reasoningEffort;
   try {
     validateAiConfig(model);
   } catch (error) {
@@ -5379,7 +5393,7 @@ function resetAiConversation() {
 async function compressAiContext() {
   const session = getActiveAiSession();
   if (session.busy || !session.messages.length) return;
-  const model = settings.ai.agentModel.trim();
+  const model = session.agentModel.trim();
   try {
     validateAiConfig(model);
   } catch (error) {
@@ -5392,13 +5406,15 @@ async function compressAiContext() {
   const beforeLength = formatAiUsage(session.contextUsage);
   const touchedPaths = getActiveAiTouchedPaths(session);
   try {
-    const response = await callOpenAiResponses({
+    const payload = {
       model,
       store: false,
       instructions: "Compress the provided AI assistant conversation into a concise but complete context summary for future coding-agent turns. Preserve user goals, decisions, file paths, tool results, pending unsaved changes, AI-created files, deleted/pending-delete files, and unresolved issues. Do not add markdown fences.",
       input: `Workspace: ${rootName.value || "unknown"}\nAI-touched files: ${formatFileStateList(getAiTouchedFiles(session), { touchedPaths })}\nDirty files: ${formatFileStateList(dirtyFiles.value, { touchedPaths })}\n\nConversation to compress:\n${formatRecentAiMessages({ includePendingUserMessage: true, session })}`,
       max_output_tokens: 4096,
-    }, controller.signal);
+    };
+    if (session.reasoningEffort && session.reasoningEffort !== "default") payload.reasoning = { effort: session.reasoningEffort };
+    const response = await callOpenAiResponses(payload, controller.signal);
     updateAiContextUsage(response, session);
     const summary = extractResponseText(response);
     if (!summary) throw new Error("Empty compressed context");
@@ -5424,8 +5440,8 @@ async function compressAiContext() {
 async function runAiAgent(prompt, signal, session = getActiveAiSession(), runConfig = {}) {
   const conversation = buildAgentInputMessages(prompt, session);
   const agentInstructions = getAgentInstructions();
-  const model = runConfig.model || settings.ai.agentModel.trim();
-  const reasoningEffort = runConfig.reasoningEffort || settings.ai.reasoningEffort;
+  const model = runConfig.model || session.agentModel.trim();
+  const reasoningEffort = runConfig.reasoningEffort || session.reasoningEffort;
   for (let round = 0; round < AI_AGENT_MAX_TOOL_CALL_ROUNDS; round += 1) {
     const payload = { model, instructions: agentInstructions, input: conversation, tools: getAiToolDefinitions() };
     if (reasoningEffort && reasoningEffort !== "default") payload.reasoning = { effort: reasoningEffort };
