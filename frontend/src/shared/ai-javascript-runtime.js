@@ -2,8 +2,12 @@ import {isTextFile} from './file-utils.js';
 
 const AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS = 30_000;
 const AI_JAVASCRIPT_MAX_TIMEOUT_MS = 60 * 60 * 1000;
+const AI_JAVASCRIPT_MAX_CODE_CHARS = 20_000;
 const AI_JAVASCRIPT_MAX_FILE_COUNT = 1000;
+const AI_JAVASCRIPT_MAX_LOGS = 100;
 const AI_JAVASCRIPT_MAX_REQUEST_COUNT = 20;
+const AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS = 100;
+const AI_JAVASCRIPT_MAX_RESULT_DEPTH = 5;
 
 function requiresAiJavaScriptWorkspace({inputFiles = [], outputFiles = [], outputDirectories = []} = {}) {
     return inputFiles.length > 0 || outputFiles.length > 0 || outputDirectories.length > 0;
@@ -69,21 +73,21 @@ function serializeAiJavaScriptError(error) {
 }
 
 function createAiJavaScriptWorkerSource({
-    maxLogs = 100,
     maxStringLength = 5000,
     maxOutputStringLength = 20000,
     maxFileCount = AI_JAVASCRIPT_MAX_FILE_COUNT,
     maxRequestCount = AI_JAVASCRIPT_MAX_REQUEST_COUNT,
+    maxResultCollectionItems = AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS,
+    maxResultDepth = AI_JAVASCRIPT_MAX_RESULT_DEPTH,
 } = {}) {
     return String.raw`
 (() => {
-const MAX_LOGS = ${maxLogs};
 const MAX_STRING_LENGTH = ${maxStringLength};
 const MAX_OUTPUT_STRING_LENGTH = ${maxOutputStringLength};
 const MAX_FILE_COUNT = ${maxFileCount};
 const MAX_REQUEST_COUNT = ${maxRequestCount};
-const MAX_COLLECTION_ITEMS = 100;
-const MAX_DEPTH = 5;
+const MAX_COLLECTION_ITEMS = ${maxResultCollectionItems};
+const MAX_DEPTH = ${maxResultDepth};
 const REQUEST_PROXY_PATH = "/api/requestProxy";
 const nativePostMessage = self.postMessage.bind(self);
 const nativeFetch = self.fetch.bind(self);
@@ -349,7 +353,11 @@ function createRuntime(payload) {
   const outputDirectories = (payload.outputDirectories || []).slice().sort((left, right) => right.path.length - left.path.length);
   const pendingOutputs = new Map();
   const pendingOperations = new Set();
-  const limits = Object.freeze({ ...payload.limits });
+  const limits = Object.freeze({
+    ...payload.limits,
+    maxOutputFileCount: MAX_FILE_COUNT,
+    maxRequestCount: MAX_REQUEST_COUNT,
+  });
   const state = { downloadedBytes: 0, outputBytes: 0, requestCount: 0 };
 
   function trackOperation(operation) {
@@ -474,9 +482,13 @@ self.onmessage = async (event) => {
 }
 
 export {
+    AI_JAVASCRIPT_MAX_CODE_CHARS,
     AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS,
     AI_JAVASCRIPT_MAX_FILE_COUNT,
+    AI_JAVASCRIPT_MAX_LOGS,
     AI_JAVASCRIPT_MAX_REQUEST_COUNT,
+    AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS,
+    AI_JAVASCRIPT_MAX_RESULT_DEPTH,
     AI_JAVASCRIPT_MAX_TIMEOUT_MS,
     createAiJavaScriptWorkerSource,
     evaluateAiJavaScriptSize,

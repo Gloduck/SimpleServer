@@ -638,7 +638,12 @@ import { MarkdownUtils } from "@/shared/markdown-utils.js";
 import { enableEditorPwa } from "@/shared/pwa-install.js";
 import {
   AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS,
+  AI_JAVASCRIPT_MAX_CODE_CHARS,
   AI_JAVASCRIPT_MAX_FILE_COUNT,
+  AI_JAVASCRIPT_MAX_LOGS,
+  AI_JAVASCRIPT_MAX_REQUEST_COUNT,
+  AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS,
+  AI_JAVASCRIPT_MAX_RESULT_DEPTH,
   AI_JAVASCRIPT_MAX_TIMEOUT_MS,
   createAiJavaScriptWorkerSource,
   evaluateAiJavaScriptSize,
@@ -699,8 +704,6 @@ const AI_IMAGE_MAX_FILE_SIZE = 20 * 1024 * 1024;
 const AI_IMAGE_MASK_MAX_FILE_SIZE = 4 * 1024 * 1024;
 const AI_IMAGE_OUTPUT_MAX_FILE_SIZE = 25 * 1024 * 1024;
 const PREVIEW_INLINE_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
-const AI_JAVASCRIPT_MAX_CODE_CHARS = 20000;
-const AI_JAVASCRIPT_MAX_LOGS = 100;
 const AI_AGENTS_FILE_NAME = "AGENTS.md";
 const AI_AGENTS_MAX_CHARS = 30000;
 const AI_AGENT_MAX_TOOL_CALL_ROUNDS = 25;
@@ -5771,25 +5774,37 @@ function getAiAllToolDefinitions() {
       "The provided code is inserted directly as the body of an already-async function: async function(input, runtime) { ... }. Top-level await is supported. Write statements directly in the function body. Do not wrap the entire snippet in an unreturned async IIFE such as (async () => { ... })(), because the outer function would finish before the IIFE completes. If an IIFE is necessary, use return await (async () => { ... })(). Every asynchronous runtime operation must be awaited before the outer function returns.",
       "runtime.request({ url, method, headers, body, responseType: 'text'|'json'|'bytes', followRedirect, timeoutMs }) returns { status, statusText, ok, headers, body, size, proxied, url }. Requests run inside the Worker and automatically use the backend proxy when enabled; runtime.network.proxy reports only whether proxying is active. Native Worker APIs such as fetch, importScripts, XMLHttpRequest, WebSocket, nested workers, and browser storage are also available, but they bypass runtime.request proxying and limits.",
       "Declare every readable file in input_files. Declare exact output paths in output_files. Use output_directories when output child paths are determined during execution; path '.' means the workspace root. Use await runtime.files.readText(path), await runtime.files.readBytes(path), runtime.files.stat(path), runtime.files.writeText(path, content, mimeType), and runtime.files.writeBytes(path, bytes, mimeType). All paths are workspace-relative and there are no file aliases. File operations require an open workspace; plain calculations and network requests do not.",
-      "Data handled through runtime.files and runtime.request is memory-bounded. Oversized declared input, runtime downloads, or declared output fail without truncation. Native browser APIs are not covered by these limits. timeout_ms defaults to 30000ms, must be positive, and is capped at 3600000ms."
+      [
+        "Hard execution limits:",
+        `- code: at most ${AI_JAVASCRIPT_MAX_CODE_CHARS} characters`,
+        `- timeout_ms: defaults to ${AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS}ms and is capped at ${AI_JAVASCRIPT_MAX_TIMEOUT_MS}ms`,
+        `- runtime.request: at most ${AI_JAVASCRIPT_MAX_REQUEST_COUNT} calls per execution`,
+        `- each of input_files, output_files, and output_directories: at most ${AI_JAVASCRIPT_MAX_FILE_COUNT} declarations; generated outputs: at most ${AI_JAVASCRIPT_MAX_FILE_COUNT} files`,
+        `- runtime-managed input and downloads: at most ${normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES)} bytes per item and in total`,
+        `- runtime-managed outputs: at most ${normalizeMemoryLimit(settings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES)} bytes per file and in total`,
+        `- console output: only the latest ${AI_JAVASCRIPT_MAX_LOGS} log entries are retained`,
+        `- structured results: at most ${AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS} items per collection and ${AI_JAVASCRIPT_MAX_RESULT_DEPTH} nested levels are returned`,
+        "Plan the script to stay within every limit. Minimize runtime.request calls by batching or consolidating remote data whenever possible instead of issuing one request per item. Oversized runtime-managed data fails without truncation. Native browser APIs bypass runtime.request limits and proxying.",
+        "Exact byte limits plus the request and output-file limits are available inside the script through runtime.limits, including maxInputFileBytes, maxInputTotalBytes, maxDownloadBytes, maxDownloadTotalBytes, maxOutputFileBytes, maxOutputTotalBytes, maxRequestCount, and maxOutputFileCount.",
+      ].join("\n")
     ), parameters: { type: "object", properties: {
-      code: { type: "string", description: "Body of an already-async function with input and runtime variables available. Top-level await is supported. Write statements directly and return the final result. Do not wrap the entire code in an unreturned async IIFE. Every asynchronous runtime operation must complete before the outer function returns." },
+      code: { type: "string", maxLength: AI_JAVASCRIPT_MAX_CODE_CHARS, description: `Body of an already-async function with input and runtime variables available, limited to ${AI_JAVASCRIPT_MAX_CODE_CHARS} characters. Top-level await is supported. Write statements directly and return the final result. Do not pass a complete function declaration or wrap the entire code in an unreturned async IIFE. Every asynchronous runtime operation must complete before the outer function returns.` },
       input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." },
-      input_files: { type: "array", description: "Workspace files made readable to the script. Paths must be workspace-relative.", items: { type: "object", properties: {
+      input_files: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Workspace files made readable to the script. Paths must be workspace-relative. At most ${AI_JAVASCRIPT_MAX_FILE_COUNT} declarations.`, items: { type: "object", properties: {
         path: { type: "string" },
         type: { type: "string", enum: ["text", "bytes"], description: "How runtime.files reads this input. Defaults to text." },
         view: { type: "string", enum: ["effective", "base"], description: "effective includes unsaved editor changes; base reads the saved file. Defaults to effective." }
       }, required: ["path"] } },
-      output_files: { type: "array", description: "Exact workspace files the script may write.", items: { type: "object", properties: {
+      output_files: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Exact workspace files the script may write. At most ${AI_JAVASCRIPT_MAX_FILE_COUNT} declarations.`, items: { type: "object", properties: {
         path: { type: "string" },
         type: { type: "string", enum: ["text", "bytes"], description: "Optional required output type. When omitted, writeText or writeBytes determines it." },
         overwrite: { type: "boolean", description: "Allow replacing existing saved or unsaved content. Defaults to false." }
       }, required: ["path"] } },
-      output_directories: { type: "array", description: "Workspace directories under which the script may dynamically create files, for example extracted archive entries.", items: { type: "object", properties: {
+      output_directories: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Workspace directories under which the script may dynamically create files, for example extracted archive entries. At most ${AI_JAVASCRIPT_MAX_FILE_COUNT} declarations.`, items: { type: "object", properties: {
         path: { type: "string", description: "Workspace-relative output directory. Use '.' for the workspace root." },
         overwrite: { type: "boolean", description: "Allow replacing existing saved or unsaved files under this directory. Defaults to false." }
       }, required: ["path"] } },
-      timeout_ms: { type: "number", description: `Optional positive timeout in milliseconds. Defaults to ${AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS}, max ${AI_JAVASCRIPT_MAX_TIMEOUT_MS}.` }
+      timeout_ms: { type: "number", exclusiveMinimum: 0, maximum: AI_JAVASCRIPT_MAX_TIMEOUT_MS, description: `Optional positive timeout in milliseconds. Defaults to ${AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS}, max ${AI_JAVASCRIPT_MAX_TIMEOUT_MS}.` }
     }, required: ["code"] } },
     { type: "function", name: "list_files", requirements: ["workspace"], description: aiToolDescription("List workspace files and directories.", "Use path relative to workspace root. Use an empty path or '.' for the workspace root. By default only the first level is listed; set recursive to true for descendants. Use max_items to keep output concise."), parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root. '.' means workspace root." }, max_items: { type: "number", description: "Maximum items to return. Capped internally." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
     { type: "function", name: "refresh_tree", requirements: ["workspace"], description: aiToolDescription("Refresh the workspace file tree from disk.", "Use this before locating files that may have been created, deleted, renamed, downloaded, or externally changed."), parameters: { type: "object", properties: { collapse_all: { type: "boolean", description: "Whether to collapse all directories after refreshing. Defaults to false." } } } },
@@ -6973,7 +6988,6 @@ async function aiToolRunJavaScript({ code, input = {}, input_files: inputFiles, 
       signal?.addEventListener("abort", abort, { once: true });
       throwIfAiAborted(signal);
       objectUrl = URL.createObjectURL(new Blob([createAiJavaScriptWorkerSource({
-        maxLogs: AI_JAVASCRIPT_MAX_LOGS,
         maxStringLength: AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS,
         maxOutputStringLength: AI_TOOL_OUTPUT_HARD_MAX_CHARS,
       })], { type: "application/javascript" }));

@@ -3,6 +3,12 @@ import test from 'node:test';
 import vm from 'node:vm';
 import {
     AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS,
+    AI_JAVASCRIPT_MAX_CODE_CHARS,
+    AI_JAVASCRIPT_MAX_FILE_COUNT,
+    AI_JAVASCRIPT_MAX_LOGS,
+    AI_JAVASCRIPT_MAX_REQUEST_COUNT,
+    AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS,
+    AI_JAVASCRIPT_MAX_RESULT_DEPTH,
     AI_JAVASCRIPT_MAX_TIMEOUT_MS,
     createAiJavaScriptWorkerSource,
     evaluateAiJavaScriptSize,
@@ -22,6 +28,15 @@ const DEFAULT_LIMITS = {
     maxOutputFileBytes: 1024,
     maxOutputTotalBytes: 1024,
 };
+
+test('场景：JavaScript 运行约束由共享常量统一定义', () => {
+    assert.equal(AI_JAVASCRIPT_MAX_CODE_CHARS, 20_000);
+    assert.equal(AI_JAVASCRIPT_MAX_FILE_COUNT, 1000);
+    assert.equal(AI_JAVASCRIPT_MAX_LOGS, 100);
+    assert.equal(AI_JAVASCRIPT_MAX_REQUEST_COUNT, 20);
+    assert.equal(AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS, 100);
+    assert.equal(AI_JAVASCRIPT_MAX_RESULT_DEPTH, 5);
+});
 
 test('场景：脚本执行时间默认三十秒、允许一毫秒并且最高限制一小时', () => {
     assert.equal(normalizeAiJavaScriptTimeout(), AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS);
@@ -104,12 +119,19 @@ test('场景：输入和输出同时检查单文件大小与本次执行累计�
 
 test('场景：纯脚本无需工作区并且只向脚本暴露代理布尔值', async () => {
     const {done} = await runWorker({
-        code: 'return { value: input.value * 2, networkKeyCount: Object.keys(runtime.network).length, hasBackendBaseUrl: "backendBaseUrl" in runtime.network, proxy: runtime.network.proxy };',
+        code: 'return { value: input.value * 2, networkKeyCount: Object.keys(runtime.network).length, hasBackendBaseUrl: "backendBaseUrl" in runtime.network, proxy: runtime.network.proxy, maxRequestCount: runtime.limits.maxRequestCount, maxOutputFileCount: runtime.limits.maxOutputFileCount };',
         input: {value: 4},
     });
 
     assert.equal(done.ok, true);
-    assert.deepEqual(done.result, {value: 8, networkKeyCount: 1, hasBackendBaseUrl: false, proxy: false});
+    assert.deepEqual(done.result, {
+        value: 8,
+        networkKeyCount: 1,
+        hasBackendBaseUrl: false,
+        proxy: false,
+        maxRequestCount: AI_JAVASCRIPT_MAX_REQUEST_COUNT,
+        maxOutputFileCount: AI_JAVASCRIPT_MAX_FILE_COUNT,
+    });
 });
 
 test('场景：工作区根目录声明允许动态写入文件但仍拒绝路径穿越', async () => {
