@@ -1562,6 +1562,8 @@ const keybindingDisposables = [];
 const inlineCompletionDisposables = [];
 const referenceProviderDisposables = [];
 const workspaceFileActionDisposables = [];
+let workspaceFileActionKey = "";
+let editorOpenerDisposable = null;
 const workspaceModelPaths = new Set();
 const workspaceModelPromises = new Map();
 const status = reactive({ left: "Ready", right: "Monaco Editor" });
@@ -1737,6 +1739,7 @@ onMounted(async () => {
   registerKeybindings();
   registerInlineCompletions();
   registerReferenceProviders();
+  registerWorkspaceEditorOpener();
   registerCompletionInvalidation();
   setStatus(tr("status.ready"), tr("status.loaded"));
   document.addEventListener("click", hideAllContextMenus);
@@ -1752,6 +1755,8 @@ onBeforeUnmount(() => {
   disableEditorPwa?.();
   formatterDisposables.splice(0).forEach((disposable) => disposable.dispose());
   workspaceFileActionDisposables.splice(0).forEach((disposable) => disposable.dispose());
+  editorOpenerDisposable?.dispose();
+  editorOpenerDisposable = null;
   referenceProviderDisposables.splice(0).forEach((disposable) => disposable.dispose());
   keybindingDisposables.splice(0).forEach((disposable) => disposable.dispose());
   inlineCompletionDisposables.splice(0).forEach((disposable) => disposable.dispose());
@@ -3297,6 +3302,7 @@ function normalizeShortcutKey(key) {
 }
 
 function openCommandPalette() {
+  registerWorkspaceFileActions();
   const targetEditor = activeDiffPath.value ? diffEditor.value?.getModifiedEditor?.() : editor.value;
   const action = targetEditor?.getAction("editor.action.quickCommand") || editor.value?.getAction("editor.action.quickCommand");
   targetEditor?.focus?.();
@@ -3394,10 +3400,17 @@ async function openSearchResult(result, match) {
 }
 
 function registerWorkspaceFileActions() {
-  workspaceFileActionDisposables.splice(0).forEach((disposable) => disposable.dispose());
-  if (!editor.value) return;
+  if (!editor.value) {
+    workspaceFileActionDisposables.splice(0).forEach((disposable) => disposable.dispose());
+    workspaceFileActionKey = "";
+    return;
+  }
   const targetEditors = [editor.value, diffEditor.value?.getOriginalEditor(), diffEditor.value?.getModifiedEditor()].filter(Boolean);
   const fileNodes = collectFileNodes(tree.value, WORKSPACE_FILE_ACTION_LIMIT);
+  const nextKey = fileNodes.map((node) => node.path).join("\0");
+  if (nextKey === workspaceFileActionKey && workspaceFileActionDisposables.length) return;
+  workspaceFileActionDisposables.splice(0).forEach((disposable) => disposable.dispose());
+  workspaceFileActionKey = nextKey;
   fileNodes.forEach((node, nodeIndex) => {
     targetEditors.forEach((targetEditor, editorIndex) => {
       workspaceFileActionDisposables.push(targetEditor.addAction({
@@ -3441,8 +3454,41 @@ function getPreviewModelUri(path) {
 }
 
 function getWorkspacePathFromModel(model) {
-  if (model?.uri?.scheme !== "file") return "";
-  return decodeURI(model.uri.path.replace(/^\/+/, ""));
+  return getWorkspacePathFromUri(model?.uri);
+}
+
+function getWorkspacePathFromUri(uri) {
+  if (uri?.scheme !== "file") return "";
+  return decodeURI(uri.path.replace(/^\/+/, ""));
+}
+
+function registerWorkspaceEditorOpener() {
+  editorOpenerDisposable?.dispose();
+  editorOpenerDisposable = monaco.editor.registerEditorOpener({
+    async openCodeEditor(_source, resource, selectionOrPosition) {
+      const path = getWorkspacePathFromUri(resource);
+      if (!path) return false;
+      const file = await openFileByPath(path);
+      if (!file) return false;
+      if (!isTextFileState(file)) return true;
+      await nextTick();
+      const targetEditor = editor.value;
+      if (!targetEditor || targetEditor.getModel() !== file.model) return false;
+      revealEditorLocation(targetEditor, selectionOrPosition);
+      return true;
+    },
+  });
+}
+
+function revealEditorLocation(targetEditor, selectionOrPosition) {
+  if (monaco.Range.isIRange(selectionOrPosition)) {
+    targetEditor.setSelection(selectionOrPosition);
+    targetEditor.revealRangeInCenter(selectionOrPosition);
+  } else if (monaco.Position.isIPosition(selectionOrPosition)) {
+    targetEditor.setPosition(selectionOrPosition);
+    targetEditor.revealPositionInCenter(selectionOrPosition);
+  }
+  targetEditor.focus();
 }
 
 function getOrCreateWorkspaceModel(content, monacoLanguage, path, syncContent = false) {
@@ -6019,11 +6065,11 @@ function clampPreviewWidth(value) {
   return Math.max(PREVIEW_MIN_WIDTH, Math.min(PREVIEW_MAX_WIDTH, Math.round(Number(value) || DEFAULT_PREVIEW_WIDTH)));
 }
 
-async function triggerFindReferences() {
+function triggerFindReferences() {
   if (!activeFile.value) return;
   const targetEditor = activeDiffPath.value ? diffEditor.value?.getModifiedEditor?.() : editor.value;
   targetEditor?.focus?.();
-  await targetEditor?.getAction("editor.action.goToReferences")?.run();
+  targetEditor?.trigger("browser-editor", "editor.action.goToReferences", null);
 }
 
 function setStatus(left, right) {
