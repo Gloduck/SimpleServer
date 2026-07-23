@@ -97,7 +97,8 @@
     }
   },
   "proxyrequest": {
-    "proxy": null
+    "proxy": null,
+    "allowPrivateNetwork": false
   },
   "github": {
     "hotSearches": [

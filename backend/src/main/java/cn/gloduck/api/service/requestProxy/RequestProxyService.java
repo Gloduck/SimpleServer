@@ -62,9 +62,11 @@ public class RequestProxyService {
             "Transfer-Encoding"));
 
     private final HttpClient httpClient;
+    private final boolean allowPrivateNetwork;
 
     public RequestProxyService(ProxyRequestConfig config) {
         this.httpClient = buildHttpClient(config);
+        this.allowPrivateNetwork = config.allowPrivateNetwork;
     }
 
     public Response options(String path, HttpHeaders headers, UriInfo uriInfo) {
@@ -189,9 +191,11 @@ public class RequestProxyService {
         if (addresses.length == 0) {
             throw new IllegalArgumentException("Unable to resolve proxy target host");
         }
-        for (InetAddress address : addresses) {
-            if (!isPublicAddress(address)) {
-                throw new IllegalArgumentException("Access to non-public proxy targets is not allowed");
+        if (!allowPrivateNetwork) {
+            for (InetAddress address : addresses) {
+                if (!isPublicAddress(address)) {
+                    throw new IllegalArgumentException("Access to non-public proxy targets is not allowed");
+                }
             }
         }
     }
