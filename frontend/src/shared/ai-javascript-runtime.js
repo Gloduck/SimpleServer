@@ -1,3 +1,5 @@
+import {isTextFile} from './file-utils.js';
+
 const AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS = 30_000;
 const AI_JAVASCRIPT_MAX_TIMEOUT_MS = 60 * 60 * 1000;
 const AI_JAVASCRIPT_MAX_FILE_COUNT = 1000;
@@ -19,6 +21,10 @@ function getAiJavaScriptOutputConflict({existingKind = '', overwrite = false} = 
     if (existingKind === 'directory') return 'OUTPUT_PATH_TYPE_CONFLICT';
     if (existingKind === 'file' && !overwrite) return 'FILE_ALREADY_EXISTS';
     return '';
+}
+
+function isAiJavaScriptTextOutput({path, type, mimeType} = {}) {
+    return type === 'text' || isTextFile({name: path, type: mimeType});
 }
 
 function evaluateAiJavaScriptSize({itemSize, currentTotal = 0, itemLimit, totalLimit, phase} = {}) {
@@ -475,6 +481,7 @@ export {
     createAiJavaScriptWorkerSource,
     evaluateAiJavaScriptSize,
     getAiJavaScriptOutputConflict,
+    isAiJavaScriptTextOutput,
     normalizeAiJavaScriptTimeout,
     requiresAiJavaScriptWorkspace,
     resolveAiJavaScriptOutputPolicy,

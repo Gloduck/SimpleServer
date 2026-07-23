@@ -7,6 +7,7 @@ import {
     createAiJavaScriptWorkerSource,
     evaluateAiJavaScriptSize,
     getAiJavaScriptOutputConflict,
+    isAiJavaScriptTextOutput,
     normalizeAiJavaScriptTimeout,
     requiresAiJavaScriptWorkspace,
     resolveAiJavaScriptOutputPolicy,
@@ -56,6 +57,14 @@ test('场景：覆盖参数为真时覆盖已保存、未保存或待删除文�
         assert.equal(getAiJavaScriptOutputConflict({existingKind: 'file', overwrite: true, state}), '');
     }
     assert.equal(getAiJavaScriptOutputConflict({existingKind: 'directory', overwrite: true}), 'OUTPUT_PATH_TYPE_CONFLICT');
+});
+
+test('场景：归档以字节写出的源码按文本处理，图片和普通二进制保持二进制', () => {
+    for (const path of ['src/App.java', 'src/App.vue', 'src/main.js']) {
+        assert.equal(isAiJavaScriptTextOutput({path, type: 'bytes', mimeType: 'application/octet-stream'}), true);
+    }
+    assert.equal(isAiJavaScriptTextOutput({path: 'assets/icon.png', type: 'bytes', mimeType: 'application/octet-stream'}), false);
+    assert.equal(isAiJavaScriptTextOutput({path: 'archive/data.bin', type: 'bytes', mimeType: 'application/octet-stream'}), false);
 });
 
 test('场景：输入和输出同时检查单文件大小与本次执行累计大小', () => {

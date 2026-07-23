@@ -643,6 +643,7 @@ import {
   createAiJavaScriptWorkerSource,
   evaluateAiJavaScriptSize,
   getAiJavaScriptOutputConflict,
+  isAiJavaScriptTextOutput,
   normalizeAiJavaScriptTimeout,
   requiresAiJavaScriptWorkspace,
   resolveAiJavaScriptOutputPolicy,
@@ -7133,16 +7134,17 @@ function validateAiJavaScriptOutputs(workerOutputs, outputFiles, outputDirectori
     const conflict = getAiJavaScriptOutputConflict({ existingKind: existing.kind, overwrite: declaration.overwrite === true });
     if (conflict === "OUTPUT_PATH_TYPE_CONFLICT") throw createAiJavaScriptError(conflict, `Output file path is a directory: ${path}`, { phase: "output", path });
     if (conflict === "FILE_ALREADY_EXISTS") throw createAiJavaScriptError(conflict, `Output file already exists: ${path}`, { phase: "output", path });
-    if (existing.exists && type === "text" && existing.file && !isTextFileState(existing.file)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is not text: ${path}`, { phase: "output", path });
-    if (existing.exists && type === "text" && !existing.file && existing.node && !isReadableTextEntry(existing.node)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is not text: ${path}`, { phase: "output", path });
-    if (existing.exists && type === "bytes" && existing.file && isTextFileState(existing.file)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is text: ${path}`, { phase: "output", path });
-    if (existing.exists && type === "bytes" && !existing.file && existing.node && isReadableTextEntry(existing.node)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is text: ${path}`, { phase: "output", path });
-    if (existing.exists && type === "bytes") {
+    const textOutput = isAiJavaScriptTextOutput({ path, type, mimeType });
+    if (existing.exists && textOutput && existing.file && !isTextFileState(existing.file)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is not text: ${path}`, { phase: "output", path });
+    if (existing.exists && textOutput && !existing.file && existing.node && !isReadableTextEntry(existing.node)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is not text: ${path}`, { phase: "output", path });
+    if (existing.exists && !textOutput && existing.file && isTextFileState(existing.file)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is text: ${path}`, { phase: "output", path });
+    if (existing.exists && !textOutput && !existing.file && existing.node && isReadableTextEntry(existing.node)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is text: ${path}`, { phase: "output", path });
+    if (existing.exists && type === "bytes" && !textOutput) {
       const existingIsImage = existing.file?.fileType === "image" || (!existing.file && isImageEntry(existing.node));
       const outputIsImage = FileUtils.isImageFile({ name: path, type: mimeType });
       if (existingIsImage !== outputIsImage) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file binary type does not match: ${path}`, { phase: "output", path });
     }
-    validated.push({ path, type, content, size, mimeType, overwrite: declaration.overwrite === true, created: !existing.exists });
+    validated.push({ path, type, content, size, mimeType, textOutput, overwrite: declaration.overwrite === true, created: !existing.exists });
   }
   validated.forEach((output) => {
     let parent = getParentFilePath(output.path);
@@ -7161,9 +7163,12 @@ async function stageAiJavaScriptOutputs(outputs, workspace, session, signal) {
     throwIfAiAborted(signal);
     assertCurrentWorkspace(workspace);
     let file;
-    if (output.type === "text") {
-      const result = await aiToolWriteFile({ path: output.path, content: output.content }, session);
-      files.push({ path: output.path, type: "text", size: output.size, mime_type: output.mimeType, created: result.created, dirty: true });
+    if (output.textOutput) {
+      const content = output.type === "text"
+        ? output.content
+        : await FileUtils.blobToText(new Blob([output.content], { type: output.mimeType }));
+      const result = await aiToolWriteFile({ path: output.path, content }, session);
+      files.push({ path: output.path, type: output.type, size: output.size, mime_type: output.mimeType, created: result.created, dirty: result.dirty });
       continue;
     }
     const blob = new Blob([output.content], { type: output.mimeType });
