@@ -178,6 +178,16 @@ test('场景：普通对象数组不会被误判为循环引用', async () => {
     ]);
 });
 
+test('场景：凭据作为函数参数注入并允许脚本原样返回', async () => {
+    const {done} = await runWorker({
+        code: 'console.log("prefix-" + TOKEN + "-suffix"); return TOKEN;',
+        credentials: [{key: 'TOKEN', value: 'secret-value'}],
+    }, {sourceOptions: {maxStringLength: 12, maxOutputStringLength: 12}});
+
+    assert.equal(done.ok, true);
+    assert.equal(done.result.text, 'secret-value');
+});
+
 test('场景：真正的自引用对象和数组仍然标记为循环引用', async () => {
     const arrayResult = await runWorker({
         code: 'const value = []; value.push(value); return value;',

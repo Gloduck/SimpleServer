@@ -461,9 +461,10 @@ self.onmessage = async (event) => {
   const startedAt = performance.now();
   try {
     const state = createRuntime(payload);
+    const credentials = Array.isArray(payload.credentials) ? payload.credentials : [];
     const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
-    const run = new AsyncFunction("input", "runtime", "\"use strict\";\n" + String(payload.code || ""));
-    const result = await run(payload.input, state.runtime);
+    const run = new AsyncFunction("input", "runtime", ...credentials.map((entry) => entry.key), "\"use strict\";\n" + String(payload.code || ""));
+    const result = await run(payload.input, state.runtime, ...credentials.map((entry) => entry.value));
     if (state.hasPendingOperations()) {
       throw runtimeError("UNAWAITED_ASYNC_OPERATION", "The script returned while runtime operations were still pending. Use top-level await and do not launch an unreturned async IIFE.", { phase: "execution" });
     }

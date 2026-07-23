@@ -636,6 +636,7 @@ import {
 } from "@/shared/file-utils.js";
 import { MarkdownUtils } from "@/shared/markdown-utils.js";
 import { enableEditorPwa } from "@/shared/pwa-install.js";
+import { AiCredentialStore } from "@/shared/ai-credential-store.js";
 import {
   AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS,
   AI_JAVASCRIPT_MAX_CODE_CHARS,
@@ -712,7 +713,7 @@ const AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS = 5000;
 const AI_TOOL_OUTPUT_HARD_MAX_CHARS = 20000;
 const AI_TOOL_SEARCH_LINE_MAX_CHARS = 240;
 const SSH_OUTPUT_MAX_CHARS = 120000;
-const SSH_COMMAND_OUTPUT_WAIT_MS = 700;
+const SSH_COMMAND_OUTPUT_WAIT_MS = 1000;
 const SSH_CONNECT_TIMEOUT_MS = 15000;
 const WORKSPACE_FILE_ACTION_LIMIT = 1000;
 const WORKSPACE_REFERENCE_FILE_LIMIT = 2000;
@@ -1592,6 +1593,7 @@ const sshDialog = reactive({ visible: false, mode: "create", draft: createSshDra
 const sftpDialog = reactive({ visible: false, mode: "upload", connectionId: "", connectionName: "", localPath: "", remotePath: "", useUnsaved: true });
 const sftpTasks = reactive([]);
 const sftpTasksCollapsed = ref(true);
+const aiCredentialStore = markRaw(new AiCredentialStore());
 let disableEditorPwa = null;
 let aiSessionSerial = 0;
 const aiSessions = reactive([createAiSession()]);
@@ -2517,6 +2519,7 @@ function createSshSession(config) {
     websocketUrl: "",
     startedAt: Date.now(),
     lastActiveAt: Date.now(),
+    aiCommandCaptures: new Set(),
   };
 }
 
@@ -3030,6 +3033,9 @@ function appendSshOutput(session, data) {
   if (!session) return;
   const text = String(data || "");
   session.output = `${session.output || ""}${text}`.slice(-SSH_OUTPUT_MAX_CHARS);
+  session.aiCommandCaptures?.forEach((capture) => {
+    capture.output = `${capture.output}${text}`.slice(-SSH_OUTPUT_MAX_CHARS);
+  });
   session.terminal?.write?.(text);
   touchSshState();
 }
@@ -3210,6 +3216,7 @@ async function activateWorkspace(handle, name, kind) {
 
 function resetWorkspaceEditorState() {
   resetPreviewState();
+  aiCredentialStore.clear();
   diffEditor.value?.setModel(null);
   editor.value?.setModel(null);
   openFiles.forEach((file) => disposeFileModels(file, { force: true }));
@@ -5769,9 +5776,18 @@ function getAiAllToolDefinitions() {
       "Use this when you are unsure whether workspace, backend, SSH, or SFTP related tools are currently usable. This tool does not return parameter schemas; use each tool's own description and parameters directly.",
       "All tools are visible to you, but tools with unmet requirements will fail if called. Prefer checking availability before using tools that depend on workspace, backend, or exposed SSH settings."
     ), parameters: { type: "object", properties: { names: { type: "array", items: { type: "string" }, description: "Optional tool names to check. Omit to return all tools." } } } },
+    { type: "function", name: "load_credentials", requirements: ["workspace"], description: aiToolDescription(
+      "Load single-line KEY=VALUE credentials from a workspace text file.",
+      "Credential values are kept in memory. Later loads override earlier values with the same Key. The result returns Key names and source paths, never values."
+    ), parameters: { type: "object", properties: { path: { type: "string", description: "Workspace-relative credential file path." } }, required: ["path"] } },
+    { type: "function", name: "list_credentials", requirements: ["workspace"], description: aiToolDescription(
+      "List the currently active credential Keys and their source files.",
+      "Credential values are never returned."
+    ), parameters: { type: "object", properties: {} } },
     { type: "function", name: "run_javascript", description: aiToolDescription(
       "Execute JavaScript in an isolated browser Web Worker for calculations, parsing, data transformation, bounded HTTP requests, and declared workspace file processing.",
       "The provided code is inserted directly as the body of an already-async function: async function(input, runtime) { ... }. Top-level await is supported. Write statements directly in the function body. Do not wrap the entire snippet in an unreturned async IIFE such as (async () => { ... })(), because the outer function would finish before the IIFE completes. If an IIFE is necessary, use return await (async () => { ... })(). Every asynchronous runtime operation must be awaited before the outer function returns.",
+      "Use credentials to declare credential Keys needed by the script. Each declared Key is available directly as a function parameter with the same name. Missing Keys are empty strings. Values are not inserted into the source code.",
       "runtime.request({ url, method, headers, body, responseType: 'text'|'json'|'bytes', followRedirect, timeoutMs }) returns { status, statusText, ok, headers, body, size, proxied, url }. Requests run inside the Worker and automatically use the backend proxy when enabled; runtime.network.proxy reports only whether proxying is active. Native Worker APIs such as fetch, importScripts, XMLHttpRequest, WebSocket, nested workers, and browser storage are also available, but they bypass runtime.request proxying and limits.",
       "Declare every readable file in input_files. Declare exact output paths in output_files. Use output_directories when output child paths are determined during execution; path '.' means the workspace root. Use await runtime.files.readText(path), await runtime.files.readBytes(path), runtime.files.stat(path), runtime.files.writeText(path, content, mimeType), and runtime.files.writeBytes(path, bytes, mimeType). All paths are workspace-relative and there are no file aliases. File operations require an open workspace; plain calculations and network requests do not.",
       [
@@ -5790,6 +5806,7 @@ function getAiAllToolDefinitions() {
     ), parameters: { type: "object", properties: {
       code: { type: "string", maxLength: AI_JAVASCRIPT_MAX_CODE_CHARS, description: `Body of an already-async function with input and runtime variables available, limited to ${AI_JAVASCRIPT_MAX_CODE_CHARS} characters. Top-level await is supported. Write statements directly and return the final result. Do not pass a complete function declaration or wrap the entire code in an unreturned async IIFE. Every asynchronous runtime operation must complete before the outer function returns.` },
       input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." },
+      credentials: { type: "array", items: { type: "string" }, description: "Credential Keys exposed directly as JavaScript parameters. Missing Keys are empty strings." },
       input_files: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Workspace files made readable to the script. Paths must be workspace-relative. At most ${AI_JAVASCRIPT_MAX_FILE_COUNT} declarations.`, items: { type: "object", properties: {
         path: { type: "string" },
         type: { type: "string", enum: ["text", "bytes"], description: "How runtime.files reads this input. Defaults to text." },
@@ -5835,13 +5852,40 @@ function getAiAllToolDefinitions() {
     { type: "function", name: "delete_file", requirements: ["workspace"], description: aiToolDescription("Mark a workspace file for deletion in memory.", "Existing disk files are deleted only when the user saves the deletion. Unsaved new files are removed immediately from memory.", "Be careful resolving ambiguous references before deleting. Do not claim the file was deleted unless this tool reports success."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "open_file", requirements: ["workspace"], description: aiToolDescription("Open a workspace file in the editor.", "Use this when the user wants a file displayed or when visual editor context is useful."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
     { type: "function", name: "show_diff", requirements: ["workspace"], description: aiToolDescription("Show the diff for an in-memory changed file.", "Use this for files changed, created, or marked for deletion in the editor session."), parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
-    { type: "function", name: "request_proxy", requirements: ["backend"], description: aiToolDescription("Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits.", "Use this for external HTTP resources that browser fetch may block. It returns response status, optional response headers, and truncated text body.", "Only http and https URLs are supported. GET and HEAD requests cannot include a body. Prefer compact API formats when available. If a successful response contains enough information, answer from it instead of making follow-up requests.", "Use filter_script to reduce large response bodies at the source of the tool result: it runs after the request in an isolated Worker and the tool body becomes the script return value. For example, for HTML responses you can remove irrelevant CSS, JavaScript, SVGs, metadata, navigation, or boilerplate and return only the useful text or data."), parameters: { type: "object", properties: { url: { type: "string", description: "Absolute target URL, including query string if needed." }, method: { type: "string", description: "HTTP method. Defaults to GET." }, headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers forwarded to the target." }, body: { type: "string", description: "Optional request body. Not allowed for GET or HEAD." }, follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." }, enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." }, include_headers: { type: "boolean", description: "Whether to include response headers in the tool result. Defaults to false; set true only when headers are needed." }, filter_script: { type: "string", description: "Optional JavaScript async function body used to filter only the response body before returning it. input is the response body string. Return a string. No DOM, network, editor, or filesystem access is available. Example: const data = JSON.parse(input); return data.items.map(x => x.title).join('\\n');" }, max_chars: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["url"] } },
+    { type: "function", name: "request_proxy", requirements: ["backend"], description: aiToolDescription(
+      "Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits.",
+      "Declare credential Keys through credentials, then use ${KEY}, ${KEY|urlencode}, ${KEY|json}, or ${KEY|base64} in the URL, header values, or body. Missing Keys are empty strings. Use $${KEY} for a literal placeholder.",
+      "Only http and https URLs are supported. GET and HEAD requests cannot include a body. Prefer compact API formats when available. If a successful response contains enough information, answer from it instead of making follow-up requests.",
+      "Use filter_script to reduce large response bodies at the source of the tool result: it runs after the request in an isolated Worker and the tool body becomes the script return value."
+    ), parameters: { type: "object", properties: {
+      url: { type: "string", description: "Absolute target URL, including query string if needed. Supports declared credential placeholders." },
+      method: { type: "string", description: "HTTP method. Defaults to GET." },
+      headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers. Header values support declared credential placeholders." },
+      body: { type: "string", description: "Optional request body supporting declared credential placeholders. Not allowed for GET or HEAD." },
+      credentials: { type: "array", items: { type: "string" }, description: "Credential Keys available to URL, header value, and body placeholders." },
+      follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." },
+      enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." },
+      include_headers: { type: "boolean", description: "Whether to include response headers in the tool result. Defaults to false." },
+      filter_script: { type: "string", description: "Optional JavaScript async function body used to filter only the response body before returning it. input is the response body string." },
+      max_chars: { type: "number", description: aiToolOutputLimitDescription() }
+    }, required: ["url"] } },
     { type: "function", name: "get_ssh_connections", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Get SSH settings exposed to AI.", "Returns id, name, host, port, active state, and command whitelist. Secrets are never returned. Use this before opening or choosing an SSH connection when the target is ambiguous."), parameters: { type: "object", properties: {} } },
     { type: "function", name: "open_ssh_connection", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Open an exposed SSH connection by id, name, or host.", "The backend SSH WebSocket performs the actual SSH connection. Reuse active connections when possible instead of reconnecting."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "activate_ssh_terminal", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Switch the visible editor tab to an already active exposed SSH terminal.", "This does not execute any SSH command. It requires the connection to already be active."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "close_ssh_connection", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Close an active exposed SSH connection by id, name, or host.", "Use only when the user asks to disconnect or when cleanup is clearly part of the requested task."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "read_ssh_output", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Read recent output from an active exposed SSH connection.", "This reads the SSH terminal transcript. Commands run through execute_ssh_command and commands manually typed by the user can both appear here, along with their outputs, prompts, and terminal control artifacts.", "Use this to inspect terminal context when needed. When the distinction matters, separate AI-run commands and results from user-run commands and results before drawing conclusions. Output may be truncated and may include ANSI terminal artifacts."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, max_chars: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["connection"] } },
-    { type: "function", name: "execute_ssh_command", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Execute a command on an active exposed SSH connection.", "Prefer commands from the connection whitelist when they can complete the task, and choose concise commands or flags that produce short output when possible.", "You must provide a clear reason, commands array containing only every main command used by the shell command, and high_risk based on your own risk assessment. Main commands outside the whitelist require approval; high_risk=true always requires approval.", "If an SSH command approval is rejected, do not try alternate SSH commands for the same purpose unless the user explicitly asks you to continue or grants permission. List every SSH command you ran in your final answer."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, command: { type: "string" }, commands: { type: "array", items: { type: "string" }, description: "Required list of main commands used by command, excluding arguments. Include every command in chains, pipes, and substitutions. Example: for 'ls -la && whoami', pass ['ls','whoami']." }, high_risk: { type: "boolean", description: "Required. AI-assessed risk flag. Set true if the command may modify files/system state, affect services, expose secrets, consume significant resources, or otherwise be risky." }, reason: { type: "string", description: "Required explanation of why this SSH command is needed." } }, required: ["connection", "command", "commands", "high_risk", "reason"] } },
+    { type: "function", name: "execute_ssh_command", requirements: ["backend", "ssh_exposed"], description: aiToolDescription(
+      "Execute a command on an active exposed SSH connection.",
+      "Prefer commands from the connection whitelist when they can complete the task, and choose concise commands or flags that produce short output when possible.",
+      "You must provide a clear reason, commands array containing every main command used by the shell command, and high_risk based on your own risk assessment.",
+      "If an SSH command approval is rejected, do not try alternate SSH commands for the same purpose unless the user explicitly asks you to continue or grants permission. List every SSH command you ran in your final answer."
+    ), parameters: { type: "object", properties: {
+      connection: { type: "string", description: "SSH setting id, name, or host." },
+      command: { type: "string" },
+      commands: { type: "array", items: { type: "string" }, description: "Required list of main commands used by command, excluding arguments. Include every command in chains, pipes, and substitutions." },
+      high_risk: { type: "boolean", description: "Required AI-assessed risk flag." },
+      reason: { type: "string", description: "Required explanation of why this SSH command is needed." }
+    }, required: ["connection", "command", "commands", "high_risk", "reason"] } },
     { type: "function", name: "sftp_upload_file", requirements: ["backend", "ssh_exposed", "workspace"], description: aiToolDescription("Submit one SFTP upload task and return its task_id.", "local_path is a workspace-relative source file path only; remote_path is the destination file path on the SSH server. Missing remote parent directories are created automatically.", "Do not pass absolute local paths, URLs, or SSH server paths as local_path. Upload returns after task submission; only briefly wait or poll completion for likely-small files such as text files or roughly under 1MB. For larger or unknown-size files, report that the task was submitted unless the user explicitly asks to wait or a next step truly depends on completion."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, local_path: { type: "string", description: "Workspace-relative source file path only, for example 'dist/app.zip' or 'src/main.js'." }, remote_path: { type: "string", description: "Destination file path on the SSH server. Missing parent directories are created automatically." }, use_unsaved: { type: "boolean", description: "Upload unsaved dirty editor content when available. Defaults to true." } }, required: ["connection", "local_path", "remote_path"] } },
     { type: "function", name: "sftp_download_file", requirements: ["backend", "ssh_exposed", "workspace"], description: aiToolDescription("Submit one SFTP download task and return its task_id.", "remote_path is the source file path on the SSH server; local_path is a workspace-relative destination path. Parent directories are created automatically.", "Do not pass absolute local paths, URLs, or SSH server paths as local_path. Download returns after task submission; only briefly wait or poll completion for likely-small files such as text files or roughly under 1MB. For larger or unknown-size files, report that the task was submitted unless the user explicitly asks to wait or a next step truly depends on completion."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, remote_path: { type: "string", description: "Source file path on the SSH server." }, local_path: { type: "string", description: "Workspace-relative destination file path only, for example 'downloads/app.zip'." } }, required: ["connection", "remote_path", "local_path"] } },
     { type: "function", name: "sftp_list_tasks", requirements: ["backend", "ssh_exposed", "workspace"], description: aiToolDescription("List SFTP upload/download tasks submitted from the current page.", "Returns task progress and status. Prefer calling without status first when locating a task, because a task may already be in a different state than expected and a status filter could hide it.", "Do not repeatedly call this just to wait for large or unknown-size transfers; use it when checking is explicitly needed."), parameters: { type: "object", properties: { status: { type: "string", description: "Optional status filter: running, completed, failed, or cancelled. Omit when unsure so tasks in other states are still returned." } } } },
@@ -5965,6 +6009,8 @@ async function runAiToolCall(call, args = {}, session = getActiveAiSession(), si
     if (availability.found && !availability.available) return { ok: false, summary: `Tool ${call.name} is unavailable because ${availability.reason}` };
     switch (call.name) {
       case "get_tool_availability": return okTool(aiToolGetToolAvailability(args));
+      case "load_credentials": return okTool(await aiToolLoadCredentials(args));
+      case "list_credentials": return okTool(aiToolListCredentials());
       case "list_files": return okTool(await aiToolListFiles(args));
       case "refresh_tree": return okTool(await aiToolRefreshTree(args));
       case "read_file": return okTool(await aiToolReadFile(args));
@@ -5982,7 +6028,7 @@ async function runAiToolCall(call, args = {}, session = getActiveAiSession(), si
       case "sftp_download_file": return okTool(await aiToolSftpDownloadFile(args));
       case "sftp_list_tasks": return okTool(aiToolSftpListTasks(args));
       case "sftp_cancel_task": return okTool(aiToolSftpCancelTask(args));
-      case "execute_ssh_command": return okTool(await aiToolExecuteSshCommand(args));
+      case "execute_ssh_command": return okTool(await aiToolExecuteSshCommand(args, signal));
       case "get_current_file": return okTool(aiToolGetCurrentFile());
       case "replace_in_file": return okTool(await aiToolReplaceInFile(args, session));
       case "replace_in_files": return okTool(await aiToolReplaceInFiles(args, session));
@@ -6562,6 +6608,19 @@ async function createVirtualFileState(path, options = {}) {
   return fileState;
 }
 
+async function aiToolLoadCredentials({ path } = {}) {
+  const normalized = normalizeWorkspacePath(path);
+  const file = await ensureFileState(normalized, { closed: true });
+  if (file.deleted) throw new Error(`File is marked for deletion: ${file.path}`);
+  const result = aiCredentialStore.load(file.path, file.model.getValue());
+  return { summary: `Loaded ${result.loaded_keys.length} credential Key(s) from ${file.path}`, ...result };
+}
+
+function aiToolListCredentials() {
+  const credentials = aiCredentialStore.list();
+  return { summary: `${credentials.length} credential Key(s) loaded`, credentials };
+}
+
 async function aiToolListFiles({ path = "", max_items: maxItems = 200, recursive = false } = {}) {
   const rawPath = String(path || "").trim();
   const normalizedPath = !rawPath || rawPath === "." ? "" : normalizeWorkspacePath(rawPath);
@@ -6896,7 +6955,7 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
   return { summary: `${results.length} match(es)`, results };
 }
 
-async function aiToolRunJavaScript({ code, input = {}, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs, result_mode: resultMode, max_output_chars: maxOutputChars } = {}, signal, session = getActiveAiSession()) {
+async function aiToolRunJavaScript({ code, input = {}, credentials, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs, result_mode: resultMode, max_output_chars: maxOutputChars } = {}, signal, session = getActiveAiSession()) {
   throwIfAiAborted(signal);
   const script = String(code || "");
   if (!script.trim()) return aiJavaScriptErrorResult(createAiJavaScriptError("SCRIPT_REQUIRED", "JavaScript code is required"));
@@ -6907,7 +6966,10 @@ async function aiToolRunJavaScript({ code, input = {}, input_files: inputFiles, 
   let normalizedInputs;
   let normalizedOutputFiles;
   let normalizedOutputDirectories;
+  let credentialSelection;
   try {
+    credentialSelection = aiCredentialStore.select(credentials);
+    validateAiJavaScriptCredentialKeys(credentialSelection.requested);
     timeout = normalizeAiJavaScriptTimeout(timeoutMs);
     normalizedInputs = normalizeAiJavaScriptInputs(inputFiles);
     normalizedOutputFiles = normalizeAiJavaScriptOutputFiles(outputFiles);
@@ -6974,7 +7036,13 @@ async function aiToolRunJavaScript({ code, input = {}, input_files: inputFiles, 
       if (settled) return;
       settled = true;
       cleanup();
-      resolve({ elapsed_ms: Math.round(performance.now() - startedAt), logs, ...result });
+      resolve({
+        elapsed_ms: Math.round(performance.now() - startedAt),
+        requested_credentials: credentialSelection.requested,
+        missing_credentials: credentialSelection.missing,
+        logs,
+        ...result,
+      });
     };
 
     const abort = () => {
@@ -7031,6 +7099,7 @@ async function aiToolRunJavaScript({ code, input = {}, input_files: inputFiles, 
       worker.postMessage({
         type: "run",
         code: script,
+        credentials: credentialSelection.requested.map((key) => ({ key, value: credentialSelection.values[key] })),
         input,
         inputFiles: loadedInputs,
         outputFiles: normalizedOutputFiles,
@@ -7062,6 +7131,15 @@ function createAiJavaScriptError(code, message, details = {}) {
     if (value !== undefined) error[key] = value;
   });
   return error;
+}
+
+function validateAiJavaScriptCredentialKeys(keys) {
+  const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
+  try {
+    new AsyncFunction("input", "runtime", ...keys, "\"use strict\";");
+  } catch {
+    throw createAiJavaScriptError("INVALID_CREDENTIAL_KEY", "run_javascript credentials must be valid non-reserved JavaScript parameter names");
+  }
 }
 
 function aiJavaScriptErrorResult(error) {
@@ -7301,65 +7379,74 @@ async function stageAiJavaScriptOutputs(outputs, workspace, session, signal) {
   return files;
 }
 
-async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, follow_redirect: followRedirect = true, enable_cors: enableCors = true, include_headers: includeHeaders = false, filter_script: filterScript, max_chars: maxChars } = {}, signal) {
+async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, credentials, follow_redirect: followRedirect = true, enable_cors: enableCors = true, include_headers: includeHeaders = false, filter_script: filterScript, max_chars: maxChars } = {}, signal) {
   throwIfAiAborted(signal);
   validateBackendEnabled();
   if (!url) throw new Error("url is required");
-  const target = new URL(url);
-  if (!["http:", "https:"].includes(target.protocol)) throw new Error("Only http and https URLs are supported");
-  const requestMethod = String(method || "GET").trim().toUpperCase();
-  if ((requestMethod === "GET" || requestMethod === "HEAD") && body != null) throw new Error(`${requestMethod} requests cannot include a body`);
+  const credentialSelection = aiCredentialStore.select(credentials);
+  try {
+    const resolvedUrl = aiCredentialStore.resolveTemplate(url, credentialSelection);
+    const resolvedHeaders = Object.fromEntries(Object.entries(headers || {}).map(([name, value]) => [name, aiCredentialStore.resolveTemplate(value, credentialSelection)]));
+    const resolvedBody = body == null ? body : aiCredentialStore.resolveTemplate(body, credentialSelection);
+    const target = new URL(resolvedUrl);
+    if (!["http:", "https:"].includes(target.protocol)) throw new Error("Only http and https URLs are supported");
+    const requestMethod = String(method || "GET").trim().toUpperCase();
+    if ((requestMethod === "GET" || requestMethod === "HEAD") && resolvedBody != null) throw new Error(`${requestMethod} requests cannot include a body`);
 
-  const outputLimit = clampToolCharLimit(maxChars);
-  const requestHeaders = buildProxyRequestHeaders(headers);
-  const proxyUrl = buildRequestProxyUrl(target, enableCors, followRedirect);
+    const outputLimit = clampToolCharLimit(maxChars);
+    const requestHeaders = buildProxyRequestHeaders(resolvedHeaders);
+    const proxyUrl = buildRequestProxyUrl(target, enableCors, followRedirect);
+    const response = await fetch(proxyUrl, {
+      method: requestMethod,
+      headers: requestHeaders,
+      body: requestMethod === "GET" || requestMethod === "HEAD" ? undefined : String(resolvedBody ?? ""),
+      credentials: "omit",
+      signal,
+    });
+    const text = await response.text();
+    const responseHeaders = Object.fromEntries(response.headers);
+    const contentType = response.headers.get("content-type") || "";
+    const filterScriptText = String(filterScript || "").trim();
+    const filtered = Boolean(filterScriptText);
+    let clipped = clipAiToolText(text, outputLimit);
+    let filterElapsedMs = 0;
 
-  const response = await fetch(proxyUrl, {
-    method: requestMethod,
-    headers: requestHeaders,
-    body: requestMethod === "GET" || requestMethod === "HEAD" ? undefined : String(body ?? ""),
-    credentials: "omit",
-    signal,
-  });
-  const text = await response.text();
-  const responseHeaders = Object.fromEntries(response.headers);
-  const contentType = response.headers.get("content-type") || "";
-  const filterScriptText = String(filterScript || "").trim();
-  const filtered = Boolean(filterScriptText);
-  let clipped = clipAiToolText(text, outputLimit);
-  let filterElapsedMs = 0;
+    if (filtered) {
+      const filterResult = await aiToolRunJavaScript({
+        code: filterScriptText,
+        input: text,
+        result_mode: "text",
+        max_output_chars: outputLimit,
+      }, signal);
+      if (!filterResult.ok) throw new Error(`filter_script failed: ${filterResult.summary || "Unknown error"}`);
+      clipped = normalizeAiJavaScriptTextResult(filterResult.result, outputLimit);
+      filterElapsedMs = filterResult.elapsed_ms || 0;
+    }
 
-  if (filtered) {
-    const filterResult = await aiToolRunJavaScript({
-      code: filterScriptText,
-      input: text,
-      result_mode: "text",
-      max_output_chars: outputLimit,
-    }, signal);
-    if (!filterResult.ok) throw new Error(`filter_script failed: ${filterResult.summary || "Unknown error"}`);
-    clipped = normalizeAiJavaScriptTextResult(filterResult.result, outputLimit);
-    filterElapsedMs = filterResult.elapsed_ms || 0;
+    const result = {
+      summary: `${requestMethod} ${String(url)} -> ${response.status} (${clipped.returned_chars}/${clipped.text_chars} chars${filtered ? `, filtered from ${text.length} chars` : ""})`,
+      url: String(url),
+      status: response.status,
+      status_text: response.statusText,
+      http_ok: response.ok,
+      content_type: contentType,
+      filtered,
+      requested_credentials: credentialSelection.requested,
+      missing_credentials: credentialSelection.missing,
+      body_chars: clipped.text_chars,
+      returned_chars: clipped.returned_chars,
+      truncated: clipped.truncated,
+      body: clipped.text,
+    };
+    if (filtered) {
+      result.source_body_chars = text.length;
+      result.filter_elapsed_ms = filterElapsedMs;
+    }
+    if (includeHeaders) result.headers = responseHeaders;
+    return result;
+  } catch (error) {
+    throw error;
   }
-
-  const result = {
-    summary: `${requestMethod} ${target.href} -> ${response.status} (${clipped.returned_chars}/${clipped.text_chars} chars${filtered ? `, filtered from ${text.length} chars` : ""})`,
-    url: target.href,
-    status: response.status,
-    status_text: response.statusText,
-    http_ok: response.ok,
-    content_type: contentType,
-    filtered,
-    body_chars: clipped.text_chars,
-    returned_chars: clipped.returned_chars,
-    truncated: clipped.truncated,
-    body: clipped.text,
-  };
-  if (filtered) {
-    result.source_body_chars = text.length;
-    result.filter_elapsed_ms = filterElapsedMs;
-  }
-  if (includeHeaders) result.headers = responseHeaders;
-  return result;
 }
 
 function normalizeAiJavaScriptTextResult(result, maxChars) {
@@ -7481,7 +7568,7 @@ function aiToolSftpCancelTask({ task_id: taskId } = {}) {
   return { ...formatSftpTaskForTool(task, cancelled ? "SFTP task cancelled" : "SFTP task was not cancelled"), cancelled };
 }
 
-async function aiToolExecuteSshCommand({ connection, command, commands, high_risk: highRisk, reason } = {}) {
+async function aiToolExecuteSshCommand({ connection, command, commands, high_risk: highRisk, reason } = {}, signal) {
   const config = getAiExposedSshConfig(connection);
   const session = getActiveSshSessionForConfig(config);
   const normalizedCommand = String(command || "").trim();
@@ -7492,11 +7579,17 @@ async function aiToolExecuteSshCommand({ connection, command, commands, high_ris
   if (typeof highRisk !== "boolean") throw new Error("high_risk is required");
   if (!normalizedReason) throw new Error(tr("ssh.error.commandReasonRequired"));
   await authorizeAiSshCommand(config, normalizedCommand, mainCommands, highRisk, normalizedReason);
-  const beforeLength = String(session.output || "").length;
-  sendSshCommand(session, normalizedCommand);
-  await delay(SSH_COMMAND_OUTPUT_WAIT_MS);
-  const clipped = clipAiToolTailText(sanitizeAiTerminalOutput(String(session.output || "").slice(beforeLength)));
-  return { summary: tr("ssh.toolExecutedCommand", { command: normalizedCommand, reason: normalizedReason }), connection: formatAiSshConnection(config, session), command: normalizedCommand, commands: mainCommands, high_risk: highRisk, reason: normalizedReason, output_chars: clipped.text_chars, returned_chars: clipped.returned_chars, truncated: clipped.truncated, output: clipped.text };
+  throwIfAiAborted(signal);
+  const capture = { output: "" };
+  session.aiCommandCaptures.add(capture);
+  try {
+    sendSshCommand(session, normalizedCommand);
+    await delay(SSH_COMMAND_OUTPUT_WAIT_MS);
+    const clipped = clipAiToolTailText(sanitizeAiTerminalOutput(capture.output));
+    return { summary: tr("ssh.toolExecutedCommand", { command: normalizedCommand, reason: normalizedReason }), connection: formatAiSshConnection(config, session), command: normalizedCommand, commands: mainCommands, high_risk: highRisk, reason: normalizedReason, output_chars: clipped.text_chars, returned_chars: clipped.returned_chars, truncated: clipped.truncated, output: clipped.text };
+  } finally {
+    session.aiCommandCaptures.delete(capture);
+  }
 }
 
 function getAiExposedSshConfig(identifier) {
