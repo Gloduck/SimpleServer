@@ -145,6 +145,58 @@ test('场景：FileSession 正确合并 effective、base 和 changes 视图', as
     ]);
 });
 
+test('场景：待删除文件保留磁盘基线并可撤销恢复', async () => {
+    const {session} = createSession();
+
+    await session.stageDelete('delete.txt');
+    assert.equal(session.getChange('delete.txt').status, 'deleted');
+    await assert.rejects(session.readText('delete.txt'), FileNotFoundError);
+    assert.equal(await session.readText('delete.txt', {view: 'base'}), 'delete me');
+
+    assert.equal(session.revert('delete.txt'), true);
+    assert.equal(session.hasChange('delete.txt'), false);
+    assert.equal(await session.readText('delete.txt'), 'delete me');
+});
+
+test('场景：未保存修改转为待删除后以磁盘内容为对比基线', async () => {
+    const {session} = createSession();
+
+    await session.stageText('alpha.txt', 'local edit');
+    await session.stageDelete('alpha.txt');
+    const change = session.getChange('alpha.txt');
+    assert.equal(change.status, 'deleted');
+    assert.equal(change.baseVersion, 'alpha-v1');
+    assert.equal(await session.readText('alpha.txt', {view: 'base'}), 'alpha');
+    await assert.rejects(session.readText('alpha.txt'), FileNotFoundError);
+
+    session.revert('alpha.txt');
+    assert.equal(await session.readText('alpha.txt'), 'alpha');
+});
+
+test('场景：未落盘新建文件删除后直接丢弃暂存状态', async () => {
+    const {provider, session} = createSession();
+
+    await session.stageText('new.txt', 'temporary', {createOnly: true});
+    assert.equal(session.getChange('new.txt').status, 'created');
+    await session.stageDelete('new.txt');
+
+    assert.equal(session.hasChange('new.txt'), false);
+    assert.equal(provider.files.has('new.txt'), false);
+    await assert.rejects(session.readText('new.txt'), FileNotFoundError);
+});
+
+test('场景：提交待删除后文件和对比基线均不再存在', async () => {
+    const {provider, session} = createSession();
+
+    await session.stageDelete('delete.txt');
+    await session.commit('delete.txt');
+
+    assert.equal(provider.files.has('delete.txt'), false);
+    assert.equal(session.hasChange('delete.txt'), false);
+    await assert.rejects(session.readText('delete.txt'), FileNotFoundError);
+    await assert.rejects(session.readText('delete.txt', {view: 'base'}), FileNotFoundError);
+});
+
 test('场景：FileSession 使用基线版本提交创建、修改和删除', async () => {
     const {provider, session} = createSession();
     await session.stageText('alpha.txt', 'changed');

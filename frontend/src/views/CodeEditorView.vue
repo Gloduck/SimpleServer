@@ -1652,7 +1652,10 @@ const activeDiffFile = computed(() => {
   return activeDiffPath.value ? openFiles.get(activeDiffPath.value) : null;
 });
 const activeDiffImageFile = computed(() => activeDiffFile.value?.fileType === "image" && !activeDiffFile.value.deleted ? activeDiffFile.value : null);
-const activeDiffUnsupportedFile = computed(() => activeDiffFile.value?.fileType === "unsupported" || activeDiffFile.value?.deleted ? activeDiffFile.value : null);
+const activeDiffUnsupportedFile = computed(() => {
+  const file = activeDiffFile.value;
+  return file && !isTextFileState(file) && (file.fileType === "unsupported" || file.deleted) ? file : null;
+});
 const displayedImageFile = computed(() => activeDiffImageFile.value || (!activeDiffPath.value ? activeImageFile.value : null));
 const activeLanguage = computed({ get: () => activeFile.value?.language || "plaintext", set: (value) => { if (activeFile.value) activeFile.value.language = value; } });
 const activePreviewType = computed(() => getPreviewType(activeTextFile.value));
@@ -3752,13 +3755,13 @@ function activateFile(path) {
   const file = openFiles.get(path);
   if (!file) return;
   activeSshTerminalId.value = "";
+  file.closed = false;
+  openFiles.set(path, file);
+  touchDirtyState();
   if (file.deleted) {
     activateDiff(path);
     return;
   }
-  file.closed = false;
-  openFiles.set(path, file);
-  touchDirtyState();
   activeDiffPath.value = "";
   diffEditor.value?.setModel(null);
   activePath.value = path;
@@ -3792,6 +3795,9 @@ function focusActivePreviewEditor() {
 function activateDiff(path) {
   const file = openFiles.get(path);
   if (!file) return;
+  file.closed = false;
+  openFiles.set(path, file);
+  touchDirtyState();
   activeSshTerminalId.value = "";
   activePath.value = path;
   activeDiffPath.value = path;
@@ -4504,7 +4510,7 @@ async function markNodeDeleted(node, workspace = captureWorkspace()) {
     setStatus(tr("status.deleted", { path: node.path }), tr("status.unsaved"));
     return;
   }
-  await markFileDeleted(node.path, { closed: true }, workspace);
+  await markFileDeleted(node.path, { closed: file?.closed ?? true }, workspace);
 }
 
 function showChangesContextMenu(event, file) {
