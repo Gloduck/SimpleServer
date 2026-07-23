@@ -716,6 +716,7 @@ const WORKSPACE_REFERENCE_FILE_LIMIT = 2000;
 const WORKSPACE_REFERENCE_RESULT_LIMIT = 1000;
 const WORKSPACE_SEARCH_FILE_LIMIT = 3000;
 const WORKSPACE_SEARCH_RESULT_LIMIT = 500;
+const MONACO_MODEL_SOFT_LIMIT = 150;
 let monaco = null;
 let prettierStandalonePromise = null;
 const prettierPluginPromises = new Map();
@@ -1565,7 +1566,6 @@ const workspaceFileActionDisposables = [];
 let workspaceFileActionKey = "";
 let editorOpenerDisposable = null;
 const workspaceModelPaths = new Set();
-const workspaceModelPromises = new Map();
 const status = reactive({ left: "Ready", right: "Monaco Editor" });
 const contextMenu = reactive({ visible: false, x: 0, y: 0, node: null });
 const changesContextMenu = reactive({ visible: false, x: 0, y: 0, file: null });
@@ -1779,6 +1779,8 @@ onBeforeUnmount(() => {
   aiSessions.forEach((session) => session.abortController?.abort());
   aiSessions.forEach((session) => disposeAiMessageResources(session.messages));
   closeAllSshSessions({ disposeTerminal: true });
+  diffEditor.value?.setModel(null);
+  editor.value?.setModel(null);
   openFiles.forEach((file) => disposeFileModels(file, { force: true }));
   disposeWorkspaceModels({ force: true });
   previewBroadcastChannel?.close();
@@ -3205,10 +3207,11 @@ async function activateWorkspace(handle, name, kind) {
 
 function resetWorkspaceEditorState() {
   resetPreviewState();
+  diffEditor.value?.setModel(null);
+  editor.value?.setModel(null);
   openFiles.forEach((file) => disposeFileModels(file, { force: true }));
   openFiles.clear();
   disposeWorkspaceModels({ force: true });
-  workspaceModelPromises.clear();
   diskTree.value = [];
   registerWorkspaceFileActions();
   activePath.value = "";
@@ -3336,17 +3339,10 @@ async function runGlobalSearch() {
     let totalMatches = 0;
     for (const node of fileNodes) {
       if (requestId !== searchSerial || totalMatches >= WORKSPACE_SEARCH_RESULT_LIMIT) break;
-      const model = await ensureWorkspaceModelForNode(node);
-      if (!model) continue;
+      const content = await readWorkspaceTextForNode(node);
+      if (content === null) continue;
       const remaining = WORKSPACE_SEARCH_RESULT_LIMIT - totalMatches;
-      const matches = model.findMatches(query, false, false, searchMatchCase.value, null, false, remaining).map((match) => ({
-        lineNumber: match.range.startLineNumber,
-        column: match.range.startColumn,
-        range: match.range,
-        startIndex: match.range.startColumn - 1,
-        endIndex: match.range.endColumn - 1,
-        lineText: model.getLineContent(match.range.startLineNumber),
-      }));
+      const matches = findPlainTextMatches(content, query, searchMatchCase.value, remaining);
       if (!matches.length) continue;
       totalMatches += matches.length;
       groupedResults.push({ path: node.path, name: node.name, matches });
@@ -3356,6 +3352,72 @@ async function runGlobalSearch() {
   } finally {
     if (requestId === searchSerial) searchBusy.value = false;
   }
+}
+
+async function readWorkspaceTextForNode(node, token) {
+  if (token?.isCancellationRequested || !node || node.kind !== "file") return null;
+  const workspace = captureWorkspace();
+  if (!isCurrentWorkspace(workspace) || isExternalWritePath(node.path, workspace.generation)) return null;
+  const openFileState = openFiles.get(node.path);
+  if (openFileState && !openFileState.deleted) {
+    if (!isTextFileState(openFileState)) return null;
+    try {
+      assertOpenFileMemoryRead(openFileState);
+      return openFileState.model.getValue();
+    } catch {
+      return null;
+    }
+  }
+  if (FileUtils.isImageFileName(node.name) || !isReadableTextEntry(node)) return null;
+  try {
+    const content = await workspace.session.readText(node.path);
+    if (token?.isCancellationRequested || !isCurrentWorkspace(workspace) || isExternalWritePath(node.path, workspace.generation)) return null;
+    return content;
+  } catch {
+    return null;
+  }
+}
+
+function findPlainTextMatches(content, query, matchCase, limit) {
+  const source = matchCase ? content : content.toLowerCase();
+  const target = matchCase ? query : query.toLowerCase();
+  if (!target || limit <= 0) return [];
+  const lineStarts = [0];
+  const newlinePattern = /\r\n|\r|\n/g;
+  let newlineMatch;
+  while ((newlineMatch = newlinePattern.exec(content))) lineStarts.push(newlineMatch.index + newlineMatch[0].length);
+  const positionAt = (offset) => {
+    let low = 0;
+    let high = lineStarts.length;
+    while (low + 1 < high) {
+      const middle = (low + high) >> 1;
+      if (lineStarts[middle] <= offset) low = middle;
+      else high = middle;
+    }
+    return { lineNumber: low + 1, column: offset - lineStarts[low] + 1 };
+  };
+  const matches = [];
+  let searchOffset = 0;
+  while (matches.length < limit) {
+    const startOffset = source.indexOf(target, searchOffset);
+    if (startOffset < 0) break;
+    const endOffset = startOffset + target.length;
+    const start = positionAt(startOffset);
+    const end = positionAt(endOffset);
+    const nextLineStart = lineStarts[start.lineNumber] ?? content.length;
+    let lineEnd = nextLineStart;
+    while (lineEnd > lineStarts[start.lineNumber - 1] && /[\r\n]/.test(content[lineEnd - 1])) lineEnd -= 1;
+    matches.push({
+      lineNumber: start.lineNumber,
+      column: start.column,
+      range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
+      startIndex: start.column - 1,
+      endIndex: start.lineNumber === end.lineNumber ? end.column - 1 : lineEnd - lineStarts[start.lineNumber - 1],
+      lineText: content.slice(lineStarts[start.lineNumber - 1], lineEnd),
+    });
+    searchOffset = Math.max(endOffset, startOffset + 1);
+  }
+  return matches;
 }
 
 function clearSearchResults() {
@@ -3520,6 +3582,14 @@ function createOriginalModel(content, monacoLanguage, path) {
   return markRaw(monaco.editor.createModel(content, monacoLanguage, getOriginalModelUri(path)));
 }
 
+function ensureOriginalModel(file) {
+  if (!isTextFileState(file)) return null;
+  if (!file.originalModel || file.originalModel.isDisposed()) {
+    file.originalModel = createOriginalModel(file.savedValue, file.monacoLanguage, file.path);
+  }
+  return file.originalModel;
+}
+
 function getOrCreatePreviewModel(content, path) {
   const uri = getPreviewModelUri(path);
   const existing = monaco.editor.getModel(uri);
@@ -3530,49 +3600,12 @@ function getOrCreatePreviewModel(content, path) {
   return markRaw(monaco.editor.createModel(content, "plaintext", uri));
 }
 
-async function ensureWorkspaceModelForNode(node, token) {
-  if (token?.isCancellationRequested || !node || node.kind !== "file") return null;
-  const workspace = captureWorkspace();
-  if (!isCurrentWorkspace(workspace) || isExternalWritePath(node.path, workspace.generation)) return null;
-  const openFileState = openFiles.get(node.path);
-  if (openFileState && !openFileState.deleted) {
-    if (!isTextFileState(openFileState)) return null;
-    try {
-      assertOpenFileMemoryRead(openFileState);
-      return openFileState.model;
-    } catch {
-      return null;
-    }
-  }
-  if (FileUtils.isImageFileName(node.name)) return null;
-  if (!isReadableTextEntry(node)) return null;
-  const existing = monaco.editor.getModel(getWorkspaceModelUri(node.path));
-  if (existing) {
-    workspaceModelPaths.add(node.path);
-    return existing;
-  }
-  if (workspaceModelPromises.has(node.path)) return workspaceModelPromises.get(node.path);
-  const promise = trackFileLoad(workspace, node.path, async () => {
-    const content = await workspace.session.readText(node.path);
-    if (token?.isCancellationRequested || !isCurrentWorkspace(workspace) || isExternalWritePath(node.path, workspace.generation)) return null;
-    const monacoLanguage = getMonacoLanguageId(getLanguageId(node.name));
-    const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
-    workspaceModelPaths.add(node.path);
-    return model;
-  }).catch(() => null).finally(() => {
-    if (workspaceModelPromises.get(node.path) === promise) workspaceModelPromises.delete(node.path);
-  });
-  workspaceModelPromises.set(node.path, promise);
-  return promise;
-}
-
 function pruneWorkspaceModels(nodes) {
   const existingPaths = new Set(collectFileNodes(nodes, Number.POSITIVE_INFINITY).map((node) => node.path));
   Array.from(workspaceModelPaths).forEach((path) => {
     if (existingPaths.has(path) || openFiles.has(path)) return;
     monaco.editor.getModel(getWorkspaceModelUri(path))?.dispose();
     workspaceModelPaths.delete(path);
-    workspaceModelPromises.delete(path);
   });
 }
 
@@ -3581,7 +3614,6 @@ function disposeWorkspaceModels({ force = false } = {}) {
     if (!force && openFiles.has(path)) return;
     monaco.editor.getModel(getWorkspaceModelUri(path))?.dispose();
     workspaceModelPaths.delete(path);
-    workspaceModelPromises.delete(path);
   });
 }
 
@@ -3818,7 +3850,7 @@ function activateDiff(path) {
     setStatus(tr("status.diff", { path }), file.deleted ? tr("changes.deleted") : tr("status.unsaved"));
     return;
   }
-  diffEditor.value.setModel({ original: file.originalModel, modified: file.model });
+  diffEditor.value.setModel({ original: ensureOriginalModel(file), modified: file.model });
   nextTick(() => diffEditor.value?.layout());
   setStatus(tr("status.diff", { path }), file.deleted ? tr("changes.deleted") : `${getLanguageLabel(file.language)} | ${file.dirty ? tr("status.unsaved") : tr("status.saved")}`);
 }
@@ -5255,22 +5287,29 @@ async function provideWorkspaceReferences(model, position, token) {
   const word = model.getWordAtPosition(position);
   if (!word?.word) return [];
   const fileNodes = collectFileNodes(tree.value, WORKSPACE_REFERENCE_FILE_LIMIT);
+  const references = [];
   for (const node of fileNodes) {
     if (token?.isCancellationRequested) return [];
-    await ensureWorkspaceModelForNode(node, token);
-  }
-  const references = [];
-  const workspaceModels = new Map();
-  monaco.editor.getModels().forEach((workspaceModel) => {
-    const path = getWorkspacePathFromModel(workspaceModel);
-    if (path) workspaceModels.set(path, workspaceModel);
-  });
-  for (const workspaceModel of workspaceModels.values()) {
-    if (token?.isCancellationRequested || references.length >= WORKSPACE_REFERENCE_RESULT_LIMIT) break;
+    const content = await readWorkspaceTextForNode(node, token);
+    if (content === null) continue;
+    const uri = getWorkspaceModelUri(node.path);
+    let workspaceModel = monaco.editor.getModel(uri);
+    let createdModel = false;
+    if (!workspaceModel) {
+      if (monaco.editor.getModels().length >= MONACO_MODEL_SOFT_LIMIT) break;
+      workspaceModel = getOrCreateWorkspaceModel(content, getMonacoLanguageId(getLanguageId(node.name)), node.path, true);
+      createdModel = true;
+    }
+    const referenceCount = references.length;
     const matches = workspaceModel.findMatches(word.word, false, false, true, null, false, WORKSPACE_REFERENCE_RESULT_LIMIT - references.length);
     matches.forEach((match) => {
       if (isExactWordMatch(workspaceModel, match.range, word.word)) references.push({ uri: workspaceModel.uri, range: match.range });
     });
+    if (createdModel) {
+      if (references.length > referenceCount) workspaceModelPaths.add(node.path);
+      else workspaceModel.dispose();
+    }
+    if (references.length >= WORKSPACE_REFERENCE_RESULT_LIMIT) break;
   }
   return references;
 }
@@ -6437,8 +6476,7 @@ async function ensureFileState(path, options = {}) {
     const monacoLanguage = getMonacoLanguageId(language);
     const model = getOrCreateWorkspaceModel(content, monacoLanguage, node.path, true);
     workspaceModelPaths.delete(node.path);
-    const originalModel = createOriginalModel(content, monacoLanguage, node.path);
-    const fileState = { name: node.name, path: node.path, fileType: "text", model, originalModel, savedValue: content, lastLegalValue: content, lastStagedValue: content, dirty: false, closed: options.closed ?? true, language, monacoLanguage, isNew: false, persisted: true, deleted: false, size: node.size, mimeType: node.mimeType || getMimeType(node.path), version: node.version };
+    const fileState = { name: node.name, path: node.path, fileType: "text", model, originalModel: null, savedValue: content, lastLegalValue: content, lastStagedValue: content, dirty: false, closed: options.closed ?? true, language, monacoLanguage, isNew: false, persisted: true, deleted: false, size: node.size, mimeType: node.mimeType || getMimeType(node.path), version: node.version };
     attachTextModelListener(fileState);
     openFiles.set(node.path, fileState);
     touchDirtyState();
@@ -6492,8 +6530,7 @@ async function createVirtualFileState(path, options = {}) {
   const monacoLanguage = getMonacoLanguageId(language);
   const model = getOrCreateWorkspaceModel(content, monacoLanguage, path, true);
   workspaceModelPaths.delete(path);
-  const originalModel = createOriginalModel("", monacoLanguage, path);
-  const fileState = { name, path, fileType: "text", model, originalModel, savedValue: "", lastLegalValue: content, lastStagedValue: "", dirty: true, closed: options.closed ?? true, language, monacoLanguage, isNew: true, persisted: false, deleted: false, size: workspace.fileSystem.policy.getTextSize(content), mimeType: getMimeType(path, "text/plain;charset=utf-8"), version: null };
+  const fileState = { name, path, fileType: "text", model, originalModel: null, savedValue: "", lastLegalValue: content, lastStagedValue: "", dirty: true, closed: options.closed ?? true, language, monacoLanguage, isNew: true, persisted: false, deleted: false, size: workspace.fileSystem.policy.getTextSize(content), mimeType: getMimeType(path, "text/plain;charset=utf-8"), version: null };
   attachTextModelListener(fileState);
   openFiles.set(path, fileState);
   try {
@@ -7644,11 +7681,15 @@ function disposeFileModels(file, { force = false } = {}) {
     URL.revokeObjectURL(file.objectUrl);
     file.objectUrl = "";
   }
+  const currentDiffModel = diffEditor.value?.getModel?.();
+  if (currentDiffModel && (currentDiffModel.original === file.originalModel || currentDiffModel.modified === file.model)) {
+    diffEditor.value.setModel(null);
+  }
+  if (editor.value?.getModel?.() === file.model) editor.value.setModel(null);
   file.modelContentDisposable?.dispose();
   if (force || !workspaceModelPaths.has(file.path)) {
     file.model?.dispose();
     workspaceModelPaths.delete(file.path);
-    workspaceModelPromises.delete(file.path);
   }
   file.originalModel?.dispose();
 }
