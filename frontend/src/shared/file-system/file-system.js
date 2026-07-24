@@ -60,11 +60,29 @@ class FileSystem {
         return normalizeEntry(entry, normalizedPath);
     }
 
+    statSync(path = '', options = {}) {
+        const normalizedPath = normalizeFilePath(path);
+        return normalizeEntry(
+            this.#provider.statSync(normalizedPath, providerOptions(options)),
+            normalizedPath,
+        );
+    }
+
     async list(path = '', options = {}) {
         const normalizedPath = normalizeFilePath(path);
         const limit = this.policy.normalizeListLimit(options.limit);
         const result = await this.#provider.list(normalizedPath, {...providerOptions(options), limit});
         if (!Array.isArray(result)) throw invalidProviderResponse('list', normalizedPath);
+        return result
+            .slice(0, limit)
+            .map((entry) => normalizeEntry(entry, joinFilePath(normalizedPath, entry.name || '')));
+    }
+
+    listSync(path = '', options = {}) {
+        const normalizedPath = normalizeFilePath(path);
+        const limit = this.policy.normalizeListLimit(options.limit);
+        const result = this.#provider.listSync(normalizedPath, {...providerOptions(options), limit});
+        if (!Array.isArray(result)) throw invalidProviderResponse('listSync', normalizedPath);
         return result
             .slice(0, limit)
             .map((entry) => normalizeEntry(entry, joinFilePath(normalizedPath, entry.name || '')));
@@ -122,6 +140,20 @@ class FileSystem {
         return blobToText(blob);
     }
 
+    readBytesSync(path, options = {}) {
+        const normalizedPath = normalizeFilePath(path);
+        const bytes = normalizeProviderBytes(
+            this.#provider.readBytesSync(normalizedPath, providerOptions(options)),
+            normalizedPath,
+        );
+        this.policy.assertMemoryRead(normalizedPath, bytes.byteLength);
+        return bytes;
+    }
+
+    readTextSync(path, options = {}) {
+        return new TextDecoder(options.encoding || 'utf-8').decode(this.readBytesSync(path, options));
+    }
+
     async openWrite(path, options = {}) {
         const normalizedPath = normalizeFilePath(path);
         const opened = await this.#provider.openWrite(normalizedPath, providerOptions(options));
@@ -154,6 +186,27 @@ class FileSystem {
         const size = this.policy.getTextSize(text);
         this.policy.assertMemoryWrite(normalizedPath, size);
         return this.writeBlob(normalizedPath, textToBlob(text, options.mimeType || 'text/plain;charset=utf-8'), options);
+    }
+
+    writeBytesSync(path, value, options = {}) {
+        const normalizedPath = normalizeFilePath(path);
+        const bytes = normalizeInputBytes(value);
+        this.policy.assertMemoryWrite(normalizedPath, bytes.byteLength);
+        return normalizeEntry(
+            this.#provider.writeBytesSync(normalizedPath, bytes, {
+                ...providerOptions(options),
+                mimeType: options.mimeType || 'application/octet-stream',
+            }),
+            normalizedPath,
+            'file',
+        );
+    }
+
+    writeTextSync(path, value, options = {}) {
+        return this.writeBytesSync(path, new TextEncoder().encode(String(value)), {
+            ...options,
+            mimeType: options.mimeType || 'text/plain;charset=utf-8',
+        });
     }
 
     async writeStream(path, source, options = {}) {
@@ -289,8 +342,25 @@ function isDirectory(entry) {
 
 function providerOptions(options = {}) {
     // 这些选项只属于 FileSession 的内存视图和暂存逻辑，不能泄露给后端 Provider。
-    const {view, baseEntry, createOnly, adoptBase, ...result} = options;
+    const {view, baseEntry, createOnly, adoptBase, encoding, ...result} = options;
     return result;
+}
+
+function normalizeProviderBytes(value, path) {
+    try {
+        return normalizeInputBytes(value);
+    } catch {
+        throw invalidProviderResponse('readBytesSync', path);
+    }
+}
+
+function normalizeInputBytes(value) {
+    if (value instanceof Uint8Array) return new Uint8Array(value);
+    if (value instanceof ArrayBuffer) return new Uint8Array(value.slice(0));
+    if (ArrayBuffer.isView(value)) {
+        return new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+    }
+    throw new TypeError('Synchronous file writes require an ArrayBuffer or typed array');
 }
 
 function invalidProviderResponse(operation, path) {

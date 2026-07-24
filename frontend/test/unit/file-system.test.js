@@ -91,6 +91,10 @@ test('场景：抽象 Provider 不实现写入复制移动且具体 Provider 负
     await assert.rejects(abstractProvider.write('unsupported.txt', new Blob(['no'])), FileUnsupportedError);
     await assert.rejects(abstractProvider.copy('source.txt', 'copy.txt'), FileUnsupportedError);
     await assert.rejects(abstractProvider.move('source.txt', 'moved.txt'), FileUnsupportedError);
+    assert.throws(() => abstractProvider.statSync('unsupported.txt'), FileUnsupportedError);
+    assert.throws(() => abstractProvider.listSync(''), FileUnsupportedError);
+    assert.throws(() => abstractProvider.readBytesSync('unsupported.txt'), FileUnsupportedError);
+    assert.throws(() => abstractProvider.writeBytesSync('unsupported.txt', new Uint8Array()), FileUnsupportedError);
     const result = await new FileSystem({provider}).writeText('shared.txt', 'shared');
     assert.equal(result.version, 'v1');
     assert.equal(await new Blob(chunks).text(), 'shared');
@@ -153,6 +157,82 @@ test('场景：FileSystem 规范化路径、过滤会话参数并直接调度 Pr
     ]);
     assert.equal(fileSystem.supports('copy'), false);
     assert.equal(fileSystem.supports('move'), false);
+});
+
+test('场景：FileSystem 同步门面规范化路径、参数和 Provider 返回值', () => {
+    const calls = [];
+    class SynchronousProvider extends FileSystemProvider {
+        statSync(path, options) {
+            calls.push({operation: 'statSync', path, options});
+            return {path, kind: 'file', size: 3, mimeType: 'text/plain', version: 'v1'};
+        }
+
+        listSync(path, options) {
+            calls.push({operation: 'listSync', path, options});
+            return [{name: 'entry.txt', kind: 'file', size: 3, mimeType: 'text/plain', version: 'v1'}];
+        }
+
+        readBytesSync(path, options) {
+            calls.push({operation: 'readBytesSync', path, options});
+            return new TextEncoder().encode('one');
+        }
+
+        writeBytesSync(path, bytes, options) {
+            calls.push({operation: 'writeBytesSync', path, bytes: [...bytes], options});
+            return {path, kind: 'file', size: bytes.byteLength, mimeType: options.mimeType, version: 'v2'};
+        }
+    }
+
+    const fileSystem = new FileSystem({provider: new SynchronousProvider()});
+    assert.equal(fileSystem.statSync('/docs/../entry.txt', {view: 'base'}).path, 'entry.txt');
+    assert.deepEqual(fileSystem.listSync('/docs/./items', {limit: 5, view: 'changes'}).map((entry) => entry.path), [
+        'docs/items/entry.txt',
+    ]);
+    assert.equal(fileSystem.readTextSync('/docs/../entry.txt', {encoding: 'utf-8', adoptBase: true}), 'one');
+    assert.equal(fileSystem.writeTextSync('/result/../result.txt', 'two', {
+        expectedVersion: null,
+        createOnly: true,
+    }).version, 'v2');
+
+    assert.deepEqual(calls, [
+        {operation: 'statSync', path: 'entry.txt', options: {}},
+        {operation: 'listSync', path: 'docs/items', options: {limit: 5}},
+        {operation: 'readBytesSync', path: 'entry.txt', options: {}},
+        {
+            operation: 'writeBytesSync',
+            path: 'result.txt',
+            bytes: [116, 119, 111],
+            options: {expectedVersion: null, mimeType: 'text/plain;charset=utf-8'},
+        },
+    ]);
+});
+
+test('场景：MemoryProvider 同步和异步接口共享文件状态与大小限制', async () => {
+    const fileSystem = createFileSystem({
+        type: 'memory',
+        config: {files: [{path: 'input.txt', content: 'one'}]},
+        policy: new FileOperationPolicy({maxMemoryReadBytes: 4, maxMemoryWriteBytes: 6}),
+    });
+
+    assert.equal(fileSystem.statSync('/input.txt').kind, 'file');
+    assert.deepEqual(fileSystem.listSync('/').map((entry) => entry.path), ['input.txt']);
+    const bytes = fileSystem.readBytesSync('input.txt');
+    bytes[0] = 0;
+    assert.equal(fileSystem.readTextSync('input.txt'), 'one');
+
+    const created = fileSystem.writeTextSync('sync.txt', 'four', {
+        createParents: true,
+        expectedVersion: null,
+    });
+    assert.equal(created.size, 4);
+    assert.equal(await fileSystem.readText('sync.txt'), 'four');
+
+    await fileSystem.writeText('async.txt', 'four', {expectedVersion: null});
+    assert.equal(fileSystem.readTextSync('async.txt'), 'four');
+    fileSystem.writeTextSync('sync-large.txt', '同步', {expectedVersion: null});
+    assert.throws(() => fileSystem.readTextSync('sync-large.txt'), FileTooLargeError);
+    assert.throws(() => fileSystem.writeTextSync('large.txt', '你好啊'), FileTooLargeError);
+    assert.equal(await fileSystem.exists('large.txt'), false);
 });
 
 test('场景：FileSession 的无视图目录操作仍经过其管理的 FileSystem', async () => {

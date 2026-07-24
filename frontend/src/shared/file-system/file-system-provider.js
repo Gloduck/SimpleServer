@@ -17,6 +17,7 @@ import {FileUnsupportedError} from './file-system-errors.js';
  * @property {boolean} [force]
  * @property {'file'|'directory'} [kind]
  * @property {number} [size]
+ * @property {string} [encoding]
  */
 
 /**
@@ -82,9 +83,19 @@ class FileSystemProvider {
         throw unsupported('stat', path);
     }
 
+    /** @param {string} path @param {FileSystemOperationOptions} options @returns {FileEntry} */
+    statSync(path = '', options = {}) {
+        throw unsupported('statSync', path);
+    }
+
     /** @param {string} path @param {FileSystemOperationOptions} options @returns {Promise<FileEntry[]>} */
     async list(path = '', options = {}) {
         throw unsupported('list', path);
+    }
+
+    /** @param {string} path @param {FileSystemOperationOptions} options @returns {FileEntry[]} */
+    listSync(path = '', options = {}) {
+        throw unsupported('listSync', path);
     }
 
     /** @param {string} path @param {FileSystemOperationOptions} options */
@@ -97,6 +108,11 @@ class FileSystemProvider {
         throw unsupported('openRead', path);
     }
 
+    /** @param {string} path @param {FileSystemOperationOptions} options @returns {Uint8Array} */
+    readBytesSync(path, options = {}) {
+        throw unsupported('readBytesSync', path);
+    }
+
     /** @param {string} path @param {FileSystemOperationOptions} options @returns {Promise<OpenedFileWrite>} */
     async openWrite(path, options = {}) {
         throw unsupported('openWrite', path);
@@ -105,6 +121,11 @@ class FileSystemProvider {
     /** @param {string} path @param {Blob} blob @param {FileSystemOperationOptions} options @returns {Promise<FileEntry>} */
     async write(path, blob, options = {}) {
         throw unsupported('write', path);
+    }
+
+    /** @param {string} path @param {Uint8Array} bytes @param {FileSystemOperationOptions} options @returns {FileEntry} */
+    writeBytesSync(path, bytes, options = {}) {
+        throw unsupported('writeBytesSync', path);
     }
 
     /** @param {string} path @param {FileSystemOperationOptions} options @returns {Promise<FileEntry>} */

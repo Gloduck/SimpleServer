@@ -79,17 +79,29 @@ class MemoryProvider extends FileSystemProvider {
         return true;
     }
 
-    async stat(path = '', options = {}) {
+    statSync(path = '', options = {}) {
         throwIfAborted(options.signal);
         const normalizedPath = normalizeFilePath(path);
         return this.#entryResult(normalizedPath, this.#requireEntry(normalizedPath));
     }
 
+    async stat(path = '', options = {}) {
+        return this.statSync(path, options);
+    }
+
+    listSync(path = '', options = {}) {
+        return this.#list(path, options, 'listSync');
+    }
+
     async list(path = '', options = {}) {
+        return this.#list(path, options, 'list');
+    }
+
+    #list(path, options, operation) {
         throwIfAborted(options.signal);
         const normalizedPath = normalizeFilePath(path);
         const directory = this.#requireEntry(normalizedPath);
-        if (directory.kind !== 'directory') throw new FileNotDirectoryError(normalizedPath, {operation: 'list'});
+        if (directory.kind !== 'directory') throw new FileNotDirectoryError(normalizedPath, {operation});
         const prefix = normalizedPath ? `${normalizedPath}/` : '';
         const entries = [];
         for (const [entryPath, entry] of this.#entries) {
@@ -101,6 +113,14 @@ class MemoryProvider extends FileSystemProvider {
         return entries
             .sort((left, right) => left.name.localeCompare(right.name))
             .slice(0, options.limit ?? Infinity);
+    }
+
+    readBytesSync(path, options = {}) {
+        throwIfAborted(options.signal);
+        const normalizedPath = normalizeFilePath(path);
+        const entry = this.#requireEntry(normalizedPath);
+        if (entry.kind !== 'file') throw new FileIsDirectoryError(normalizedPath, {operation: 'readBytesSync'});
+        return new Uint8Array(entry.bytes);
     }
 
     async openRead(path, options = {}) {
@@ -171,6 +191,19 @@ class MemoryProvider extends FileSystemProvider {
             }
             throw error;
         }
+    }
+
+    writeBytesSync(path, value, options = {}) {
+        throwIfAborted(options.signal);
+        const normalizedPath = normalizeFilePath(path);
+        const bytes = toInitialBytes(value);
+        this.#assertWritable(normalizedPath);
+        this.#assertExpectedVersion(normalizedPath, options.expectedVersion);
+        this.#assertFileTarget(normalizedPath);
+        if (options.createParents === true) this.#validateParentDirectories(normalizedPath);
+        else this.#requireDirectory(getParentFilePath(normalizedPath));
+        this.#setFile(normalizedPath, bytes, options.mimeType || getMimeType(normalizedPath));
+        return this.statSync(normalizedPath);
     }
 
     async createDirectory(path, options = {}) {
