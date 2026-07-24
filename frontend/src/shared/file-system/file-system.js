@@ -194,6 +194,22 @@ class FileSystem {
         return this.#provider.remove(normalizeFilePath(path), providerOptions(options));
     }
 
+    async copy(sourcePath, destinationPath, options = {}) {
+        const normalizedDestination = normalizeFilePath(destinationPath);
+        return normalizeEntry(
+            await this.#provider.copy(
+                normalizeFilePath(sourcePath),
+                normalizedDestination,
+                providerOptions(options),
+            ),
+            normalizedDestination,
+        );
+    }
+
+    async copyFile(sourcePath, destinationPath, options = {}) {
+        return this.copy(sourcePath, destinationPath, {...options, recursive: false});
+    }
+
     async move(sourcePath, destinationPath, options = {}) {
         const normalizedDestination = normalizeFilePath(destinationPath);
         return normalizeEntry(
@@ -204,6 +220,28 @@ class FileSystem {
             ),
             normalizedDestination,
         );
+    }
+
+    async rename(sourcePath, destinationPath, options = {}) {
+        return this.move(sourcePath, destinationPath, options);
+    }
+
+    async unlink(path, options = {}) {
+        return this.remove(path, {...options, recursive: false, kind: 'file'});
+    }
+
+    async removeDirectory(path, options = {}) {
+        return this.remove(path, {...options, kind: 'directory'});
+    }
+
+    async exists(path, options = {}) {
+        try {
+            await this.stat(path, options);
+            return true;
+        } catch (error) {
+            if (error?.code === 'FILE_NOT_FOUND') return false;
+            throw error;
+        }
     }
 
     async isCopyDestinationInside(sourcePath, destinationFileSystem, destinationPath, options = {}) {

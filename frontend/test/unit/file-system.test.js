@@ -14,6 +14,7 @@ import {
     FileAlreadyExistsError,
     FileChangeSet,
     FileConflictError,
+    FileIsDirectoryError,
     FileNotFoundError,
     FileOperationPolicy,
     FileResourceResolver,
@@ -454,6 +455,53 @@ test('场景：FileSystem 通过 Provider 边界判断文件目标是否相同',
     const fileSystem = new FileSystem({provider: new BrowserHandleProvider({root})});
 
     assert.equal(await fileSystem.isSameFileTarget(sourceFile.name, target), true);
+});
+
+test('场景：BrowserHandleProvider 对缺失 unlink 返回稳定未找到错误', async () => {
+    const missing = Object.assign(new Error('missing'), {name: 'NotFoundError'});
+    const root = {
+        kind: 'directory',
+        name: 'root',
+        async getFileHandle() {
+            throw missing;
+        },
+        async getDirectoryHandle() {
+            throw missing;
+        },
+    };
+    const fileSystem = new FileSystem({provider: new BrowserHandleProvider({root})});
+
+    await assert.rejects(fileSystem.unlink('missing.txt'), FileNotFoundError);
+});
+
+test('场景：BrowserHandleProvider unlink 不删除检查后被替换的目录', async () => {
+    const typeMismatch = Object.assign(new Error('directory'), {name: 'TypeMismatchError'});
+    let fileHandleCalls = 0;
+    let removed = false;
+    const root = {
+        kind: 'directory',
+        name: 'root',
+        async getFileHandle() {
+            fileHandleCalls += 1;
+            if (fileHandleCalls === 1) {
+                return {
+                    kind: 'file',
+                    name: 'target.txt',
+                    async getFile() {
+                        return {name: 'target.txt', size: 1, type: 'text/plain', lastModified: 1};
+                    },
+                };
+            }
+            throw typeMismatch;
+        },
+        async removeEntry() {
+            removed = true;
+        },
+    };
+    const fileSystem = new FileSystem({provider: new BrowserHandleProvider({root})});
+
+    await assert.rejects(fileSystem.unlink('target.txt', {recursive: true}), FileIsDirectoryError);
+    assert.equal(removed, false);
 });
 
 test('场景：createFileSystem 通过注册的来源类型隐藏 Provider 构造过程', () => {

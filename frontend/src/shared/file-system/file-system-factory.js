@@ -1,6 +1,7 @@
 import {FileSystem} from './file-system.js';
 import {BrowserHandleProvider} from './providers/browser-handle-provider.js';
 import {GithubProvider} from './providers/github-provider.js';
+import {MemoryProvider} from './providers/memory-provider.js';
 
 const providerFactories = new Map();
 
@@ -34,5 +35,6 @@ registerFileSystemProvider('browser', createBrowserProvider);
 registerFileSystemProvider('local', createBrowserProvider);
 registerFileSystemProvider('opfs', createBrowserProvider);
 registerFileSystemProvider('github', (config) => new GithubProvider(config));
+registerFileSystemProvider('memory', (config) => new MemoryProvider(config));
 
 export {createFileSystem, registerFileSystemProvider};

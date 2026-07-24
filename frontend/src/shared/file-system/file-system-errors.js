@@ -90,6 +90,42 @@ class FilePermissionError extends FileSystemError {
     }
 }
 
+class FileIsDirectoryError extends FileSystemError {
+    static code = 'FILE_IS_DIRECTORY';
+
+    constructor(path, options = {}) {
+        super(options.message || `Expected a file but found a directory: ${path}`, {
+            ...options,
+            code: FileIsDirectoryError.code,
+            path,
+        });
+    }
+}
+
+class FileNotDirectoryError extends FileSystemError {
+    static code = 'FILE_NOT_DIRECTORY';
+
+    constructor(path, options = {}) {
+        super(options.message || `Expected a directory but found a file: ${path}`, {
+            ...options,
+            code: FileNotDirectoryError.code,
+            path,
+        });
+    }
+}
+
+class FileDirectoryNotEmptyError extends FileSystemError {
+    static code = 'FILE_DIRECTORY_NOT_EMPTY';
+
+    constructor(path, options = {}) {
+        super(options.message || `Directory is not empty: ${path}`, {
+            ...options,
+            code: FileDirectoryNotEmptyError.code,
+            path,
+        });
+    }
+}
+
 export {
     FileSystemError,
     FileNotFoundError,
@@ -98,4 +134,7 @@ export {
     FileTooLargeError,
     FileUnsupportedError,
     FilePermissionError,
+    FileIsDirectoryError,
+    FileNotDirectoryError,
+    FileDirectoryNotEmptyError,
 };

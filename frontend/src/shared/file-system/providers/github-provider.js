@@ -9,7 +9,9 @@ import {
 import {FileSystemProvider} from '../file-system-provider.js';
 import {
     FileConflictError,
+    FileIsDirectoryError,
     FileNotFoundError,
+    FileNotDirectoryError,
     FilePermissionError,
     FileSystemError,
     FileUnsupportedError,
@@ -42,7 +44,11 @@ class GithubProvider extends FileSystemProvider {
             implicitDirectories: true,
             createDirectory: false,
             removeFile: true,
-            move: false,
+            copy: true,
+            copyDirectory: false,
+            move: true,
+            moveDirectory: false,
+            atomicMove: false,
             resourceUrl: false,
             optimisticLocking: true,
             versionPrecondition: 'atomic',
@@ -101,10 +107,7 @@ class GithubProvider extends FileSystemProvider {
             throw error;
         }
         if (!Array.isArray(data)) {
-            throw new FileUnsupportedError('list', {
-                path: normalizedPath,
-                message: `Cannot list a file: ${normalizedPath}`,
-            });
+            throw new FileNotDirectoryError(normalizedPath, {operation: 'list'});
         }
         return data
             .map((entry) => githubEntry(joinFilePath(normalizedPath, entry.name), entry))
@@ -116,10 +119,7 @@ class GithubProvider extends FileSystemProvider {
         const normalizedPath = normalizeFilePath(path);
         const data = await this.#getContent(normalizedPath, options);
         if (Array.isArray(data) || data.type !== 'file') {
-            throw new FileUnsupportedError('openRead', {
-                path: normalizedPath,
-                message: `Cannot read a directory: ${normalizedPath}`,
-            });
+            throw new FileIsDirectoryError(normalizedPath, {operation: 'openRead'});
         }
 
         if (data.encoding === 'base64' && typeof data.content === 'string') {
@@ -195,7 +195,24 @@ class GithubProvider extends FileSystemProvider {
 
     async remove(path, options = {}) {
         const normalizedPath = normalizeFilePath(path);
-        const version = options.expectedVersion;
+        let version = options.expectedVersion;
+        if (options.kind || options.force === true) {
+            let entry;
+            try {
+                entry = await this.stat(normalizedPath, options);
+            } catch (error) {
+                if (options.force === true && error?.code === FileNotFoundError.code) return false;
+                throw error;
+            }
+            if (options.kind === 'file' && entry.kind === 'directory') {
+                throw new FileIsDirectoryError(normalizedPath, {operation: 'remove'});
+            }
+            if (options.kind === 'directory' && entry.kind === 'file') {
+                throw new FileNotDirectoryError(normalizedPath, {operation: 'remove'});
+            }
+            if (entry.kind === 'directory') throw new FileUnsupportedError('removeDirectory', {path: normalizedPath});
+            if (version === undefined && options.force === true) version = entry.version;
+        }
         if (version === undefined) {
             throw new FileConflictError(normalizedPath, {
                 expectedVersion: undefined,

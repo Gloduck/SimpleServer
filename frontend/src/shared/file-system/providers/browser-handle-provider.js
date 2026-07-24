@@ -9,10 +9,12 @@ import {
 import {FileSystemProvider} from '../file-system-provider.js';
 import {
     FileConflictError,
+    FileDirectoryNotEmptyError,
+    FileIsDirectoryError,
     FileNotFoundError,
+    FileNotDirectoryError,
     FilePermissionError,
     FileSystemError,
-    FileUnsupportedError,
 } from '../file-system-errors.js';
 
 class BrowserHandleProvider extends FileSystemProvider {
@@ -38,8 +40,12 @@ class BrowserHandleProvider extends FileSystemProvider {
             removeFile: true,
             removeDirectory: true,
             recursiveRemove: true,
+            copy: true,
+            copyDirectory: true,
             copyTargetValidation: true,
-            move: false,
+            move: true,
+            moveDirectory: true,
+            atomicMove: false,
             optimisticLocking: true,
             versionPrecondition: 'best-effort',
         };
@@ -143,7 +149,7 @@ class BrowserHandleProvider extends FileSystemProvider {
                 .slice(0, limit);
         } catch (error) {
             if (error?.name === 'TypeMismatchError') {
-                throw new FileUnsupportedError('list', {path: normalizedPath, cause: error});
+                throw new FileNotDirectoryError(normalizedPath, {operation: 'list', cause: error});
             }
             throw translateHandleError(error, normalizedPath);
         }
@@ -163,7 +169,7 @@ class BrowserHandleProvider extends FileSystemProvider {
             };
         } catch (error) {
             if (error?.name === 'TypeMismatchError') {
-                throw new FileUnsupportedError('openRead', {path: normalizedPath, cause: error});
+                throw new FileIsDirectoryError(normalizedPath, {operation: 'openRead', cause: error});
             }
             throw translateHandleError(error, normalizedPath);
         }
@@ -229,13 +235,60 @@ class BrowserHandleProvider extends FileSystemProvider {
             code: 'INVALID_FILE_PATH',
             path: normalizedPath,
         });
-        await this.#checkExpectedVersion(normalizedPath, options.expectedVersion);
+        let state;
+        try {
+            state = await this.#checkExpectedVersion(normalizedPath, options.expectedVersion);
+        } catch (error) {
+            if (options.force === true && error?.code === FileNotFoundError.code) return false;
+            throw error;
+        }
+        if (!state.exists) {
+            if (options.force === true) return false;
+            throw new FileNotFoundError(normalizedPath);
+        }
+        if (options.kind) {
+            const entry = state.entry;
+            if (options.kind === 'file' && entry.kind === 'directory') {
+                throw new FileIsDirectoryError(normalizedPath, {operation: 'remove'});
+            }
+            if (options.kind === 'directory' && entry.kind === 'file') {
+                throw new FileNotDirectoryError(normalizedPath, {operation: 'remove'});
+            }
+        }
         try {
             const parent = await this.#getDirectory(getParentFilePath(normalizedPath));
-            await parent.removeEntry(getFileName(normalizedPath), {recursive: options.recursive === true});
+            const name = getFileName(normalizedPath);
+            let handle = null;
+            if (options.kind === 'file') {
+                try {
+                    handle = await parent.getFileHandle(name);
+                } catch (error) {
+                    if (error?.name === 'TypeMismatchError') {
+                        throw new FileIsDirectoryError(normalizedPath, {operation: 'remove', cause: error});
+                    }
+                    throw error;
+                }
+            } else if (options.kind === 'directory') {
+                try {
+                    handle = await parent.getDirectoryHandle(name);
+                } catch (error) {
+                    if (error?.name === 'TypeMismatchError') {
+                        throw new FileNotDirectoryError(normalizedPath, {operation: 'remove', cause: error});
+                    }
+                    throw error;
+                }
+            }
+            const recursive = options.kind === 'file' ? false : options.recursive === true;
+            if (handle && typeof handle.remove === 'function') await handle.remove({recursive});
+            else await parent.removeEntry(name, {recursive});
             return true;
         } catch (error) {
-            throw translateHandleError(error, normalizedPath);
+            const translated = translateHandleError(error, normalizedPath);
+            if (options.force === true && translated.code === FileNotFoundError.code) return false;
+            if (error?.name === 'InvalidModificationError') {
+                throw new FileDirectoryNotEmptyError(normalizedPath, {operation: 'remove', cause: error});
+            }
+            throw translated;
         }
     }
 
@@ -261,8 +314,10 @@ class BrowserHandleProvider extends FileSystemProvider {
     async #checkExpectedVersion(path, expectedVersion) {
         let exists = true;
         let actualVersion = null;
+        let entry = null;
         try {
-            actualVersion = (await this.stat(path)).version;
+            entry = await this.stat(path);
+            actualVersion = entry.version;
         } catch (error) {
             if (error?.code !== FileNotFoundError.code) throw error;
             exists = false;
@@ -270,7 +325,7 @@ class BrowserHandleProvider extends FileSystemProvider {
         if (expectedVersion !== undefined && expectedVersion !== actualVersion) {
             throw new FileConflictError(path, {expectedVersion, actualVersion});
         }
-        return {exists, version: actualVersion};
+        return {exists, version: actualVersion, entry};
     }
 }
 

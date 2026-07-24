@@ -5,6 +5,7 @@ export {DEFAULT_FILE_SYSTEM_CAPABILITIES, FileSystemProvider} from './file-syste
 export {FileOperationPolicy} from './file-operation-policy.js';
 export {FileResourceResolver} from './file-resource-resolver.js';
 export {createFileSystem, registerFileSystemProvider} from './file-system-factory.js';
+export {MemoryProvider} from './providers/memory-provider.js';
 export {writeFileTarget} from './file-target.js';
 export {
     FileSystemError,
@@ -14,4 +15,7 @@ export {
     FileTooLargeError,
     FileUnsupportedError,
     FilePermissionError,
+    FileIsDirectoryError,
+    FileNotDirectoryError,
+    FileDirectoryNotEmptyError,
 } from './file-system-errors.js';
