@@ -4,7 +4,18 @@ const PROXY_CONTROL_HEADERS = new Set([
     'x-proxy-cors',
     'x-proxy-follow-redirect',
 ]);
-const NODE_PROXY_BLOCKED_HEADERS = new Set([...PROXY_CONTROL_HEADERS, 'host']);
+const PROXY_REQUEST_BLOCKED_HEADERS = new Set([
+    ...PROXY_CONTROL_HEADERS,
+    'proxy-host',
+    'proxy-cors',
+    'proxy-follow-redirect',
+    'host',
+    'connection',
+    'content-length',
+    'transfer-encoding',
+    'upgrade',
+    'expect',
+]);
 const NODE_DESTINATION_OPTIONS = [
     'protocol',
     'host',
@@ -20,7 +31,7 @@ const NODE_DESTINATION_OPTIONS = [
     'createConnection',
 ];
 
-class ProxyRequest {
+class RequestProxy {
     #serverUrlSource;
     #baseUrlSource;
     #proxyPath;
@@ -86,7 +97,7 @@ class ProxyRequest {
             const requestInput = this.#Request && input instanceof this.#Request ? input : null;
             const redirect = normalizeFetchRedirect(init, requestInput);
             const baseUrl = this.#resolveBaseUrl();
-            const proxyUrl = buildProxyRequestUrl(serverUrl, requestInput?.url ?? input, {
+            const proxyUrl = buildRequestProxyUrl(serverUrl, requestInput?.url ?? input, {
                 baseUrl,
                 proxyPath: this.#proxyPath,
                 enableCors: this.#enableCors,
@@ -113,7 +124,7 @@ class ProxyRequest {
 
         const parsed = parseNodeRequestArguments(targetProtocol, args);
         const baseUrl = this.#resolveBaseUrl();
-        const proxyUrl = buildProxyRequestUrl(serverUrl, parsed.target, {
+        const proxyUrl = buildRequestProxyUrl(serverUrl, parsed.target, {
             baseUrl,
             proxyPath: this.#proxyPath,
             enableCors: this.#enableCors,
@@ -133,7 +144,7 @@ class ProxyRequest {
         const baseUrl = this.#resolveBaseUrl();
         return {
             proxied: true,
-            url: buildProxyRequestUrl(serverUrl, input, {
+            url: buildRequestProxyUrl(serverUrl, input, {
                 baseUrl,
                 proxyPath: this.#proxyPath,
                 enableCors: this.#enableCors,
@@ -157,7 +168,7 @@ class ProxyRequest {
     }
 }
 
-function buildProxyRequestUrl(serverUrl, targetUrl, {
+function buildRequestProxyUrl(serverUrl, targetUrl, {
     baseUrl = '',
     proxyPath = REQUEST_PROXY_PATH,
     enableCors = true,
@@ -172,13 +183,11 @@ function buildProxyRequestUrl(serverUrl, targetUrl, {
     server.pathname = `${serverPath}${normalizeProxyPath(proxyPath)}${target.pathname || '/'}`;
     server.hash = '';
 
-    const controls = new URLSearchParams({
-        'X-Proxy-Host': target.origin,
-        'X-Proxy-Cors': enableCors ? 'true' : 'false',
-        'X-Proxy-Follow-Redirect': followRedirect ? 'true' : 'false',
-    });
-    const targetQuery = target.search.startsWith('?') ? target.search.slice(1) : target.search;
-    server.search = targetQuery ? `?${targetQuery}&${controls}` : `?${controls}`;
+    const query = new URLSearchParams(target.search);
+    query.set('X-Proxy-Host', target.origin);
+    query.set('X-Proxy-Cors', enableCors ? 'true' : 'false');
+    query.set('X-Proxy-Follow-Redirect', followRedirect ? 'true' : 'false');
+    server.search = query.toString();
     return server.href;
 }
 
@@ -201,7 +210,7 @@ function createXMLHttpRequestAdapter(NativeXMLHttpRequest, rewriteUrl) {
         }
 
         setRequestHeader(name, value) {
-            if (this.#proxied && PROXY_CONTROL_HEADERS.has(String(name).toLowerCase())) return;
+            if (this.#proxied && PROXY_REQUEST_BLOCKED_HEADERS.has(String(name).toLowerCase())) return;
             return super.setRequestHeader(name, value);
         }
     };
@@ -278,15 +287,15 @@ function buildNodeProxyOptions(source, target, targetProtocol, proxyProtocol) {
 }
 
 function sanitizeFetchHeaders(headers, HeadersCtor) {
-    if (typeof HeadersCtor !== 'function') return sanitizeHeaderEntries(headers, PROXY_CONTROL_HEADERS);
+    if (typeof HeadersCtor !== 'function') return sanitizeHeaderEntries(headers, PROXY_REQUEST_BLOCKED_HEADERS);
     const result = new HeadersCtor(headers == null ? undefined : headers);
-    PROXY_CONTROL_HEADERS.forEach((name) => result.delete(name));
+    PROXY_REQUEST_BLOCKED_HEADERS.forEach((name) => result.delete(name));
     return result;
 }
 
 function sanitizeNodeHeaders(headers) {
     if (headers == null) return null;
-    const entries = sanitizeHeaderEntries(headers, NODE_PROXY_BLOCKED_HEADERS);
+    const entries = sanitizeHeaderEntries(headers, PROXY_REQUEST_BLOCKED_HEADERS);
     const result = {};
     entries.forEach(([name, value]) => {
         if (result[name] === undefined) result[name] = value;
@@ -366,7 +375,7 @@ function isOptionsObject(value) {
 }
 
 export {
-    ProxyRequest,
+    RequestProxy,
     REQUEST_PROXY_PATH,
-    buildProxyRequestUrl,
+    buildRequestProxyUrl,
 };

@@ -636,6 +636,7 @@ import {
 } from "@/shared/file-utils.js";
 import { MarkdownUtils } from "@/shared/markdown-utils.js";
 import { enableEditorPwa } from "@/shared/pwa-install.js";
+import { RequestProxy } from "@/shared/request-proxy.js";
 import { AiCredentialStore } from "@/shared/ai-credential-store.js";
 import {
   AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS,
@@ -669,7 +670,6 @@ const SETTINGS_URL_PARAM = "settings";
 const MEBIBYTE = 1024 * 1024;
 const DEFAULT_MAX_MEMORY_READ_BYTES = 50 * MEBIBYTE;
 const DEFAULT_MAX_MEMORY_WRITE_BYTES = 50 * MEBIBYTE;
-const REQUEST_PROXY_PATH = "/api/requestProxy";
 const SSH_WEBSOCKET_PATH = "/api/ssh/ws";
 const SFTP_UPLOAD_PATH = "/api/ssh/sftp/upload";
 const SFTP_DOWNLOAD_PATH = "/api/ssh/sftp/download";
@@ -7389,13 +7389,13 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, cre
     if ((requestMethod === "GET" || requestMethod === "HEAD") && resolvedBody != null) throw new Error(`${requestMethod} requests cannot include a body`);
 
     const outputLimit = clampToolCharLimit(maxChars);
-    const requestHeaders = buildProxyRequestHeaders(resolvedHeaders);
-    const proxyUrl = buildRequestProxyUrl(target, enableCors, followRedirect);
-    const response = await fetch(proxyUrl, {
+    const requestProxy = new RequestProxy(getBackendBaseUrl(), { enableCors });
+    const response = await requestProxy.fetch(target, {
       method: requestMethod,
-      headers: requestHeaders,
+      headers: resolvedHeaders,
       body: requestMethod === "GET" || requestMethod === "HEAD" ? undefined : String(resolvedBody ?? ""),
       credentials: "omit",
+      redirect: followRedirect ? "follow" : "manual",
       signal,
     });
     const text = await response.text();
@@ -7458,31 +7458,6 @@ function normalizeAiJavaScriptTextResult(result, maxChars) {
 
 function clampToolCharLimit(value, defaultValue = AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS, maxValue = AI_TOOL_OUTPUT_HARD_MAX_CHARS) {
   return Math.max(AI_TOOL_OUTPUT_MIN_CHARS, Math.min(Number(value) || defaultValue, maxValue));
-}
-
-function buildRequestProxyUrl(target, enableCors, followRedirect) {
-  const separator = target.search ? "&" : "?";
-  const proxyParams = new URLSearchParams({
-    "X-Proxy-Host": target.origin,
-    "X-Proxy-Cors": enableCors ? "true" : "false",
-    "X-Proxy-Follow-Redirect": followRedirect ? "true" : "false",
-  });
-  return `${getBackendBaseUrl()}${REQUEST_PROXY_PATH}${target.pathname || "/"}${target.search}${separator}${proxyParams.toString()}`;
-}
-
-function buildProxyRequestHeaders(headers) {
-  const requestHeaders = new Headers();
-  if (!headers || typeof headers !== "object" || Array.isArray(headers)) return requestHeaders;
-  Object.entries(headers).forEach(([name, value]) => {
-    if (value == null || shouldSkipProxyRequestHeader(name)) return;
-    requestHeaders.set(name, String(value));
-  });
-  return requestHeaders;
-}
-
-function shouldSkipProxyRequestHeader(name) {
-  const normalized = String(name || "").trim().toLowerCase();
-  return ["host", "connection", "content-length", "transfer-encoding", "upgrade", "expect", "proxy-host", "proxy-cors", "proxy-follow-redirect"].includes(normalized);
 }
 
 function aiToolGetSshConnections() {
