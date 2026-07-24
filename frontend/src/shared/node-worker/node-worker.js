@@ -1,4 +1,3 @@
-import {init as initEsmLexer, parse as parseEsm} from 'es-module-lexer';
 import {
     getFileName,
     getMimeType,
@@ -9,6 +8,7 @@ import {
 import {FileSystem, MemoryProvider} from '../file-system/index.js';
 import {
     detectJavaScriptSourceFormat,
+    escapeModuleSpecifier,
     scanCommonJsModuleSpecifiers,
     scanEsmModuleSpecifiers,
 } from './module-source-scanner.js';
@@ -447,7 +447,6 @@ class NodeWorker {
     }
 
     async executeEsmEntry(path, source) {
-        await initEsmLexer;
         const url = await this.buildEsmModuleUrl(path, source);
         return import(url);
     }
@@ -464,18 +463,18 @@ class NodeWorker {
         this.esmBuildStack.add(normalizedPath);
         try {
             const source = sourceOverride === undefined ? this.readModuleText(normalizedPath) : stripShebang(sourceOverride);
-            const [imports] = parseEsm(source);
             const replacements = [];
-            for (const item of imports) {
-                if (!item.n) {
+            for (const dependency of await scanEsmModuleSpecifiers(source)) {
+                if (!dependency.specifier) {
                     throw nodeWorkerError('DYNAMIC_MODULE_NOT_PRELOADED', `Dynamic import must use a string literal: ${displayPath(normalizedPath)}`, {
                         path: displayPath(normalizedPath),
                     });
                 }
                 replacements.push({
-                    start: item.s,
-                    end: item.e,
-                    value: await this.resolveEsmUrl(item.n, normalizedPath),
+                    start: dependency.start,
+                    end: dependency.end,
+                    value: await this.resolveEsmUrl(dependency.specifier, normalizedPath),
+                    quote: dependency.quote,
                 });
             }
             const transformed = applyReplacements(source, replacements);
@@ -865,7 +864,8 @@ function packageEntry(manifest, mode) {
 function applyReplacements(source, replacements) {
     let result = source;
     for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
-        result = `${result.slice(0, replacement.start)}${replacement.value}${result.slice(replacement.end)}`;
+        const value = escapeModuleSpecifier(replacement.value, replacement.quote);
+        result = `${result.slice(0, replacement.start)}${value}${result.slice(replacement.end)}`;
     }
     return result;
 }

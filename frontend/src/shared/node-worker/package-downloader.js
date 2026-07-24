@@ -521,7 +521,9 @@ function throwIfAborted(signal) {
 
 function normalizePackageName(value) {
     const name = String(value || '').trim();
-    if (!/^(?:@[a-z0-9._~-]+\/[a-z0-9._~-]+|[a-z0-9._~-]+)$/i.test(name)) {
+    const validPattern = /^(?:@[a-z0-9._~-]+\/[a-z0-9._~-]+|[a-z0-9._~-]+)$/i.test(name);
+    const validSegments = name.replace(/^@/, '').split('/').every((part) => part !== '.' && part !== '..');
+    if (!validPattern || !validSegments) {
         throw packageError('INVALID_PACKAGE_NAME', `Invalid package name: ${name}`, {name});
     }
     return name;
