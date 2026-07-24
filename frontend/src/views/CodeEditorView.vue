@@ -626,6 +626,8 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { CdnUtils } from "@/shared/cdn-utils.js";
+import { runAiNodeWorker } from "@/shared/ai-node-worker.js";
+import { runFilterScript } from "@/shared/filter-script-worker.js";
 import {
   FileUtils,
   getMimeType,
@@ -637,25 +639,8 @@ import {
 import { MarkdownUtils } from "@/shared/markdown-utils.js";
 import { enableEditorPwa } from "@/shared/pwa-install.js";
 import { RequestProxy } from "@/shared/request-proxy.js";
+import { prepareRunScript } from "@/shared/node-worker/run-script-preparer.js";
 import { AiCredentialStore } from "@/shared/ai-credential-store.js";
-import {
-  AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS,
-  AI_JAVASCRIPT_MAX_CODE_CHARS,
-  AI_JAVASCRIPT_MAX_FILE_COUNT,
-  AI_JAVASCRIPT_MAX_LOGS,
-  AI_JAVASCRIPT_MAX_REQUEST_COUNT,
-  AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS,
-  AI_JAVASCRIPT_MAX_RESULT_DEPTH,
-  AI_JAVASCRIPT_MAX_TIMEOUT_MS,
-  createAiJavaScriptWorkerSource,
-  evaluateAiJavaScriptSize,
-  getAiJavaScriptOutputConflict,
-  isAiJavaScriptTextOutput,
-  normalizeAiJavaScriptTimeout,
-  requiresAiJavaScriptWorkspace,
-  resolveAiJavaScriptOutputPolicy,
-  serializeAiJavaScriptError,
-} from "@/shared/ai-javascript-runtime.js";
 import {
   createFileSystem,
   FileConflictError,
@@ -712,6 +697,14 @@ const AI_TOOL_OUTPUT_MIN_CHARS = 1000;
 const AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS = 5000;
 const AI_TOOL_OUTPUT_HARD_MAX_CHARS = 20000;
 const AI_TOOL_SEARCH_LINE_MAX_CHARS = 240;
+const AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS = 30_000;
+const AI_JAVASCRIPT_MAX_TIMEOUT_MS = 60 * 60 * 1000;
+const AI_JAVASCRIPT_MAX_CODE_CHARS = 20_000;
+const AI_JAVASCRIPT_MAX_FILE_COUNT = 1000;
+const AI_JAVASCRIPT_MAX_LOGS = 100;
+const AI_JAVASCRIPT_MAX_REQUEST_COUNT = 20;
+const AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS = 100;
+const AI_JAVASCRIPT_MAX_RESULT_DEPTH = 5;
 const SSH_OUTPUT_MAX_CHARS = 120000;
 const SSH_COMMAND_OUTPUT_WAIT_MS = 1000;
 const SSH_CONNECT_TIMEOUT_MS = 15000;
@@ -5780,44 +5773,51 @@ function getAiAllToolDefinitions() {
       "Credential values are never returned."
     ), parameters: { type: "object", properties: {} } },
     { type: "function", name: "run_javascript", description: aiToolDescription(
-      "Execute JavaScript in an isolated browser Web Worker for calculations, parsing, data transformation, bounded HTTP requests, and declared workspace file processing.",
-      "The provided code is inserted directly as the body of an already-async function: async function(input, runtime) { ... }. Top-level await is supported. Write statements directly in the function body. Do not wrap the entire snippet in an unreturned async IIFE such as (async () => { ... })(), because the outer function would finish before the IIFE completes. If an IIFE is necessary, use return await (async () => { ... })(). Every asynchronous runtime operation must be awaited before the outer function returns.",
-      "Use credentials to declare credential Keys needed by the script. Each declared Key is available directly as a function parameter with the same name. Missing Keys are empty strings. Values are not inserted into the source code.",
-      "runtime.request({ url, method, headers, body, responseType: 'text'|'json'|'bytes', followRedirect, timeoutMs }) returns { status, statusText, ok, headers, body, size, proxied, url }. Requests run inside the Worker and automatically use the backend proxy when enabled; runtime.network.proxy reports only whether proxying is active. Native Worker APIs such as fetch, importScripts, XMLHttpRequest, WebSocket, nested workers, and browser storage are also available, but they bypass runtime.request proxying and limits.",
-      "Declare every readable file in input_files. Declare exact output paths in output_files. Use output_directories when output child paths are determined during execution; path '.' means the workspace root. Use await runtime.files.readText(path), await runtime.files.readBytes(path), runtime.files.stat(path), runtime.files.writeText(path, content, mimeType), and runtime.files.writeBytes(path, bytes, mimeType). All paths are workspace-relative and there are no file aliases. File operations require an open workspace; plain calculations and network requests do not.",
+      "Execute a complete script in an isolated browser Worker using a Node-compatible JavaScript runtime. It supports CommonJS, ESM, UMD, and plain global JavaScript for computation, data transformation, browser-compatible npm packages, CDN/HTTP modules, WebAssembly, and declared workspace file processing. This is not a complete Node.js process.",
+      "Provide exactly one of code or entry_file. code is complete module or script source, not an async function body. format may be auto, commonjs, module, umd, or global. When omitted, the format is inferred from the extension, package.json type, and source syntax.",
+      "CommonJS returns module.exports. Async scripts may assign module.exports = main() or use main().catch(...) as the final executed expression. Do not silently swallow errors: rethrow them or call process.exit(1). ESM supports import, export, named exports, export default, and top-level await. UMD returns module.exports when available, otherwise its global export. A global script should expose returned values through globalThis.",
+      "require and import support relative files, JSON, workspace node_modules, npm:package@version specifiers, scoped packages, package subpaths, and absolute HTTP/HTTPS URLs. Supported CDNs include jsDelivr, esm.sh, unpkg, cdnjs, and Skypack. CommonJS, ESM, UMD, and global CDN files are detected automatically, and their remote relative dependencies are resolved recursively. Bare package names resolve only from workspace node_modules; use an npm: specifier to download a Registry package. Dependencies prepared before execution must use string literals.",
+      "input is available as the global input value. env and credentials are exposed through process.env; credentials override matching env entries and missing credentials become empty strings. Read args with process.argv.slice(2). process.cwd() and relative node:fs paths use cwd.",
+      "Workspace modules referenced by static import or require are loaded automatically. Declare ordinary data files read through node:fs or node:fs/promises in input_files. The virtual file system allows temporary files, but after execution only changed files within output_files and output_directories are extracted; all other temporary files are discarded. Outputs are staged in the editor and reach disk only when the user saves them. File deletion and empty-directory output are not supported.",
+      "fetch, XMLHttpRequest, node:http, and node:https share request-count, per-response-size, cumulative-download-size, and timeout limits. Requests automatically use RequestProxy when the backend is available and otherwise use the browser network directly.",
+      "Supported built-ins are node:assert, node:buffer, node:fs, node:fs/promises, node:http, node:https, node:path, node:querystring, node:url, and node:util. Unsupported features include child_process, os, native Node extensions, CommonJS import(), variable dynamic imports, and cyclic ESM dependencies.",
       [
-        "Hard execution limits:",
-        `- code: at most ${AI_JAVASCRIPT_MAX_CODE_CHARS} characters`,
+        "Hard limits:",
+        `- code: up to ${AI_JAVASCRIPT_MAX_CODE_CHARS} characters`,
         `- timeout_ms: defaults to ${AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS}ms and is capped at ${AI_JAVASCRIPT_MAX_TIMEOUT_MS}ms`,
-        `- runtime.request: at most ${AI_JAVASCRIPT_MAX_REQUEST_COUNT} calls per execution`,
-        `- each of input_files, output_files, and output_directories: at most ${AI_JAVASCRIPT_MAX_FILE_COUNT} declarations; generated outputs: at most ${AI_JAVASCRIPT_MAX_FILE_COUNT} files`,
-        `- runtime-managed input and downloads: at most ${normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES)} bytes per item and in total`,
-        `- runtime-managed outputs: at most ${normalizeMemoryLimit(settings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES)} bytes per file and in total`,
-        `- console output: only the latest ${AI_JAVASCRIPT_MAX_LOGS} log entries are retained`,
-        `- structured results: at most ${AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS} items per collection and ${AI_JAVASCRIPT_MAX_RESULT_DEPTH} nested levels are returned`,
-        "Plan the script to stay within every limit. Minimize runtime.request calls by batching or consolidating remote data whenever possible instead of issuing one request per item. Oversized runtime-managed data fails without truncation. Native browser APIs bypass runtime.request limits and proxying.",
-        "Exact byte limits plus the request and output-file limits are available inside the script through runtime.limits, including maxInputFileBytes, maxInputTotalBytes, maxDownloadBytes, maxDownloadTotalBytes, maxOutputFileBytes, maxOutputTotalBytes, maxRequestCount, and maxOutputFileCount.",
+        `- fetch, XMLHttpRequest, node:http, and node:https: up to ${AI_JAVASCRIPT_MAX_REQUEST_COUNT} requests in total`,
+        `- input_files, output_files, and output_directories: up to ${AI_JAVASCRIPT_MAX_FILE_COUNT} entries each; final output is capped at ${AI_JAVASCRIPT_MAX_FILE_COUNT} files`,
+        `- each input and network response: up to ${normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES)} bytes; cumulative downloads use the same limit`,
+        `- each output and all outputs combined: up to ${normalizeMemoryLimit(settings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES)} bytes`,
+        `- console output: up to ${AI_JAVASCRIPT_MAX_LOGS} log entries`,
+        `- structured result collections: up to ${AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS} entries each and ${AI_JAVASCRIPT_MAX_RESULT_DEPTH} levels deep`,
       ].join("\n")
     ), parameters: { type: "object", properties: {
-      code: { type: "string", maxLength: AI_JAVASCRIPT_MAX_CODE_CHARS, description: `Body of an already-async function with input and runtime variables available, limited to ${AI_JAVASCRIPT_MAX_CODE_CHARS} characters. Top-level await is supported. Write statements directly and return the final result. Do not pass a complete function declaration or wrap the entire code in an unreturned async IIFE. Every asynchronous runtime operation must complete before the outer function returns.` },
-      input: { type: "object", description: "Optional JSON object exposed to the script as input. Wrap arrays or primitive values in an object property." },
-      credentials: { type: "array", items: { type: "string" }, description: "Credential Keys exposed directly as JavaScript parameters. Missing Keys are empty strings." },
-      input_files: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Workspace files made readable to the script. Paths must be workspace-relative. At most ${AI_JAVASCRIPT_MAX_FILE_COUNT} declarations.`, items: { type: "object", properties: {
-        path: { type: "string" },
-        type: { type: "string", enum: ["text", "bytes"], description: "How runtime.files reads this input. Defaults to text." },
-        view: { type: "string", enum: ["effective", "base"], description: "effective includes unsaved editor changes; base reads the saved file. Defaults to effective." }
+      code: { type: "string", maxLength: AI_JAVASCRIPT_MAX_CODE_CHARS, description: `Complete JavaScript module or script source, up to ${AI_JAVASCRIPT_MAX_CODE_CHARS} characters. Provide code or entry_file, but not both. CommonJS returns through module.exports; ESM returns through exports.` },
+      entry_file: { type: "string", description: "Workspace-relative entry-file path. Provide entry_file or code, but not both. The entry and its static dependencies use the effective view, including unsaved changes." },
+      format: { type: "string", enum: ["auto", "commonjs", "module", "umd", "global"], description: "Optional script format. Omit it or use auto for inference. Prefer commonjs for generated CommonJS, module for generated ESM, and auto for existing files." },
+      resolve_from: { type: "string", description: "Workspace-relative directory used to resolve relative require/import specifiers and workspace node_modules for inline code. Defaults to the workspace root." },
+      cwd: { type: "string", description: "Workspace-relative directory used by process.cwd() and relative node:fs paths. Defaults to the workspace root." },
+      input: { type: "object", description: "Optional JSON object exposed to the script as the global input value." },
+      env: { type: "object", additionalProperties: { type: "string" }, description: "Non-sensitive environment values exposed through process.env. Values are converted to strings." },
+      args: { type: "array", items: { type: "string" }, description: "Command-line arguments available through process.argv.slice(2)." },
+      credentials: { type: "array", items: { type: "string" }, description: "Credential Keys to inject into process.env. Pass Keys only, never values. Missing credentials become empty strings." },
+      input_files: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Workspace data files that may be read through node:fs. Static import/require modules do not need to be declared again. Up to ${AI_JAVASCRIPT_MAX_FILE_COUNT} entries.`, items: { type: "object", properties: {
+        path: { type: "string", description: "Workspace-relative file path." },
+        type: { type: "string", enum: ["text", "bytes"], description: "Load type. Defaults to text." },
+        view: { type: "string", enum: ["effective", "base"], description: "effective includes unsaved changes; base reads only saved content. Defaults to effective." }
       }, required: ["path"] } },
-      output_files: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Exact workspace files the script may write. At most ${AI_JAVASCRIPT_MAX_FILE_COUNT} declarations.`, items: { type: "object", properties: {
-        path: { type: "string" },
-        type: { type: "string", enum: ["text", "bytes"], description: "Optional required output type. When omitted, writeText or writeBytes determines it." },
+      output_files: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Exact workspace files to extract after execution. Up to ${AI_JAVASCRIPT_MAX_FILE_COUNT} entries.`, items: { type: "object", properties: {
+        path: { type: "string", description: "Workspace-relative output path." },
+        type: { type: "string", enum: ["text", "bytes"], description: "Optional expected output type. When omitted, the type is inferred from MIME information and the extension." },
         overwrite: { type: "boolean", description: "Allow replacing existing saved or unsaved content. Defaults to false." }
       }, required: ["path"] } },
-      output_directories: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Workspace directories under which the script may dynamically create files, for example extracted archive entries. At most ${AI_JAVASCRIPT_MAX_FILE_COUNT} declarations.`, items: { type: "object", properties: {
-        path: { type: "string", description: "Workspace-relative output directory. Use '.' for the workspace root." },
-        overwrite: { type: "boolean", description: "Allow replacing existing saved or unsaved files under this directory. Defaults to false." }
+      output_directories: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Workspace directories from which dynamically named child files should be extracted after execution. Up to ${AI_JAVASCRIPT_MAX_FILE_COUNT} entries.`, items: { type: "object", properties: {
+        path: { type: "string", description: "Workspace-relative directory. Use '.' for the workspace root." },
+        overwrite: { type: "boolean", description: "Allow replacing existing files within this directory. Defaults to false." }
       }, required: ["path"] } },
-      timeout_ms: { type: "number", exclusiveMinimum: 0, maximum: AI_JAVASCRIPT_MAX_TIMEOUT_MS, description: `Optional positive timeout in milliseconds. Defaults to ${AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS}, max ${AI_JAVASCRIPT_MAX_TIMEOUT_MS}.` }
-    }, required: ["code"] } },
+      timeout_ms: { type: "number", exclusiveMinimum: 0, maximum: AI_JAVASCRIPT_MAX_TIMEOUT_MS, description: `Script execution timeout. Defaults to ${AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS}ms and is capped at ${AI_JAVASCRIPT_MAX_TIMEOUT_MS}ms.` }
+    } } },
     { type: "function", name: "list_files", requirements: ["workspace"], description: aiToolDescription("List workspace files and directories.", "Use path relative to workspace root. Use an empty path or '.' for the workspace root. By default only the first level is listed; set recursive to true for descendants. Use max_items to keep output concise."), parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root. '.' means workspace root." }, max_items: { type: "number", description: "Maximum items to return. Capped internally." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
     { type: "function", name: "refresh_tree", requirements: ["workspace"], description: aiToolDescription("Refresh the workspace file tree from disk.", "Use this before locating files that may have been created, deleted, renamed, downloaded, or externally changed."), parameters: { type: "object", properties: { collapse_all: { type: "boolean", description: "Whether to collapse all directories after refreshing. Defaults to false." } } } },
     { type: "function", name: "read_file", requirements: ["workspace"], description: aiToolDescription("Read a workspace text file.", "Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads. This tool only reads text-like files; binary or unsupported files will fail.", "Use max_chars to keep large files concise; default is intentionally limited."), parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "number", description: "Optional 1-based starting line number. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return." }, max_chars: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["path"] } },
@@ -6950,173 +6950,174 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
   return { summary: `${results.length} match(es)`, results };
 }
 
-async function aiToolRunJavaScript({ code, input = {}, credentials, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs, result_mode: resultMode, max_output_chars: maxOutputChars } = {}, signal, session = getActiveAiSession()) {
+async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolve_from: resolveFrom, cwd, input = {}, env, args, credentials, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs } = {}, signal, session = getActiveAiSession()) {
   throwIfAiAborted(signal);
-  const script = String(code || "");
-  if (!script.trim()) return aiJavaScriptErrorResult(createAiJavaScriptError("SCRIPT_REQUIRED", "JavaScript code is required"));
-  if (script.length > AI_JAVASCRIPT_MAX_CODE_CHARS) return aiJavaScriptErrorResult(createAiJavaScriptError("SCRIPT_TOO_LARGE", `JavaScript code is too large: ${script.length} chars`, { size: script.length, maxSize: AI_JAVASCRIPT_MAX_CODE_CHARS }));
-  if (!window.Worker || !window.Blob || !window.URL) return aiJavaScriptErrorResult(createAiJavaScriptError("WORKER_UNAVAILABLE", "Web Worker is not available in this browser"));
-
-  let timeout;
-  let normalizedInputs;
-  let normalizedOutputFiles;
-  let normalizedOutputDirectories;
-  let credentialSelection;
-  try {
-    credentialSelection = aiCredentialStore.select(credentials);
-    validateAiJavaScriptCredentialKeys(credentialSelection.requested);
-    timeout = normalizeAiJavaScriptTimeout(timeoutMs);
-    normalizedInputs = normalizeAiJavaScriptInputs(inputFiles);
-    normalizedOutputFiles = normalizeAiJavaScriptOutputFiles(outputFiles);
-    normalizedOutputDirectories = normalizeAiJavaScriptOutputDirectories(outputDirectories);
-  } catch (error) {
-    return aiJavaScriptErrorResult(error);
-  }
-
-  const usesWorkspace = requiresAiJavaScriptWorkspace({ inputFiles: normalizedInputs, outputFiles: normalizedOutputFiles, outputDirectories: normalizedOutputDirectories });
-  if (usesWorkspace && !isWorkspaceLoaded()) {
-    return aiJavaScriptErrorResult(createAiJavaScriptError("WORKSPACE_REQUIRED", "File operations require an open workspace", { phase: "preflight" }));
-  }
-
-  const workspace = usesWorkspace ? captureWorkspace() : null;
-  const maxReadBytes = workspace?.session?.fileSystem.policy.maxMemoryReadBytes ?? normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES);
-  const maxWriteBytes = workspace?.session?.fileSystem.policy.maxMemoryWriteBytes ?? normalizeMemoryLimit(settings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES);
-  const limits = {
-    maxInputFileBytes: maxReadBytes,
-    maxInputTotalBytes: maxReadBytes,
-    maxDownloadBytes: maxReadBytes,
-    maxDownloadTotalBytes: maxReadBytes,
-    maxOutputFileBytes: maxWriteBytes,
-    maxOutputTotalBytes: maxWriteBytes,
-  };
-
-  let loadedInputs;
-  try {
-    if (workspace) {
-      validateAiJavaScriptOutputDeclarations(normalizedOutputFiles, normalizedOutputDirectories, workspace);
-      loadedInputs = await loadAiJavaScriptInputs(normalizedInputs, workspace, limits, signal);
-    } else {
-      loadedInputs = [];
-    }
-  } catch (error) {
-    return aiJavaScriptErrorResult(error);
-  }
-
-  const proxy = isBackendEnabled();
-  let backendBaseUrl = "";
-  try {
-    if (proxy) backendBaseUrl = getBackendBaseUrl();
-  } catch (error) {
-    return aiJavaScriptErrorResult(error);
-  }
-  const logs = [];
   const startedAt = performance.now();
+  const logs = [];
+  let credentialSelection;
 
-  return new Promise((resolve, reject) => {
-    let worker = null;
-    let objectUrl = "";
-    let timer = 0;
-    let settled = false;
+  try {
+    const hasCode = code !== undefined && code !== null;
+    const rawEntryFile = String(entryFile || "").trim();
+    if (hasCode === Boolean(rawEntryFile)) throw createAiJavaScriptError("INVALID_ENTRY", "Provide exactly one of code or entry_file", { phase: "preflight" });
+    const script = hasCode ? String(code) : undefined;
+    if (hasCode && !script.trim()) throw createAiJavaScriptError("SCRIPT_REQUIRED", "JavaScript code is required", { phase: "preflight" });
+    if (hasCode && script.length > AI_JAVASCRIPT_MAX_CODE_CHARS) throw createAiJavaScriptError("SCRIPT_TOO_LARGE", `JavaScript code is too large: ${script.length} chars`, { phase: "preflight", size: script.length, maxSize: AI_JAVASCRIPT_MAX_CODE_CHARS });
+    if (!window.Worker || !window.MessageChannel) throw createAiJavaScriptError("WORKER_UNAVAILABLE", "Web Worker is not available in this browser");
 
-    const cleanup = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      worker?.terminate();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      worker = null;
-      objectUrl = "";
+    const timeout = normalizeAiJavaScriptTimeout(timeoutMs);
+    const normalizedFormat = normalizeAiJavaScriptFormat(format);
+    const normalizedEntryFile = rawEntryFile ? normalizeAiJavaScriptPath(rawEntryFile) : "";
+    const normalizedResolveFrom = normalizeAiJavaScriptDirectory(resolveFrom, "resolve_from");
+    const normalizedCwd = normalizeAiJavaScriptDirectory(cwd, "cwd");
+    const normalizedEnv = normalizeAiJavaScriptEnv(env);
+    const normalizedArgs = normalizeAiJavaScriptArgs(args);
+    const normalizedInputs = normalizeAiJavaScriptInputs(inputFiles);
+    const normalizedOutputFiles = normalizeAiJavaScriptOutputFiles(outputFiles);
+    const normalizedOutputDirectories = normalizeAiJavaScriptOutputDirectories(outputDirectories);
+    credentialSelection = aiCredentialStore.select(credentials);
+
+    const requiresWorkspace = Boolean(normalizedEntryFile || normalizedInputs.length || normalizedOutputFiles.length || normalizedOutputDirectories.length);
+    if (requiresWorkspace && !isWorkspaceLoaded()) {
+      throw createAiJavaScriptError("WORKSPACE_REQUIRED", "Workspace files require an open workspace", { phase: "preflight" });
+    }
+    const workspace = isWorkspaceLoaded() ? captureWorkspace() : null;
+    const maxReadBytes = workspace?.session?.fileSystem.policy.maxMemoryReadBytes ?? normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES);
+    const maxWriteBytes = workspace?.session?.fileSystem.policy.maxMemoryWriteBytes ?? normalizeMemoryLimit(settings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES);
+    const limits = {
+      maxInputFileBytes: maxReadBytes,
+      maxInputTotalBytes: maxReadBytes,
+      maxDownloadBytes: maxReadBytes,
+      maxDownloadTotalBytes: maxReadBytes,
+      maxOutputFileBytes: maxWriteBytes,
+      maxOutputTotalBytes: maxWriteBytes,
     };
 
-    const finish = (result) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve({
+    if (workspace) validateAiJavaScriptOutputDeclarations(normalizedOutputFiles, normalizedOutputDirectories, workspace);
+    const loadedInputs = workspace ? await loadAiJavaScriptInputs(normalizedInputs, workspace, limits, signal) : [];
+    throwIfAiAborted(signal);
+    const proxy = isBackendEnabled();
+    const backendBaseUrl = proxy ? getBackendBaseUrl() : "";
+    const requestProxy = new RequestProxy(backendBaseUrl, { baseUrl: window.location.href });
+    const prepareStartedAt = performance.now();
+    const prepared = await prepareRunScript({
+      ...(hasCode ? { code: script } : { entryFile: normalizedEntryFile }),
+      ...(normalizedFormat ? { format: normalizedFormat } : {}),
+      resolveFrom: normalizedResolveFrom,
+      cwd: normalizedCwd,
+      input,
+      env: { ...normalizedEnv, ...credentialSelection.values },
+      args: normalizedArgs,
+      inputFiles: loadedInputs.map((file) => ({ path: file.path, type: file.type, content: file.content, mimeType: file.mimeType })),
+      signal,
+    }, {
+      workspace: workspace ? createAiRunScriptWorkspace(workspace) : null,
+      fetch: requestProxy.fetch,
+      limits: {
+        maxSourceBytes: maxReadBytes,
+        maxTotalBytes: maxReadBytes,
+        maxDownloadBytes: maxReadBytes,
+        maxDownloadTotalBytes: maxReadBytes,
+      },
+      signal,
+    });
+    const prepareElapsedMs = Math.round(performance.now() - prepareStartedAt);
+    if (workspace) assertCurrentWorkspace(workspace);
+
+    const data = await runAiNodeWorker({
+      prepared,
+      outputFiles: normalizedOutputFiles,
+      outputDirectories: normalizedOutputDirectories,
+      fileLimits: {
+        maxReadBytes,
+        maxWriteBytes,
+        maxEntryCount: Math.max(40_000, prepared.files.length * 3 + AI_JAVASCRIPT_MAX_FILE_COUNT * 3),
+      },
+      outputLimits: {
+        maxOutputFileBytes: maxWriteBytes,
+        maxOutputTotalBytes: maxWriteBytes,
+        maxOutputFileCount: AI_JAVASCRIPT_MAX_FILE_COUNT,
+      },
+      network: {
+        serverUrl: backendBaseUrl,
+        baseUrl: window.location.href,
+        limits: {
+          maxRequestCount: AI_JAVASCRIPT_MAX_REQUEST_COUNT,
+          maxResponseBytes: maxReadBytes,
+          maxResponseTotalBytes: maxReadBytes,
+          defaultTimeoutMs: Math.min(AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS, timeout),
+          maxTimeoutMs: timeout,
+        },
+      },
+      logging: {
+        maxEntries: AI_JAVASCRIPT_MAX_LOGS,
+        serialization: {
+          maxStringLength: AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS,
+          maxCollectionItems: AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS,
+          maxDepth: AI_JAVASCRIPT_MAX_RESULT_DEPTH,
+        },
+      },
+      serialization: {
+        maxStringLength: AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS,
+        maxCollectionItems: AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS,
+        maxDepth: AI_JAVASCRIPT_MAX_RESULT_DEPTH,
+      },
+    }, {
+      signal,
+      timeoutMs: timeout,
+      onLog: (log) => logs.push(log),
+    });
+
+    if (!data.ok) {
+      return {
+        ok: false,
+        summary: `JavaScript failed: ${data.error?.message || "Unknown error"}`,
+        error: serializeAiJavaScriptError(data.error),
+        logs,
+        log_stats: data.logStats,
+        network: data.network,
+        prepare_elapsed_ms: prepareElapsedMs,
+        execute_elapsed_ms: data.elapsedMs || 0,
         elapsed_ms: Math.round(performance.now() - startedAt),
         requested_credentials: credentialSelection.requested,
         missing_credentials: credentialSelection.missing,
-        logs,
-        ...result,
-      });
-    };
-
-    const abort = () => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(createAiAbortError());
-    };
-
-    try {
-      signal?.addEventListener("abort", abort, { once: true });
-      throwIfAiAborted(signal);
-      objectUrl = URL.createObjectURL(new Blob([createAiJavaScriptWorkerSource({
-        maxStringLength: AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS,
-        maxOutputStringLength: AI_TOOL_OUTPUT_HARD_MAX_CHARS,
-      })], { type: "application/javascript" }));
-      worker = new Worker(objectUrl);
-      worker.onmessage = async (event) => {
-        const data = event.data || {};
-        if (data.type === "log") {
-          logs.push(data.log);
-          if (logs.length > AI_JAVASCRIPT_MAX_LOGS) logs.shift();
-          return;
-        }
-        if (data.type !== "done" || settled) return;
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", abort);
-        worker?.terminate();
-        worker = null;
-        try {
-          if (!data.ok) {
-            finish({ ok: false, summary: `JavaScript failed: ${data.error?.message || "Unknown error"}`, error: serializeAiJavaScriptError(data.error) });
-            return;
-          }
-          const validatedOutputs = workspace
-            ? validateAiJavaScriptOutputs(data.outputFiles, normalizedOutputFiles, normalizedOutputDirectories, workspace, limits)
-            : [];
-          const stagedFiles = workspace
-            ? await stageAiJavaScriptOutputs(validatedOutputs, workspace, session)
-            : [];
-          finish({ ok: true, summary: `JavaScript completed in ${data.elapsedMs || 0}ms${stagedFiles.length ? ` and produced ${stagedFiles.length} file(s)` : ""}`, result: data.result, files: stagedFiles });
-        } catch (error) {
-          finish(aiJavaScriptErrorResult(error));
-        }
       };
-      worker.onerror = (event) => {
-        event.preventDefault?.();
-        finish(aiJavaScriptErrorResult(createAiJavaScriptError("WORKER_ERROR", event.message || "Unknown JavaScript worker error", { filename: event.filename, lineno: event.lineno, colno: event.colno })));
-      };
-      timer = window.setTimeout(() => {
-        finish(aiJavaScriptErrorResult(createAiJavaScriptError("SCRIPT_TIMEOUT", `JavaScript timed out after ${timeout}ms`, { phase: "execution" })));
-      }, timeout);
-      const transfer = loadedInputs.filter((file) => file.type === "bytes").map((file) => file.content);
-      worker.postMessage({
-        type: "run",
-        code: script,
-        credentials: credentialSelection.requested.map((key) => ({ key, value: credentialSelection.values[key] })),
-        input,
-        inputFiles: loadedInputs,
-        outputFiles: normalizedOutputFiles,
-        outputDirectories: normalizedOutputDirectories,
-        limits,
-        network: {
-          proxy,
-          backendBaseUrl,
-          requestTimeoutMs: Math.min(AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS, timeout),
-          maxRequestTimeoutMs: timeout,
-        },
-        resultMode,
-        maxOutputChars,
-      }, transfer);
-    } catch (error) {
-      if (error.name === "AbortError") {
-        abort();
-        return;
-      }
-      finish(aiJavaScriptErrorResult(error));
     }
-  });
+
+    if (workspace) assertCurrentWorkspace(workspace);
+    const validatedOutputs = workspace
+      ? validateAiJavaScriptOutputs(data.outputFiles, normalizedOutputFiles, normalizedOutputDirectories, workspace, limits)
+      : [];
+    const stagedFiles = workspace
+      ? await stageAiJavaScriptOutputs(validatedOutputs, workspace, session, signal)
+      : [];
+    return {
+      ok: true,
+      summary: `JavaScript completed in ${data.elapsedMs || 0}ms${stagedFiles.length ? ` and produced ${stagedFiles.length} file(s)` : ""}`,
+      result: data.result,
+      exit_code: data.exitCode || 0,
+      entry_path: prepared.entryPath,
+      format: prepared.format,
+      logs,
+      log_stats: data.logStats,
+      network: data.network,
+      files: stagedFiles,
+      prepare_elapsed_ms: prepareElapsedMs,
+      execute_elapsed_ms: data.elapsedMs || 0,
+      elapsed_ms: Math.round(performance.now() - startedAt),
+      requested_credentials: credentialSelection.requested,
+      missing_credentials: credentialSelection.missing,
+    };
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    return {
+      ...aiJavaScriptErrorResult(error),
+      logs,
+      elapsed_ms: Math.round(performance.now() - startedAt),
+      requested_credentials: credentialSelection?.requested || [],
+      missing_credentials: credentialSelection?.missing || [],
+    };
+  }
 }
 
 function createAiJavaScriptError(code, message, details = {}) {
@@ -7128,13 +7129,64 @@ function createAiJavaScriptError(code, message, details = {}) {
   return error;
 }
 
-function validateAiJavaScriptCredentialKeys(keys) {
-  const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor;
-  try {
-    new AsyncFunction("input", "runtime", ...keys, "\"use strict\";");
-  } catch {
-    throw createAiJavaScriptError("INVALID_CREDENTIAL_KEY", "run_javascript credentials must be valid non-reserved JavaScript parameter names");
-  }
+function normalizeAiJavaScriptTimeout(value) {
+  if (value === undefined || value === null || value === "") return AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS;
+  const timeout = Number(value);
+  if (!Number.isFinite(timeout) || timeout <= 0) throw createAiJavaScriptError("INVALID_TIMEOUT", "timeout_ms must be a positive finite number", { phase: "preflight" });
+  return Math.min(Math.ceil(timeout), AI_JAVASCRIPT_MAX_TIMEOUT_MS);
+}
+
+function serializeAiJavaScriptError(error) {
+  const source = error && typeof error === "object" ? error : {};
+  const result = {
+    name: source.name || "Error",
+    code: source.code || "SCRIPT_ERROR",
+    message: source.message || String(error),
+  };
+  [
+    ["phase", "phase"],
+    ["path", "path"],
+    ["url", "url"],
+    ["operation", "operation"],
+    ["size", "size"],
+    ["maxSize", "max_size"],
+    ["requestAborted", "request_aborted"],
+    ["partialFileDiscarded", "partial_file_discarded"],
+    ["specifier", "specifier"],
+    ["parent", "parent"],
+    ["format", "format"],
+    ["exitCode", "exit_code"],
+    ["status", "status"],
+  ].forEach(([sourceKey, resultKey]) => {
+    if (source[sourceKey] !== undefined) result[resultKey] = source[sourceKey];
+  });
+  return result;
+}
+
+function evaluateAiJavaScriptSize({ itemSize, currentTotal = 0, itemLimit, totalLimit, phase }) {
+  const size = Number(itemSize) || 0;
+  const total = currentTotal + size;
+  if (size > itemLimit) return { total, violation: { phase, size, maxSize: itemLimit } };
+  if (total > totalLimit) return { total, violation: { phase: `${phase}-total`, size: total, maxSize: totalLimit } };
+  return { total, violation: null };
+}
+
+function resolveAiJavaScriptOutputPolicy(path, outputFiles, outputDirectories) {
+  const exact = outputFiles.find((item) => item.path === path);
+  if (exact) return exact;
+  return outputDirectories
+    .filter((item) => item.path === "" ? path !== "" : path !== item.path && path.startsWith(`${item.path}/`))
+    .sort((left, right) => right.path.length - left.path.length)[0] || null;
+}
+
+function getAiJavaScriptOutputConflict(existingKind, overwrite) {
+  if (existingKind === "directory") return "OUTPUT_PATH_TYPE_CONFLICT";
+  if (existingKind === "file" && !overwrite) return "FILE_ALREADY_EXISTS";
+  return "";
+}
+
+function isAiJavaScriptTextOutput(path, type, mimeType) {
+  return type === "text" || FileUtils.isTextFile({ name: path, type: mimeType });
 }
 
 function aiJavaScriptErrorResult(error) {
@@ -7151,6 +7203,7 @@ function normalizeAiJavaScriptArray(value, field) {
 
 function normalizeAiJavaScriptPath(value, phase = "preflight") {
   const raw = String(value || "").trim();
+  if (!raw) throw createAiJavaScriptError("INVALID_FILE_PATH", "File path is required", { phase, path: raw });
   if (/^(?:[\\/]|[A-Za-z]:[\\/])/.test(raw)) throw createAiJavaScriptError("INVALID_FILE_PATH", `Absolute file paths are not allowed: ${raw}`, { phase, path: raw });
   try {
     return normalizeWorkspacePath(raw);
@@ -7160,6 +7213,97 @@ function normalizeAiJavaScriptPath(value, phase = "preflight") {
     if (!error.path) error.path = raw;
     throw error;
   }
+}
+
+function normalizeAiJavaScriptDirectory(value, field) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === ".") return "";
+  try {
+    return normalizeAiJavaScriptPath(raw);
+  } catch (error) {
+    if (!error.operation) error.operation = field;
+    throw error;
+  }
+}
+
+function normalizeAiJavaScriptFormat(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw || raw === "auto") return raw;
+  const aliases = { cjs: "commonjs", esm: "module", mjs: "module", iife: "global", script: "global" };
+  const format = aliases[raw] || raw;
+  if (!["commonjs", "module", "umd", "global"].includes(format)) {
+    throw createAiJavaScriptError("INVALID_MODULE_FORMAT", `Unsupported module format: ${value}`, { phase: "preflight", format: raw });
+  }
+  return format;
+}
+
+function normalizeAiJavaScriptEnv(value) {
+  if (value == null) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw createAiJavaScriptError("INVALID_ARGUMENT", "env must be an object", { phase: "preflight" });
+  }
+  return Object.fromEntries(Object.entries(value).map(([name, item]) => [String(name), String(item ?? "")]));
+}
+
+function normalizeAiJavaScriptArgs(value) {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw createAiJavaScriptError("INVALID_ARGUMENT", "args must be an array", { phase: "preflight" });
+  if (value.length > AI_JAVASCRIPT_MAX_FILE_COUNT) {
+    throw createAiJavaScriptError("ARGUMENT_COUNT_EXCEEDED", `args exceeds ${AI_JAVASCRIPT_MAX_FILE_COUNT} entries`, {
+      phase: "preflight",
+      size: value.length,
+      maxSize: AI_JAVASCRIPT_MAX_FILE_COUNT,
+    });
+  }
+  return value.map(String);
+}
+
+function createAiRunScriptWorkspace(workspace) {
+  const activeSession = workspace.session;
+  return {
+    policy: activeSession.policy,
+    async stat(path, options = {}) {
+      throwIfAiAborted(options.signal);
+      assertCurrentWorkspace(workspace);
+      return activeSession.stat(path, options);
+    },
+    async list(path, options = {}) {
+      throwIfAiAborted(options.signal);
+      assertCurrentWorkspace(workspace);
+      return activeSession.list(path, options);
+    },
+    async readText(path, options = {}) {
+      throwIfAiAborted(options.signal);
+      assertCurrentWorkspace(workspace);
+      if ((options.view || "effective") === "effective") {
+        const opened = openFiles.get(path);
+        if (opened?.deleted) throw createAiJavaScriptError("FILE_NOT_FOUND", `File is marked for deletion: ${path}`, { phase: "prepare", path });
+        if (opened && isTextFileState(opened)) {
+          assertOpenFileMemoryRead(opened);
+          return opened.model.getValue();
+        }
+      }
+      return activeSession.readText(path, options);
+    },
+    async readBlob(path, options = {}) {
+      throwIfAiAborted(options.signal);
+      assertCurrentWorkspace(workspace);
+      if ((options.view || "effective") === "effective") {
+        const opened = openFiles.get(path);
+        if (opened?.deleted) throw createAiJavaScriptError("FILE_NOT_FOUND", `File is marked for deletion: ${path}`, { phase: "prepare", path });
+        if (opened && isTextFileState(opened)) {
+          assertOpenFileMemoryRead(opened);
+          return new Blob([opened.model.getValue()], { type: opened.mimeType || getMimeType(path, "text/plain;charset=utf-8") });
+        }
+        const blob = opened ? getActiveBlobFile(opened) : null;
+        if (blob) {
+          activeSession.policy?.assertMemoryRead(path, blob.size);
+          return blob;
+        }
+      }
+      return activeSession.readBlob(path, options);
+    },
+  };
 }
 
 function normalizeAiJavaScriptInputs(value) {
@@ -7195,6 +7339,7 @@ function normalizeAiJavaScriptOutputDirectories(value) {
   return normalizeAiJavaScriptArray(value, "output_directories").map((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw createAiJavaScriptError("INVALID_ARGUMENT", "Each output_directories entry must be an object", { phase: "preflight" });
     const rawPath = String(item.path || "").trim();
+    if (!rawPath) throw createAiJavaScriptError("INVALID_FILE_PATH", "output_directories path is required; use '.' for the workspace root", { phase: "preflight", path: rawPath });
     const path = rawPath === "." ? "" : normalizeAiJavaScriptPath(rawPath);
     if (paths.has(path)) throw createAiJavaScriptError("DUPLICATE_FILE_PATH", `Duplicate output directory: ${path}`, { phase: "preflight", path });
     paths.add(path);
@@ -7323,10 +7468,10 @@ function validateAiJavaScriptOutputs(workerOutputs, outputFiles, outputDirectori
     totalSize = budget.total;
     if (budget.violation) throw new FileTooLargeError(path, { ...budget.violation, operation: budget.violation.phase === "output" ? "run_javascript output" : "run_javascript total output" });
     const existing = getAiJavaScriptExistingPath(path);
-    const conflict = getAiJavaScriptOutputConflict({ existingKind: existing.kind, overwrite: declaration.overwrite === true });
+    const conflict = getAiJavaScriptOutputConflict(existing.kind, declaration.overwrite === true);
     if (conflict === "OUTPUT_PATH_TYPE_CONFLICT") throw createAiJavaScriptError(conflict, `Output file path is a directory: ${path}`, { phase: "output", path });
     if (conflict === "FILE_ALREADY_EXISTS") throw createAiJavaScriptError(conflict, `Output file already exists: ${path}`, { phase: "output", path });
-    const textOutput = isAiJavaScriptTextOutput({ path, type, mimeType });
+    const textOutput = isAiJavaScriptTextOutput(path, type, mimeType);
     if (existing.exists && textOutput && existing.file && !isTextFileState(existing.file)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is not text: ${path}`, { phase: "output", path });
     if (existing.exists && textOutput && !existing.file && existing.node && !isReadableTextEntry(existing.node)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is not text: ${path}`, { phase: "output", path });
     if (existing.exists && !textOutput && existing.file && isTextFileState(existing.file)) throw createAiJavaScriptError("OUTPUT_TYPE_CONFLICT", `Existing output file is text: ${path}`, { phase: "output", path });
@@ -7407,15 +7552,13 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, cre
     let filterElapsedMs = 0;
 
     if (filtered) {
-      const filterResult = await aiToolRunJavaScript({
-        code: filterScriptText,
-        input: text,
-        result_mode: "text",
-        max_output_chars: outputLimit,
-      }, signal);
-      if (!filterResult.ok) throw new Error(`filter_script failed: ${filterResult.summary || "Unknown error"}`);
-      clipped = normalizeAiJavaScriptTextResult(filterResult.result, outputLimit);
-      filterElapsedMs = filterResult.elapsed_ms || 0;
+      const filterStartedAt = performance.now();
+      clipped = await runFilterScript(filterScriptText, text, {
+        maxChars: outputLimit,
+        timeoutMs: AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS,
+        signal,
+      });
+      filterElapsedMs = Math.round(performance.now() - filterStartedAt);
     }
 
     const result = {
@@ -7442,18 +7585,6 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, cre
   } catch (error) {
     throw error;
   }
-}
-
-function normalizeAiJavaScriptTextResult(result, maxChars) {
-  if (result && typeof result === "object" && Object.prototype.hasOwnProperty.call(result, "text")) {
-    return {
-      text: String(result.text ?? ""),
-      text_chars: Number(result.text_chars) || String(result.text ?? "").length,
-      returned_chars: Number(result.returned_chars) || String(result.text ?? "").length,
-      truncated: Boolean(result.truncated),
-    };
-  }
-  return clipAiToolText(result, maxChars);
 }
 
 function clampToolCharLimit(value, defaultValue = AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS, maxValue = AI_TOOL_OUTPUT_HARD_MAX_CHARS) {

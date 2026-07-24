@@ -9,6 +9,9 @@
 <main>NodeWorker browser runtime test harness</main>
 <script type="module">
     import {FileSystem, MemoryProvider} from '/src/shared/file-system/index.js';
+    import {runAiNodeWorker} from '/src/shared/ai-node-worker.js';
+    import {runFilterScript} from '/src/shared/filter-script-worker.js';
+    import {NetworkLimit} from '/src/shared/network-limit.js';
     import {DependencyStore} from '/src/shared/node-worker/dependency-store.js';
     import {
         detectJavaScriptSourceFormat,
@@ -29,6 +32,7 @@
     globalThis.runtimeHarness = {
         FileSystem,
         MemoryProvider,
+        NetworkLimit,
         DependencyStore,
         NodeWorker,
         PackageDownloader,
@@ -37,6 +41,8 @@
         detectJavaScriptSourceFormat,
         escapeModuleSpecifier,
         prepareRunScript,
+        runAiNodeWorker,
+        runFilterScript,
         satisfiesVersion,
         scanCommonJsModuleSpecifiers,
         scanEsmModuleSpecifiers,
