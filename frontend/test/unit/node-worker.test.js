@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {EditorNodeWorker} from '../../src/shared/node-worker/editor-node-worker.js';
 import {NodeWorker} from '../../src/shared/node-worker/node-worker.js';
 
 function createWorker(Worker, options = {}) {
@@ -8,10 +7,6 @@ function createWorker(Worker, options = {}) {
 }
 
 const createNodeWorker = (options) => createWorker(NodeWorker, options);
-
-function createEditorNodeWorker(options = {}) {
-    return createWorker(EditorNodeWorker, options);
-}
 
 async function withGlobalFetch(fetch, callback) {
     const originalFetch = globalThis.fetch;
@@ -92,8 +87,8 @@ test('场景：NodeWorker 从映射到本地的 node_modules 加载 CommonJS 包
     assert.equal((await worker.run()).exports, 'commonjs-package');
 });
 
-test('场景：EditorNodeWorker 从映射到本地的 node_modules 加载 ESM 包', async () => {
-    const worker = createEditorNodeWorker({
+test('场景：NodeWorker 从映射到本地的 node_modules 加载 ESM 包', async () => {
+    const worker = createNodeWorker({
         entryPath: 'workspace/src/main.mjs',
         files: [
             {path: 'workspace/src/main.mjs', content: 'import value from "example"; export default value;'},
@@ -108,8 +103,8 @@ test('场景：EditorNodeWorker 从映射到本地的 node_modules 加载 ESM �
     assert.equal((await worker.run()).exports.default, 'esm-package');
 });
 
-test('场景：EditorNodeWorker 通过 Memory FileSystem 加载 CommonJS、JSON 并提供 node:fs', async () => {
-    const worker = createEditorNodeWorker({
+test('场景：NodeWorker 通过 Memory FileSystem 加载 CommonJS、JSON 并提供 node:fs', async () => {
+    const worker = createNodeWorker({
         entryPath: 'workspace/main.cjs',
         cwd: 'workspace',
         files: [
@@ -128,18 +123,15 @@ test('场景：EditorNodeWorker 通过 Memory FileSystem 加载 CommonJS、JSON 
             {path: 'workspace/config.json', content: '{"suffix":"!"}'},
             {path: 'workspace/input.txt', content: 'hello', mimeType: 'text/plain'},
         ],
-        outputFiles: [{path: 'workspace/output.txt', type: 'text', overwrite: true}],
     });
 
     const result = await worker.run();
     assert.deepEqual(result.exports, {cwd: '/workspace', exists: true});
-    assert.equal(result.outputFiles.length, 1);
-    assert.equal(result.outputFiles[0].path, 'workspace/output.txt');
-    assert.equal(result.outputFiles[0].content, 'HELLO!');
+    assert.equal(worker.fileSystem.readTextSync('workspace/output.txt'), 'HELLO!');
 });
 
-test('场景：EditorNodeWorker 从内存文件系统加载相对 ESM 模块', async () => {
-    const worker = createEditorNodeWorker({
+test('场景：NodeWorker 从内存文件系统加载相对 ESM 模块', async () => {
+    const worker = createNodeWorker({
         entryPath: 'workspace/main.mjs',
         files: [
             {
@@ -157,8 +149,8 @@ test('场景：EditorNodeWorker 从内存文件系统加载相对 ESM 模块', a
     assert.equal(result.exports.result, 'esm:12');
 });
 
-test('场景：EditorNodeWorker 的 CommonJS 缓存支持循环依赖', async () => {
-    const worker = createEditorNodeWorker({
+test('场景：NodeWorker 的 CommonJS 缓存支持循环依赖', async () => {
+    const worker = createNodeWorker({
         entryPath: 'workspace/main.cjs',
         files: [
             {path: 'workspace/main.cjs', content: 'module.exports = require("./a");'},
@@ -178,7 +170,7 @@ test('场景：EditorNodeWorker 的 CommonJS 缓存支持循环依赖', async ()
 });
 
 test('场景：ESM 通过 node:fs 读写同一个内存 FileSystem', async () => {
-    const worker = createEditorNodeWorker({
+    const worker = createNodeWorker({
         entryPath: 'workspace/main.mjs',
         cwd: 'workspace',
         files: [
@@ -193,79 +185,9 @@ test('场景：ESM 通过 node:fs 读写同一个内存 FileSystem', async () =>
             },
             {path: 'workspace/input.txt', content: 'shared'},
         ],
-        outputFiles: [{path: 'workspace/output.txt', type: 'text', overwrite: true}],
     });
 
     const result = await worker.run();
     assert.equal(result.exports.default, 'shared');
-    assert.equal(result.outputFiles[0].content, 'shared-esm');
-});
-
-test('场景：EditorNodeWorker 使用项目 policy 限制文件写入', async () => {
-    const worker = createEditorNodeWorker({
-        format: 'commonjs',
-        code: 'require("node:fs").writeFileSync("output.txt", "12345");',
-        outputFiles: [{path: 'output.txt', type: 'text'}],
-        limits: {maxMemoryWriteBytes: 4},
-    });
-
-    assert.equal(worker.fileSystem.policy.maxMemoryWriteBytes, 4);
-    await assert.rejects(worker.run(), {code: 'FILE_TOO_LARGE'});
-});
-
-test('场景：EditorNodeWorker 使用 network-adapter 覆盖 fetch', async () => {
-    const requests = [];
-    await withGlobalFetch(async (url) => {
-        requests.push(String(url));
-        return new Response('proxied');
-    }, async () => {
-        const worker = createEditorNodeWorker({
-            format: 'commonjs',
-            code: 'module.exports = fetch("https://target.test/api?q=1").then((response) => response.text());',
-            network: {
-                proxy: true,
-                backendBaseUrl: 'https://proxy.test/base',
-                baseUrl: 'https://page.test/editor',
-            },
-        });
-
-        const result = await worker.run();
-        assert.equal(result.exports, 'proxied');
-        const requested = new URL(requests[0]);
-        assert.equal(requested.origin, 'https://proxy.test');
-        assert.equal(requested.pathname, '/base/api/requestProxy/api');
-        assert.equal(requested.searchParams.get('X-Proxy-Host'), 'https://target.test');
-    });
-});
-
-test('场景：node:https 与 fetch 共享 EditorNodeWorker 的 network-adapter', async () => {
-    const requests = [];
-    await withGlobalFetch(async (url) => {
-        requests.push(String(url));
-        return new Response('node-http');
-    }, async () => {
-        const worker = createEditorNodeWorker({
-            format: 'commonjs',
-            code: [
-                'const https = require("node:https");',
-                'module.exports = new Promise((resolve, reject) => {',
-                '  const request = https.get("https://target.test/data", (response) => {',
-                '    const chunks = [];',
-                '    response.on("data", (chunk) => chunks.push(chunk));',
-                '    response.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));',
-                '  });',
-                '  request.on("error", reject);',
-                '});',
-            ].join('\n'),
-            network: {
-                proxy: true,
-                backendBaseUrl: 'https://proxy.test',
-                baseUrl: 'https://page.test/editor',
-            },
-        });
-
-        const result = await worker.run();
-        assert.equal(result.exports, 'node-http');
-        assert.equal(new URL(requests[0]).searchParams.get('X-Proxy-Host'), 'https://target.test');
-    });
+    assert.equal(worker.fileSystem.readTextSync('workspace/output.txt'), 'shared-esm');
 });

@@ -44,7 +44,9 @@ class NodeWorker {
         this.moduleUrls = [];
         this.runtimeKey = `__simpleServerNodeWorker_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         this.usesDataModuleUrls = Boolean(globalThis.process?.versions?.node);
-        this.Buffer = createBufferClass();
+        this.Buffer = globalThis.process?.versions?.node && typeof globalThis.Buffer === 'function'
+            ? globalThis.Buffer
+            : createBufferClass();
         this.process = this.createProcess(this.options);
         this.console = globalThis.console;
         this.builtins = this.createBuiltinModules(this.options);
