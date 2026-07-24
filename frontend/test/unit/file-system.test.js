@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
 import test from 'node:test';
 import {
     base64ToBytes,
@@ -28,6 +29,25 @@ import {
     FileUnsupportedError,
     writeFileTarget,
 } from '../../src/shared/file-system/index.js';
+import {
+    getTestArgument,
+    isTestArgumentEnabled,
+    loadTestArguments,
+} from '../test-helpers.js';
+
+const testArguments = loadTestArguments();
+const githubTestConfig = Object.freeze({
+    token: getTestArgument(testArguments, 'github-token', {environment: 'SIMPLE_SERVER_GITHUB_TOKEN'}),
+    repo: getTestArgument(testArguments, 'github-repo', {environment: 'SIMPLE_SERVER_GITHUB_REPO'}),
+    branch: getTestArgument(testArguments, 'github-branch', {environment: 'SIMPLE_SERVER_GITHUB_BRANCH'}),
+    rootPath: getTestArgument(testArguments, 'github-root', {
+        environment: 'SIMPLE_SERVER_GITHUB_ROOT',
+        defaultValue: '.simple-server-integration',
+    }),
+});
+const githubIntegrationEnabled = isTestArgumentEnabled(testArguments, 'github-integration', {
+    environment: 'SIMPLE_SERVER_GITHUB_INTEGRATION',
+}) || Boolean(githubTestConfig.token && githubTestConfig.repo && githubTestConfig.branch);
 
 test('场景：规范化根目录相对路径并拒绝越过根目录', () => {
     assert.equal(normalizeFilePath(''), '');
@@ -734,9 +754,7 @@ test('场景：createFileSystem 通过注册的来源类型隐藏 Provider 构�
 
 test('场景：GithubProvider 使用调用方 SHA 写入 UTF-8 字节且不会预读取', async () => {
     const requests = [];
-    const provider = new GithubProvider({
-        token: 'token',
-        repo: 'owner/repo',
+    const fileSystem = createGithubFileSystem({
         branch: 'feature/test',
         rootPath: 'workspace',
         fetch: async (url, options) => {
@@ -744,7 +762,6 @@ test('场景：GithubProvider 使用调用方 SHA 写入 UTF-8 字节且不会�
             return Response.json({content: {name: 'hello.txt', path: 'workspace/hello.txt', sha: 'new-sha', size: 6}});
         },
     });
-    const fileSystem = new FileSystem({provider});
 
     await fileSystem.writeText('hello.txt', '你好', {expectedVersion: 'old-sha'});
     assert.equal(requests.length, 1);
@@ -760,23 +777,19 @@ test('场景：GithubProvider 使用调用方 SHA 写入 UTF-8 字节且不会�
 });
 
 test('场景：GithubProvider 将预期更新目标缺失视为冲突', async () => {
-    const provider = new GithubProvider({
-        token: 'token',
-        repo: 'owner/repo',
+    const fileSystem = createGithubFileSystem({
         fetch: async () => Response.json({message: 'Not Found'}, {status: 404}),
     });
 
     await assert.rejects(
-        new FileSystem({provider}).writeText('missing.txt', 'local', {expectedVersion: 'old-sha'}),
+        fileSystem.writeText('missing.txt', 'local', {expectedVersion: 'old-sha'}),
         FileConflictError,
     );
 });
 
 test('场景：GithubProvider 以有效全局接收者调用浏览器 fetch', async () => {
     let calls = 0;
-    const provider = new GithubProvider({
-        token: 'token',
-        repo: 'owner/repo',
+    const provider = createGithubProvider({
         fetch: function () {
             assert.equal(this, globalThis);
             calls += 1;
@@ -793,45 +806,28 @@ test('场景：GithubProvider 以有效全局接收者调用浏览器 fetch', as
 });
 
 test('场景：GithubProvider 通过鉴权文件读取保护资源访问', async () => {
-    const provider = new GithubProvider({
-        token: 'token',
-        repo: 'owner/repo',
+    const fileSystem = createGithubFileSystem({
         branch: 'feature/test',
         rootPath: 'workspace',
         proxy: 'https://proxy.example/',
         fetch: async () => Response.json([]),
     });
-    assert.equal(await new FileSystem({provider}).getResourceUrl('docs/my image.png'), null);
+
+    assert.equal(await fileSystem.getResourceUrl('docs/my image.png'), null);
 });
 
 test('场景：需要鉴权时 GithubProvider 绕过第三方下载代理', async () => {
     const requests = [];
-    const provider = new GithubProvider({
+    const fileSystem = createGithubFileSystem({
         token: 'secret-token',
-        repo: 'owner/repo',
         proxy: 'https://proxy.example',
         fetch: async (url, options) => {
             requests.push({url, options});
-            if (requests.length === 1) {
-                return Response.json({
-                    type: 'file',
-                    name: 'large.bin',
-                    path: 'large.bin',
-                    sha: 'large-v1',
-                    size: 6,
-                    download_url: 'https://raw.example/large.bin',
-                });
-            }
-            return {
-                ok: true,
-                status: 200,
-                headers: new Headers({'content-length': '6'}),
-                body: new Blob(['stream']).stream(),
-            };
+            return requests.length === 1 ? githubDownloadMetadata() : githubDownloadResponse();
         },
     });
 
-    await new FileSystem({provider}).openRead('large.bin');
+    await fileSystem.openRead('large.bin');
     assert.equal(requests[0].options.headers.Authorization, 'Bearer secret-token');
     assert.equal(requests[1].url, 'https://raw.example/large.bin');
     assert.equal(new Headers(requests[1].options.headers).get('authorization'), 'Bearer secret-token');
@@ -839,31 +835,14 @@ test('场景：需要鉴权时 GithubProvider 绕过第三方下载代理', asyn
 
 test('场景：GithubProvider 对 download_url 保持流式读取', async () => {
     let requests = 0;
-    const provider = new GithubProvider({
-        token: 'token',
-        repo: 'owner/repo',
+    const fileSystem = createGithubFileSystem({
         fetch: async () => {
             requests += 1;
-            if (requests === 1) {
-                return Response.json({
-                    type: 'file',
-                    name: 'large.bin',
-                    path: 'large.bin',
-                    sha: 'large-v1',
-                    size: 6,
-                    download_url: 'https://raw.example/large.bin',
-                });
-            }
-            return {
-                ok: true,
-                status: 200,
-                headers: new Headers({'content-length': '6'}),
-                body: new Blob(['stream']).stream(),
-            };
+            return requests === 1 ? githubDownloadMetadata() : githubDownloadResponse();
         },
     });
 
-    const opened = await new FileSystem({provider}).openRead('large.bin');
+    const opened = await fileSystem.openRead('large.bin');
     assert.equal(opened.kind, 'file');
     assert.equal(opened.size, 6);
     assert.equal(await new Response(opened.stream).text(), 'stream');
@@ -871,9 +850,7 @@ test('场景：GithubProvider 对 download_url 保持流式读取', async () => 
 
 test('场景：GithubProvider 保留 FileSession.openRead 观察到的 SHA', async () => {
     let sha = 'github-v1';
-    const provider = new GithubProvider({
-        token: 'token',
-        repo: 'owner/repo',
+    const fileSystem = createGithubFileSystem({
         fetch: async () => Response.json({
             type: 'file',
             name: 'readme.md',
@@ -884,12 +861,140 @@ test('场景：GithubProvider 保留 FileSession.openRead 观察到的 SHA', asy
             content: btoa('base'),
         }),
     });
-    const session = new FileSession({fileSystem: new FileSystem({provider})});
+    const session = new FileSession({fileSystem});
 
     assert.equal(await session.readText('readme.md'), 'base');
     sha = 'github-v2';
     await session.stageText('readme.md', 'local');
     assert.equal(session.getChange('readme.md').baseVersion, 'github-v1');
+});
+
+test('场景：GithubProvider 自己完成非原子文件 copy 和 move', async () => {
+    const remote = createGithubContentsFixture({'source.txt': 'hello'});
+    const provider = createGithubProvider({fetch: remote.fetch});
+    const fileSystem = new FileSystem({provider});
+
+    assert.equal(provider.getCapabilities().copy, true);
+    assert.equal(provider.getCapabilities().move, true);
+    assert.equal(fileSystem.getCapabilities().copy, true);
+    assert.equal(fileSystem.getCapabilities().move, true);
+    assert.equal(fileSystem.getCapabilities().atomicMove, false);
+
+    await fileSystem.copyFile('source.txt', 'copy.txt');
+    assert.equal(remote.readText('copy.txt'), 'hello');
+    assert.equal(remote.readText('source.txt'), 'hello');
+
+    await fileSystem.rename('copy.txt', 'moved.txt');
+    assert.equal(remote.has('copy.txt'), false);
+    assert.equal(remote.readText('moved.txt'), 'hello');
+});
+
+test('场景：GithubProvider 明确拒绝不完整列表风险下的目录 copy 和 move', async () => {
+    const provider = createGithubProvider({
+        fetch: async () => {
+            throw new Error('Directory capability rejection should not fetch content');
+        },
+    });
+    provider.stat = async (path) => ({
+        path,
+        name: path.split('/').pop(),
+        kind: 'directory',
+        size: 0,
+        mimeType: null,
+        version: null,
+    });
+    const fileSystem = new FileSystem({provider});
+
+    await assert.rejects(fileSystem.copy('source', 'copy', {recursive: true}), FileUnsupportedError);
+    await assert.rejects(fileSystem.move('source', 'moved', {recursive: true}), FileUnsupportedError);
+});
+
+test('场景：真实 GithubProvider 完成文本读写、冲突刷新和清理', {
+    skip: githubIntegrationEnabled ? false : '未启用真实 GitHub 文件系统测试',
+    timeout: 120_000,
+}, async () => {
+    assertGithubTestConfig();
+    const fileSystem = createLiveGithubFileSystem();
+    const runId = createGithubRunId();
+    const filePath = `run-${runId}/fixture.txt`;
+
+    try {
+        const initialText = `created:${runId}\n`;
+        const created = await fileSystem.writeText(filePath, initialText, {
+            expectedVersion: null,
+            message: `SimpleServer test create ${runId}`,
+        });
+        assert.ok(created.version);
+        assert.equal(await fileSystem.readText(filePath), initialText);
+
+        const entries = await fileSystem.list(`run-${runId}`);
+        const listed = entries.find((entry) => entry.path === filePath);
+        assert.equal(listed?.kind, 'file');
+        assert.equal(listed?.version, created.version);
+
+        const updatedText = `updated:${runId}\n`;
+        const updated = await fileSystem.writeText(filePath, updatedText, {
+            expectedVersion: created.version,
+            message: `SimpleServer test update ${runId}`,
+        });
+        assert.notEqual(updated.version, created.version);
+
+        const session = new FileSession({fileSystem});
+        await session.readText(filePath);
+        await session.stageText(filePath, `local:${runId}\n`);
+        const external = await fileSystem.writeText(filePath, `external:${runId}\n`, {
+            expectedVersion: updated.version,
+            message: `SimpleServer test external update ${runId}`,
+        });
+        await assert.rejects(session.commit(filePath), FileConflictError);
+        await session.refreshChangeBase(filePath);
+        assert.equal(session.getChange(filePath).baseVersion, external.version);
+
+        const retried = await session.commit(filePath, {message: `SimpleServer test retry ${runId}`});
+        assert.equal(await fileSystem.readText(filePath), `local:${runId}\n`);
+        await fileSystem.remove(filePath, {
+            expectedVersion: retried.version,
+            message: `SimpleServer test delete ${runId}`,
+        });
+        await assert.rejects(fileSystem.stat(filePath), {code: 'FILE_NOT_FOUND'});
+    } finally {
+        await removeGithubFiles(fileSystem, [filePath]);
+    }
+});
+
+test('场景：真实 GithubProvider 完成二进制 copy、move 和目录列表', {
+    skip: githubIntegrationEnabled ? false : '未启用真实 GitHub 文件系统测试',
+    timeout: 120_000,
+}, async () => {
+    assertGithubTestConfig();
+    const fileSystem = createLiveGithubFileSystem();
+    const runId = createGithubRunId();
+    const directory = `run-${runId}`;
+    const sourcePath = `${directory}/source.bin`;
+    const copyPath = `${directory}/copy.bin`;
+    const movedPath = `${directory}/moved.bin`;
+    const bytes = new Uint8Array([0, 1, 2, 127, 128, 255]);
+
+    try {
+        const created = await fileSystem.writeBlob(sourcePath, new Blob([bytes], {type: 'application/octet-stream'}), {
+            expectedVersion: null,
+            message: `SimpleServer binary create ${runId}`,
+        });
+        assert.deepEqual(new Uint8Array(await (await fileSystem.readBlob(sourcePath)).arrayBuffer()), bytes);
+
+        const copied = await fileSystem.copyFile(sourcePath, copyPath, {
+            sourceExpectedVersion: created.version,
+            message: `SimpleServer binary copy ${runId}`,
+        });
+        await fileSystem.rename(copyPath, movedPath, {
+            sourceExpectedVersion: copied.version,
+            message: `SimpleServer binary move ${runId}`,
+        });
+        assert.deepEqual(new Uint8Array(await (await fileSystem.readBlob(movedPath)).arrayBuffer()), bytes);
+        assert.deepEqual((await fileSystem.list(directory)).map((entry) => entry.name).sort(), ['moved.bin', 'source.bin']);
+    } finally {
+        await removeGithubFiles(fileSystem, [sourcePath, copyPath, movedPath]);
+    }
 });
 
 test('场景：memory Provider 通过工厂接入并共享完整目录树', async () => {
@@ -969,30 +1074,6 @@ test('场景：memory Provider 支持目录复制、文件覆盖、移动和类�
     assert.equal(await fileSystem.exists('copy'), false);
 });
 
-test('场景：GithubProvider 自己完成非原子文件 cp 和 mv', async () => {
-    const remote = createGithubContentsFixture({'source.txt': 'hello'});
-    const provider = new GithubProvider({
-        token: 'token',
-        repo: 'owner/repo',
-        fetch: remote.fetch,
-    });
-    const fileSystem = new FileSystem({provider});
-
-    assert.equal(provider.getCapabilities().copy, true);
-    assert.equal(provider.getCapabilities().move, true);
-    assert.equal(fileSystem.getCapabilities().copy, true);
-    assert.equal(fileSystem.getCapabilities().move, true);
-    assert.equal(fileSystem.getCapabilities().atomicMove, false);
-
-    await fileSystem.copyFile('source.txt', 'copy.txt');
-    assert.equal(remote.readText('copy.txt'), 'hello');
-    assert.equal(remote.readText('source.txt'), 'hello');
-
-    await fileSystem.rename('copy.txt', 'moved.txt');
-    assert.equal(remote.has('copy.txt'), false);
-    assert.equal(remote.readText('moved.txt'), 'hello');
-});
-
 test('场景：memory Provider 保留写入授权并生成不冲突的新版本', async () => {
     const fileSystem = createFileSystem({
         type: 'memory',
@@ -1059,28 +1140,6 @@ test('场景：copy 和同路径 move 不会绕过显式源版本前置条件', 
     );
 });
 
-test('场景：GithubProvider 明确拒绝不完整列表风险下的目录 cp 和 mv', async () => {
-    const provider = new GithubProvider({
-        token: 'token',
-        repo: 'owner/repo',
-        fetch: async () => {
-            throw new Error('Directory capability rejection should not fetch content');
-        },
-    });
-    provider.stat = async (path) => ({
-        path,
-        name: path.split('/').pop(),
-        kind: 'directory',
-        size: 0,
-        mimeType: null,
-        version: null,
-    });
-    const fileSystem = new FileSystem({provider});
-
-    await assert.rejects(fileSystem.copy('source', 'copy', {recursive: true}), FileUnsupportedError);
-    await assert.rejects(fileSystem.move('source', 'moved', {recursive: true}), FileUnsupportedError);
-});
-
 test('场景：FileResourceResolver 对对象 URL 引用计数并报告不支持环境', async () => {
     const createDescriptor = Object.getOwnPropertyDescriptor(globalThis.URL, 'createObjectURL');
     const revokeDescriptor = Object.getOwnPropertyDescriptor(globalThis.URL, 'revokeObjectURL');
@@ -1133,6 +1192,79 @@ test('场景：FileResourceResolver 对对象 URL 引用计数并报告不支持
         else delete globalThis.URL.revokeObjectURL;
     }
 });
+
+function createGithubProvider(options = {}) {
+    return new GithubProvider({token: 'token', repo: 'owner/repo', ...options});
+}
+
+function createGithubFileSystem(options = {}) {
+    return new FileSystem({provider: createGithubProvider(options)});
+}
+
+function githubDownloadMetadata() {
+    return Response.json({
+        type: 'file',
+        name: 'large.bin',
+        path: 'large.bin',
+        sha: 'large-v1',
+        size: 6,
+        download_url: 'https://raw.example/large.bin',
+    });
+}
+
+function githubDownloadResponse() {
+    return {
+        ok: true,
+        status: 200,
+        headers: new Headers({'content-length': '6'}),
+        body: new Blob(['stream']).stream(),
+    };
+}
+
+function createLiveGithubFileSystem() {
+    return new FileSystem({
+        provider: new GithubProvider(githubTestConfig),
+    });
+}
+
+function assertGithubTestConfig() {
+    const required = [
+        ['github-token', githubTestConfig.token],
+        ['github-repo', githubTestConfig.repo],
+        ['github-branch', githubTestConfig.branch],
+    ];
+    const missing = required.filter(([, value]) => !value).map(([name]) => `--${name}`);
+    if (missing.length) throw new Error(`Missing GitHub test values: ${missing.join(', ')}`);
+}
+
+function createGithubRunId() {
+    return `${Date.now()}-${process.pid}-${randomUUID()}`;
+}
+
+async function removeGithubFiles(fileSystem, paths) {
+    for (const path of paths) await removeGithubFileIfPresent(fileSystem, path);
+}
+
+async function removeGithubFileIfPresent(fileSystem, path) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        let entry;
+        try {
+            entry = await fileSystem.stat(path);
+        } catch (error) {
+            if (error?.code === 'FILE_NOT_FOUND') return;
+            throw error;
+        }
+        try {
+            await fileSystem.remove(path, {
+                expectedVersion: entry.version,
+                message: `SimpleServer test cleanup ${path}`,
+            });
+            return;
+        } catch (error) {
+            if (error?.code !== FileConflictError.code || attempt === 2) throw error;
+        }
+    }
+}
 
 function createSession() {
     const provider = new FakeProvider({

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NodeWorker Browser Runtime Tests</title>
+</head>
+<body>
+<main>NodeWorker browser runtime test harness</main>
+<script type="module">
+    import {FileSystem, MemoryProvider} from '/src/shared/file-system/index.js';
+    import {DependencyStore} from '/src/shared/node-worker/dependency-store.js';
+    import {
+        detectJavaScriptSourceFormat,
+        escapeModuleSpecifier,
+        scanCommonJsModuleSpecifiers,
+        scanEsmModuleSpecifiers,
+        scanJavaScriptModuleSource,
+    } from '/src/shared/node-worker/module-source-scanner.js';
+    import {NodeWorker} from '/src/shared/node-worker/node-worker.js';
+    import {
+        PackageDownloader,
+        compareVersions,
+        satisfiesVersion,
+        selectPackageVersion,
+    } from '/src/shared/node-worker/package-downloader.js';
+    import {createRunScriptPreparer, prepareRunScript} from '/src/shared/node-worker/run-script-preparer.js';
+
+    globalThis.runtimeHarness = {
+        FileSystem,
+        MemoryProvider,
+        DependencyStore,
+        NodeWorker,
+        PackageDownloader,
+        compareVersions,
+        createRunScriptPreparer,
+        detectJavaScriptSourceFormat,
+        escapeModuleSpecifier,
+        prepareRunScript,
+        satisfiesVersion,
+        scanCommonJsModuleSpecifiers,
+        scanEsmModuleSpecifiers,
+        scanJavaScriptModuleSource,
+        selectPackageVersion,
+    };
+    document.documentElement.dataset.runtimeReady = 'true';
+</script>
+</body>
+</html>

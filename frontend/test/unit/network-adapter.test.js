@@ -3,6 +3,9 @@ import http from 'node:http';
 import https from 'node:https';
 import test from 'node:test';
 import {ProxyRequest, buildProxyRequestUrl} from '../../src/shared/script-runtime/network-adapter.js';
+import {getTestArgument, loadTestArguments} from '../test-helpers.js';
+
+const testArguments = loadTestArguments();
 
 test('场景：代理地址保留目标路径和查询参数并附加控制参数', () => {
     const result = new URL(buildProxyRequestUrl(
@@ -215,8 +218,8 @@ test('场景：Node 模块拒绝与入口模块不一致的目标协议', () => 
     );
 });
 
-const realProxyServerUrl = readArgument('proxy-server-url');
-const realProxyTargetUrl = readArgument('proxy-target-url');
+const realProxyServerUrl = getTestArgument(testArguments, 'proxy-server-url');
+const realProxyTargetUrl = getTestArgument(testArguments, 'proxy-target-url');
 
 test('场景：通过命令行参数配置的真实 proxyRequest 服务完成 fetch 和 Node 请求', {
     skip: realProxyServerUrl && realProxyTargetUrl
@@ -269,15 +272,4 @@ function requestWithNodeModule(nodeModule, target) {
         });
         request.on('error', reject);
     });
-}
-
-function readArgument(name) {
-    const option = `--${name}`;
-    const optionWithValue = `${option}=`;
-    for (let index = 2; index < process.argv.length; index += 1) {
-        const value = process.argv[index];
-        if (value === option) return String(process.argv[index + 1] || '').trim();
-        if (value.startsWith(optionWithValue)) return value.slice(optionWithValue.length).trim();
-    }
-    return '';
 }
