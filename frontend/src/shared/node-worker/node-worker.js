@@ -7,6 +7,11 @@ import {
     normalizeFilePath,
 } from '../file-utils.js';
 import {FileSystem, MemoryProvider} from '../file-system/index.js';
+import {
+    detectJavaScriptSourceFormat,
+    scanCommonJsModuleSpecifiers,
+    scanEsmModuleSpecifiers,
+} from './module-source-scanner.js';
 
 const BUILTIN_ALIASES = new Map([
     ['assert', 'node:assert'],
@@ -198,27 +203,19 @@ class NodeWorker {
         if (requested !== 'auto') return requested;
         const detectedFormat = this.moduleFormats.get(normalizeFilePath(path));
         if (isJavaScriptFormat(detectedFormat)) return detectedFormat;
-        await initEsmLexer;
-        return this.detectSourceModuleFormat(source);
+        return detectJavaScriptSourceFormat(source);
     }
 
     async resolveModuleFormats(entryPath) {
-        await initEsmLexer;
         for (const file of this.options.files) {
             if (this.moduleFormats.has(file.path)) continue;
             const directFormat = this.getDirectModuleFormat(file.path);
             if (directFormat) {
                 this.moduleFormats.set(file.path, directFormat);
             } else if (file.path === entryPath || isJavaScriptFile(file)) {
-                this.moduleFormats.set(file.path, this.detectSourceModuleFormat(String(file.content ?? '')));
+                this.moduleFormats.set(file.path, await detectJavaScriptSourceFormat(String(file.content ?? '')));
             }
         }
-    }
-
-    detectSourceModuleFormat(source) {
-        const [imports, exports] = parseEsm(source);
-        if (imports.length > 0 || exports.length > 0) return 'module';
-        return looksLikeCommonJsOrUmd(source) ? 'umd' : 'global';
     }
 
     getModuleFormat(path) {
@@ -334,7 +331,9 @@ class NodeWorker {
         if (visited.has(cacheKey)) return;
         visited.add(cacheKey);
 
-        for (const specifier of findStaticRequireSpecifiers(source)) {
+        for (const dependency of scanCommonJsModuleSpecifiers(source)) {
+            if (dependency.kind !== 'require') continue;
+            const specifier = dependency.specifier;
             const builtin = BUILTIN_ALIASES.get(specifier) || specifier;
             if (this.builtins.has(builtin) || builtin.startsWith('node:')) continue;
 
@@ -356,19 +355,17 @@ class NodeWorker {
     }
 
     async prepareEsmDependencies(path, source, visited = new Set()) {
-        await initEsmLexer;
         const normalizedPath = normalizeFilePath(path);
         const cacheKey = `module:${normalizedPath}`;
         if (visited.has(cacheKey)) return;
         visited.add(cacheKey);
 
-        const [imports] = parseEsm(source);
-        for (const item of imports) {
-            if (!item.n) continue;
-            const builtin = BUILTIN_ALIASES.get(item.n) || item.n;
+        for (const dependency of await scanEsmModuleSpecifiers(source)) {
+            if (!dependency.specifier) continue;
+            const builtin = BUILTIN_ALIASES.get(dependency.specifier) || dependency.specifier;
             if (this.builtins.has(builtin) || builtin.startsWith('node:')) continue;
 
-            const dependencyPath = this.resolveModule(item.n, normalizedPath, 'import');
+            const dependencyPath = this.resolveModule(dependency.specifier, normalizedPath, 'import');
             const format = this.getModuleFormat(dependencyPath);
             if (format === 'module') {
                 await this.prepareEsmDependencies(dependencyPath, this.readModuleText(dependencyPath), visited);
@@ -909,30 +906,6 @@ function hasModuleExports(module, initialExports) {
     return initialExports != null
         && (typeof initialExports === 'object' || typeof initialExports === 'function')
         && Object.keys(initialExports).length > 0;
-}
-
-function looksLikeCommonJsOrUmd(source) {
-    return /\bmodule\s*\.\s*exports\b|\bexports\s*(?:\.|\[)|\brequire\s*\(|\btypeof\s+(?:module|exports)\b|\bdefine\s*\.\s*amd\b/.test(String(source || ''));
-}
-
-function findStaticRequireSpecifiers(source) {
-    const result = [];
-    const pattern = /\brequire\s*\(\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')\s*\)/g;
-    for (const match of String(source || '').matchAll(pattern)) {
-        result.push(decodeStaticModuleSpecifier(match[1] ?? match[2] ?? ''));
-    }
-    return result;
-}
-
-function decodeStaticModuleSpecifier(value) {
-    return String(value).replace(/\\([\\'"bfnrtv])/g, (match, escaped) => ({
-        b: '\b',
-        f: '\f',
-        n: '\n',
-        r: '\r',
-        t: '\t',
-        v: '\v',
-    })[escaped] ?? escaped);
 }
 
 function esmNamespaceForRequire(namespace) {
