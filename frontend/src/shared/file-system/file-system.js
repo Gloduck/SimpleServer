@@ -70,7 +70,7 @@ class FileSystem {
 
     async list(path = '', options = {}) {
         const normalizedPath = normalizeFilePath(path);
-        const limit = this.policy.normalizeListLimit(options.limit);
+        const limit = normalizePolicyListLimit(this.policy, options.limit);
         const result = await this.#provider.list(normalizedPath, {...providerOptions(options), limit});
         if (!Array.isArray(result)) throw invalidProviderResponse('list', normalizedPath);
         return result
@@ -80,7 +80,7 @@ class FileSystem {
 
     listSync(path = '', options = {}) {
         const normalizedPath = normalizeFilePath(path);
-        const limit = this.policy.normalizeListLimit(options.limit);
+        const limit = normalizePolicyListLimit(this.policy, options.limit);
         const result = this.#provider.listSync(normalizedPath, {...providerOptions(options), limit});
         if (!Array.isArray(result)) throw invalidProviderResponse('listSync', normalizedPath);
         return result
@@ -90,7 +90,7 @@ class FileSystem {
 
     async walk(path = '', options = {}) {
         const normalizedPath = normalizeFilePath(path);
-        const limit = this.policy.normalizeListLimit(options.limit, this.policy.maxWalkEntries);
+        const limit = normalizePolicyListLimit(this.policy, options.limit, this.policy?.maxWalkEntries);
         const entries = [];
         const directories = [normalizedPath];
 
@@ -98,7 +98,7 @@ class FileSystem {
             const directory = directories.shift();
             const children = await this.list(directory, {
                 ...options,
-                limit: Math.min(this.policy.maxListEntries, limit - entries.length),
+                limit: Math.min(this.policy?.maxListEntries ?? Infinity, limit - entries.length),
             });
             for (const child of children) {
                 entries.push(child);
@@ -129,9 +129,9 @@ class FileSystem {
     async readBlob(path, options = {}) {
         const normalizedPath = normalizeFilePath(path);
         const opened = await this.openRead(normalizedPath, options);
-        this.policy.assertMemoryRead(normalizedPath, opened.size);
+        this.policy?.assertMemoryRead(normalizedPath, opened.size);
         const blob = opened.blob || await streamToBlob(opened.stream);
-        this.policy.assertMemoryRead(normalizedPath, blob.size);
+        this.policy?.assertMemoryRead(normalizedPath, blob.size);
         return withBlobType(blob, opened.mimeType);
     }
 
@@ -146,7 +146,7 @@ class FileSystem {
             this.#provider.readBytesSync(normalizedPath, providerOptions(options)),
             normalizedPath,
         );
-        this.policy.assertMemoryRead(normalizedPath, bytes.byteLength);
+        this.policy?.assertMemoryRead(normalizedPath, bytes.byteLength);
         return bytes;
     }
 
@@ -171,7 +171,7 @@ class FileSystem {
     async writeBlob(path, value, options = {}) {
         const normalizedPath = normalizeFilePath(path);
         const blob = toBlob(value, options.mimeType);
-        this.policy.assertMemoryWrite(normalizedPath, blob.size);
+        this.policy?.assertMemoryWrite(normalizedPath, blob.size);
 
         const result = await this.#provider.write(normalizedPath, blob, {
             ...providerOptions(options),
@@ -183,15 +183,14 @@ class FileSystem {
     async writeText(path, value, options = {}) {
         const normalizedPath = normalizeFilePath(path);
         const text = String(value);
-        const size = this.policy.getTextSize(text);
-        this.policy.assertMemoryWrite(normalizedPath, size);
+        if (this.policy) this.policy.assertMemoryWrite(normalizedPath, this.policy.getTextSize(text));
         return this.writeBlob(normalizedPath, textToBlob(text, options.mimeType || 'text/plain;charset=utf-8'), options);
     }
 
     writeBytesSync(path, value, options = {}) {
         const normalizedPath = normalizeFilePath(path);
         const bytes = normalizeInputBytes(value);
-        this.policy.assertMemoryWrite(normalizedPath, bytes.byteLength);
+        this.policy?.assertMemoryWrite(normalizedPath, bytes.byteLength);
         return normalizeEntry(
             this.#provider.writeBytesSync(normalizedPath, bytes, {
                 ...providerOptions(options),
@@ -216,7 +215,7 @@ class FileSystem {
 
         // 不支持流式写入时在门面层缓冲，并仍使用同一套写入大小限制。
         if (!this.supports('streamingWrite')) {
-            if (Number.isFinite(options.size)) this.policy.assertMemoryWrite(normalizedPath, options.size);
+            if (Number.isFinite(options.size)) this.policy?.assertMemoryWrite(normalizedPath, options.size);
             const blob = await streamToBlob(stream, options.mimeType);
             return this.writeBlob(normalizedPath, blob, options);
         }
@@ -344,6 +343,19 @@ function providerOptions(options = {}) {
     // 这些选项只属于 FileSession 的内存视图和暂存逻辑，不能泄露给后端 Provider。
     const {view, baseEntry, createOnly, adoptBase, encoding, ...result} = options;
     return result;
+}
+
+function normalizePolicyListLimit(policy, limit, maximum) {
+    if (policy) {
+        return maximum === undefined
+            ? policy.normalizeListLimit(limit)
+            : policy.normalizeListLimit(limit, maximum);
+    }
+    const normalizedMaximum = maximum ?? Infinity;
+    if (limit === undefined || limit === null) return normalizedMaximum;
+    if (limit === Infinity) return normalizedMaximum;
+    if (!Number.isInteger(limit) || limit <= 0) throw new RangeError('limit must be a positive integer');
+    return Math.min(limit, normalizedMaximum);
 }
 
 function normalizeProviderBytes(value, path) {

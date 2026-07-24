@@ -117,7 +117,7 @@ class FileSession {
             else entries.set(name, changeToEntry(change));
         }
 
-        const limit = this.#fileSystem.policy.normalizeListLimit(fileOptions.limit);
+        const limit = normalizePolicyListLimit(this.#fileSystem.policy, fileOptions.limit);
         return [...entries.values()]
             .sort((left, right) => left.name.localeCompare(right.name))
             .slice(0, limit);
@@ -125,14 +125,15 @@ class FileSession {
 
     async walk(path = '', options = {}) {
         const normalizedPath = normalizeFilePath(path);
-        const limit = this.#fileSystem.policy.normalizeListLimit(options.limit, this.#fileSystem.policy.maxWalkEntries);
+        const policy = this.#fileSystem.policy;
+        const limit = normalizePolicyListLimit(policy, options.limit, policy?.maxWalkEntries);
         const entries = [];
         const directories = [normalizedPath];
         while (directories.length > 0 && entries.length < limit) {
             const directory = directories.shift();
             const children = await this.list(directory, {
                 ...options,
-                limit: Math.min(this.#fileSystem.policy.maxListEntries, limit - entries.length),
+                limit: Math.min(policy?.maxListEntries ?? Infinity, limit - entries.length),
             });
             for (const child of children) {
                 entries.push(child);
@@ -173,9 +174,9 @@ class FileSession {
     async readBlob(path, options = {}) {
         const normalizedPath = normalizeFilePath(path);
         const opened = await this.openRead(normalizedPath, options);
-        this.#fileSystem.policy.assertMemoryRead(normalizedPath, opened.size);
+        this.#fileSystem.policy?.assertMemoryRead(normalizedPath, opened.size);
         const blob = opened.blob || await streamToBlob(opened.stream);
-        this.#fileSystem.policy.assertMemoryRead(normalizedPath, blob.size);
+        this.#fileSystem.policy?.assertMemoryRead(normalizedPath, blob.size);
         return withBlobType(blob, opened.mimeType);
     }
 
@@ -187,7 +188,9 @@ class FileSession {
     async stageText(path, value, options = {}) {
         const normalizedPath = normalizeFilePath(path);
         const text = String(value);
-        this.#fileSystem.policy.assertMemoryWrite(normalizedPath, this.#fileSystem.policy.getTextSize(text));
+        if (this.#fileSystem.policy) {
+            this.#fileSystem.policy.assertMemoryWrite(normalizedPath, this.#fileSystem.policy.getTextSize(text));
+        }
         const {createOnly = false, ...changeOptions} = options;
         const base = createOnly
             ? await this.#getCreateBase(normalizedPath)
@@ -203,7 +206,7 @@ class FileSession {
     async stageBlob(path, value, options = {}) {
         const normalizedPath = normalizeFilePath(path);
         const blob = toBlob(value, options.mimeType);
-        this.#fileSystem.policy.assertMemoryWrite(normalizedPath, blob.size);
+        this.#fileSystem.policy?.assertMemoryWrite(normalizedPath, blob.size);
         const {createOnly = false, ...changeOptions} = options;
         const base = createOnly
             ? await this.#getCreateBase(normalizedPath)
@@ -471,6 +474,19 @@ class FileSession {
 function normalizeView(view = 'effective') {
     if (!FILE_VIEWS.has(view)) throw new RangeError(`Unknown file session view: ${view}`);
     return view;
+}
+
+function normalizePolicyListLimit(policy, limit, maximum) {
+    if (policy) {
+        return maximum === undefined
+            ? policy.normalizeListLimit(limit)
+            : policy.normalizeListLimit(limit, maximum);
+    }
+    const normalizedMaximum = maximum ?? Infinity;
+    if (limit === undefined || limit === null) return normalizedMaximum;
+    if (limit === Infinity) return normalizedMaximum;
+    if (!Number.isInteger(limit) || limit <= 0) throw new RangeError('limit must be a positive integer');
+    return Math.min(limit, normalizedMaximum);
 }
 
 function changeToBlob(change) {

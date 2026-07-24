@@ -45,6 +45,29 @@ test('场景：默认内存读取和写入限制均为 50 MiB', () => {
     assert.equal(policy.maxMemoryWriteBytes, 50 * 1024 * 1024);
 });
 
+test('场景：FileSystem policy 为空时不附加内存和遍历限制', async () => {
+    const fileSystem = createFileSystem({
+        type: 'memory',
+        config: {
+            files: [
+                {path: 'first.txt', content: 'first'},
+                {path: 'nested/second.txt', content: 'second'},
+            ],
+        },
+        policy: null,
+    });
+
+    assert.equal(fileSystem.policy, null);
+    assert.equal(fileSystem.readTextSync('nested/second.txt'), 'second');
+    fileSystem.writeTextSync('third.txt', 'third');
+    assert.deepEqual((await fileSystem.walk()).map((entry) => entry.path), [
+        'first.txt',
+        'nested',
+        'third.txt',
+        'nested/second.txt',
+    ]);
+});
+
 test('场景：UTF-8 内存读写限制生效且流式读取不受内存限制', async () => {
     const provider = new FakeProvider({
         'four.txt': {text: 'éé', version: 'v1'},
