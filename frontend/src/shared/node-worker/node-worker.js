@@ -24,12 +24,18 @@ const BUILTIN_ALIASES = new Map([
 class NodeWorker {
     constructor(options = {}) {
         this.options = this.normalizeOptions(options);
+        this.moduleFormats = new Map(this.options.files
+            .filter((file) => file.format)
+            .map((file) => [file.path, file.format]));
         this.fileSystem = this.createFileSystem(this.options);
         this.network = this.createNetwork(this.options);
         this.moduleCache = new Map();
         this.esmUrlCache = new Map();
         this.esmBuildStack = new Set();
         this.esmValues = new Map();
+        this.esmModuleValues = new Map();
+        this.esmModulePromises = new Map();
+        this.scriptGlobalRestores = new Map();
         this.moduleUrls = [];
         this.runtimeKey = `__simpleServerNodeWorker_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         this.usesDataModuleUrls = Boolean(globalThis.process?.versions?.node);
@@ -47,6 +53,7 @@ class NodeWorker {
                 path: entryPath,
                 content: String(options.code),
                 mimeType: 'text/javascript',
+                format: normalizeOptionalFileFormat(options.format),
             });
         }
         for (const file of options.files || []) {
@@ -56,6 +63,7 @@ class NodeWorker {
                 path,
                 content: file.content ?? '',
                 mimeType: file.mimeType || '',
+                format: normalizeOptionalFileFormat(file.format),
             });
         }
         return {
@@ -66,7 +74,6 @@ class NodeWorker {
             input: options.input,
             env: options.env,
             args: options.args,
-            syntheticEntry: !options.entryPath,
             files,
         };
     }
@@ -159,12 +166,15 @@ class NodeWorker {
         const source = this.options.code === undefined
             ? this.readModuleText(entryPath)
             : stripShebang(String(this.options.code));
+        await this.resolveModuleFormats(entryPath);
         const format = await this.getEntryFormat(entryPath, source);
+        const previousGlobals = this.installRuntimeGlobals();
 
         try {
+            if (format !== 'module') await this.prepareCommonJsDependencies(entryPath, source);
             const exports = format === 'module'
                 ? await this.executeEsmEntry(entryPath, source)
-                : await this.executeCommonJsEntry(entryPath, source);
+                : await this.executeCommonJsEntry(entryPath, source, format);
             if (this.process.exitCode !== 0) {
                 throw nodeWorkerError('PROCESS_EXIT', `Process exited with code ${this.process.exitCode}`, {
                     exitCode: this.process.exitCode,
@@ -177,6 +187,8 @@ class NodeWorker {
             }
             throw error;
         } finally {
+            this.restoreScriptGlobals();
+            restoreGlobals(previousGlobals);
             this.disposeModuleUrls();
         }
     }
@@ -184,26 +196,50 @@ class NodeWorker {
     async getEntryFormat(path, source) {
         const requested = normalizeFormat(this.options.format);
         if (requested !== 'auto') return requested;
-        if (this.options.code !== undefined && this.options.syntheticEntry !== false) {
-            await initEsmLexer;
-            const [imports, exports] = parseEsm(source);
-            return imports.length > 0 || exports.length > 0 ? 'module' : 'commonjs';
-        }
-        const extensionFormat = this.getModuleFormat(path);
-        if (extensionFormat === 'module' || extensionFormat === 'commonjs') return extensionFormat;
+        const detectedFormat = this.moduleFormats.get(normalizeFilePath(path));
+        if (isJavaScriptFormat(detectedFormat)) return detectedFormat;
         await initEsmLexer;
+        return this.detectSourceModuleFormat(source);
+    }
+
+    async resolveModuleFormats(entryPath) {
+        await initEsmLexer;
+        for (const file of this.options.files) {
+            if (this.moduleFormats.has(file.path)) continue;
+            const directFormat = this.getDirectModuleFormat(file.path);
+            if (directFormat) {
+                this.moduleFormats.set(file.path, directFormat);
+            } else if (file.path === entryPath || isJavaScriptFile(file)) {
+                this.moduleFormats.set(file.path, this.detectSourceModuleFormat(String(file.content ?? '')));
+            }
+        }
+    }
+
+    detectSourceModuleFormat(source) {
         const [imports, exports] = parseEsm(source);
-        return imports.length > 0 || exports.length > 0 ? 'module' : 'commonjs';
+        if (imports.length > 0 || exports.length > 0) return 'module';
+        return looksLikeCommonJsOrUmd(source) ? 'umd' : 'global';
     }
 
     getModuleFormat(path) {
+        const normalizedPath = normalizeFilePath(path);
+        const declaredFormat = this.moduleFormats.get(normalizedPath);
+        if (declaredFormat) return declaredFormat;
+        return this.getDirectModuleFormat(normalizedPath)
+            || (normalizedPath.endsWith('.js') ? 'commonjs' : '');
+    }
+
+    getDirectModuleFormat(path) {
         const normalizedPath = normalizeFilePath(path);
         if (normalizedPath.endsWith('.mjs')) return 'module';
         if (normalizedPath.endsWith('.cjs')) return 'commonjs';
         if (normalizedPath.endsWith('.json')) return 'json';
         if (!normalizedPath.endsWith('.js')) return '';
+        return this.getPackageModuleFormat(normalizedPath);
+    }
 
-        let directory = getParentFilePath(normalizedPath);
+    getPackageModuleFormat(path) {
+        let directory = getParentFilePath(path);
         while (true) {
             const packagePath = joinFilePath(directory, 'package.json');
             if (this.isFile(packagePath)) {
@@ -216,13 +252,13 @@ class NodeWorker {
             if (!directory) break;
             directory = getParentFilePath(directory);
         }
-        return 'commonjs';
+        return '';
     }
 
-    async executeCommonJsEntry(path, source) {
+    async executeCommonJsEntry(path, source, format = 'commonjs') {
         const module = {id: path, filename: displayPath(path), exports: {}, loaded: false};
         this.moduleCache.set(path, module);
-        const completion = this.executeCommonJsSource(path, source, module, true);
+        const completion = this.executeCommonJsSource(path, source, module, format === 'commonjs', format);
         module.loaded = true;
         if (isThenable(completion)) {
             const resolved = await completion;
@@ -235,8 +271,10 @@ class NodeWorker {
         return module.exports;
     }
 
-    executeCommonJsSource(path, source, module, captureCompletion = false) {
+    executeCommonJsSource(path, source, module, captureCompletion = false, format = 'commonjs') {
         const require = this.createRequire(path);
+        const initialExports = module.exports;
+        const globalSnapshot = isGlobalAwareFormat(format) ? captureGlobalDescriptors() : null;
         const parameters = [
             'require',
             'module',
@@ -264,12 +302,94 @@ class NodeWorker {
             this.options.input,
         ];
         const sourceUrl = `\n//# sourceURL=${displayPath(path)}`;
-        if (captureCompletion) {
-            const execute = new Function(...parameters, 'source', '"use strict"; return eval(source);');
-            return execute(...values, `${stripShebang(source)}${sourceUrl}`);
+        let completion;
+        try {
+            if (captureCompletion) {
+                const execute = new Function(...parameters, 'source', '"use strict"; return eval(source);');
+                completion = execute(...values, `${stripShebang(source)}${sourceUrl}`);
+            } else if (format === 'global') {
+                completion = (0, eval)(`${stripShebang(source)}${sourceUrl}`);
+            } else {
+                const strict = format === 'commonjs' ? '"use strict";\n' : '';
+                const execute = new Function(...parameters, `${strict}${stripShebang(source)}${sourceUrl}`);
+                completion = execute.call(globalThis, ...values);
+            }
+        } catch (error) {
+            if (globalSnapshot) this.collectGlobalModuleExports(globalSnapshot);
+            throw error;
         }
-        const execute = new Function(...parameters, `"use strict";\n${stripShebang(source)}${sourceUrl}`);
-        return execute(...values);
+
+        if (globalSnapshot) {
+            const globalExports = this.collectGlobalModuleExports(globalSnapshot);
+            if (format === 'global' || (format === 'umd' && !hasModuleExports(module, initialExports))) {
+                if (globalExports.found) module.exports = globalExports.value;
+            }
+        }
+        return completion;
+    }
+
+    async prepareCommonJsDependencies(path, source, visited = new Set()) {
+        const normalizedPath = normalizeFilePath(path);
+        const cacheKey = `commonjs:${normalizedPath}`;
+        if (visited.has(cacheKey)) return;
+        visited.add(cacheKey);
+
+        for (const specifier of findStaticRequireSpecifiers(source)) {
+            const builtin = BUILTIN_ALIASES.get(specifier) || specifier;
+            if (this.builtins.has(builtin) || builtin.startsWith('node:')) continue;
+
+            let dependencyPath;
+            try {
+                dependencyPath = this.resolveModule(specifier, normalizedPath, 'require');
+            } catch (error) {
+                if (error?.code === 'MODULE_NOT_FOUND') continue;
+                throw error;
+            }
+            const format = this.getModuleFormat(dependencyPath);
+            if (format === 'module') {
+                await this.prepareEsmDependencies(dependencyPath, this.readModuleText(dependencyPath), visited);
+                await this.loadEsmModuleValue(dependencyPath);
+            } else if (isCommonJsLikeFormat(format)) {
+                await this.prepareCommonJsDependencies(dependencyPath, this.readModuleText(dependencyPath), visited);
+            }
+        }
+    }
+
+    async prepareEsmDependencies(path, source, visited = new Set()) {
+        await initEsmLexer;
+        const normalizedPath = normalizeFilePath(path);
+        const cacheKey = `module:${normalizedPath}`;
+        if (visited.has(cacheKey)) return;
+        visited.add(cacheKey);
+
+        const [imports] = parseEsm(source);
+        for (const item of imports) {
+            if (!item.n) continue;
+            const builtin = BUILTIN_ALIASES.get(item.n) || item.n;
+            if (this.builtins.has(builtin) || builtin.startsWith('node:')) continue;
+
+            const dependencyPath = this.resolveModule(item.n, normalizedPath, 'import');
+            const format = this.getModuleFormat(dependencyPath);
+            if (format === 'module') {
+                await this.prepareEsmDependencies(dependencyPath, this.readModuleText(dependencyPath), visited);
+            } else if (isCommonJsLikeFormat(format)) {
+                await this.prepareCommonJsDependencies(dependencyPath, this.readModuleText(dependencyPath), visited);
+            }
+        }
+    }
+
+    async loadEsmModuleValue(path) {
+        const normalizedPath = normalizeFilePath(path);
+        if (this.esmModuleValues.has(normalizedPath)) return this.esmModuleValues.get(normalizedPath);
+        if (!this.esmModulePromises.has(normalizedPath)) {
+            this.esmModulePromises.set(normalizedPath, (async () => {
+                const url = await this.buildEsmModuleUrl(normalizedPath);
+                const value = await import(url);
+                this.esmModuleValues.set(normalizedPath, value);
+                return value;
+            })());
+        }
+        return this.esmModulePromises.get(normalizedPath);
     }
 
     createRequire(parentPath) {
@@ -295,9 +415,19 @@ class NodeWorker {
 
         const format = this.getModuleFormat(normalizedPath);
         if (format === 'module') {
-            throw nodeWorkerError('ERR_REQUIRE_ESM', `require() cannot load an ES module: ${displayPath(normalizedPath)}`, {
-                path: displayPath(normalizedPath),
+            if (!this.esmModuleValues.has(normalizedPath)) {
+                throw nodeWorkerError('ERR_REQUIRE_ESM', `require() cannot dynamically load an ES module: ${displayPath(normalizedPath)}`, {
+                    path: displayPath(normalizedPath),
+                });
+            }
+            const exports = esmNamespaceForRequire(this.esmModuleValues.get(normalizedPath));
+            this.moduleCache.set(normalizedPath, {
+                id: normalizedPath,
+                filename: displayPath(normalizedPath),
+                exports,
+                loaded: true,
             });
+            return exports;
         }
         if (format === 'json') {
             const module = {id: normalizedPath, filename: displayPath(normalizedPath), exports: {}, loaded: false};
@@ -310,7 +440,7 @@ class NodeWorker {
         const module = {id: normalizedPath, filename: displayPath(normalizedPath), exports: {}, loaded: false};
         this.moduleCache.set(normalizedPath, module);
         try {
-            this.executeCommonJsSource(normalizedPath, this.readModuleText(normalizedPath), module, false);
+            this.executeCommonJsSource(normalizedPath, this.readModuleText(normalizedPath), module, false, format);
             module.loaded = true;
             return module.exports;
         } catch (error) {
@@ -321,13 +451,8 @@ class NodeWorker {
 
     async executeEsmEntry(path, source) {
         await initEsmLexer;
-        const previousGlobals = this.installRuntimeGlobals();
-        try {
-            const url = await this.buildEsmModuleUrl(path, source);
-            return await import(url);
-        } finally {
-            restoreGlobals(previousGlobals);
-        }
+        const url = await this.buildEsmModuleUrl(path, source);
+        return import(url);
     }
 
     async buildEsmModuleUrl(path, sourceOverride) {
@@ -423,6 +548,30 @@ class NodeWorker {
             Object.defineProperty(globalThis, name, {configurable: true, writable: true, value});
         }
         return previous;
+    }
+
+    collectGlobalModuleExports(before) {
+        const after = captureGlobalDescriptors();
+        const changed = [];
+        const names = new Set([...before.keys(), ...after.keys()]);
+        for (const name of names) {
+            const previous = before.get(name);
+            const current = after.get(name);
+            if (samePropertyDescriptor(previous, current)) continue;
+            if (!this.scriptGlobalRestores.has(name)) this.scriptGlobalRestores.set(name, previous);
+            if (current) changed.push([name, readGlobalProperty(name, current)]);
+        }
+        if (changed.length === 1) return {found: true, value: changed[0][1]};
+        if (changed.length > 1) return {found: true, value: Object.fromEntries(changed)};
+        return {found: false, value: undefined};
+    }
+
+    restoreScriptGlobals() {
+        for (const [name, descriptor] of [...this.scriptGlobalRestores.entries()].reverse()) {
+            if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+            else delete globalThis[name];
+        }
+        this.scriptGlobalRestores.clear();
     }
 
     resolveModule(specifier, parentPath, mode) {
@@ -671,8 +820,35 @@ function normalizeFormat(format) {
     const value = String(format || 'auto').trim().toLowerCase();
     if (value === 'esm' || value === 'mjs' || value === 'module') return 'module';
     if (value === 'cjs' || value === 'commonjs') return 'commonjs';
+    if (value === 'umd') return 'umd';
+    if (value === 'global' || value === 'iife' || value === 'script') return 'global';
     if (value === 'auto') return 'auto';
     throw nodeWorkerError('INVALID_MODULE_FORMAT', `Unsupported module format: ${format}`, {format});
+}
+
+function normalizeOptionalFileFormat(format) {
+    if (format === undefined || format === null || format === '') return '';
+    const value = String(format).trim().toLowerCase();
+    if (value === 'json') return 'json';
+    const normalized = normalizeFormat(value);
+    return normalized === 'auto' ? '' : normalized;
+}
+
+function isJavaScriptFormat(format) {
+    return format === 'module' || isCommonJsLikeFormat(format);
+}
+
+function isCommonJsLikeFormat(format) {
+    return format === 'commonjs' || format === 'umd' || format === 'global';
+}
+
+function isGlobalAwareFormat(format) {
+    return format === 'umd' || format === 'global';
+}
+
+function isJavaScriptFile(file) {
+    return /\.(?:cjs|js|mjs)$/i.test(file.path)
+        || /(?:java|ecma)script/i.test(String(file.mimeType || ''));
 }
 
 function packageEntry(manifest, mode) {
@@ -702,6 +878,66 @@ function restoreGlobals(previous) {
         if (descriptor) Object.defineProperty(globalThis, name, descriptor);
         else delete globalThis[name];
     }
+}
+
+function captureGlobalDescriptors() {
+    return new Map(Object.entries(Object.getOwnPropertyDescriptors(globalThis)));
+}
+
+function samePropertyDescriptor(left, right) {
+    if (left === right) return true;
+    if (!left || !right) return false;
+    return left.configurable === right.configurable
+        && left.enumerable === right.enumerable
+        && left.writable === right.writable
+        && Object.is(left.value, right.value)
+        && left.get === right.get
+        && left.set === right.set;
+}
+
+function readGlobalProperty(name, descriptor) {
+    if (Object.prototype.hasOwnProperty.call(descriptor, 'value')) return descriptor.value;
+    try {
+        return globalThis[name];
+    } catch {
+        return undefined;
+    }
+}
+
+function hasModuleExports(module, initialExports) {
+    if (module.exports !== initialExports) return true;
+    return initialExports != null
+        && (typeof initialExports === 'object' || typeof initialExports === 'function')
+        && Object.keys(initialExports).length > 0;
+}
+
+function looksLikeCommonJsOrUmd(source) {
+    return /\bmodule\s*\.\s*exports\b|\bexports\s*(?:\.|\[)|\brequire\s*\(|\btypeof\s+(?:module|exports)\b|\bdefine\s*\.\s*amd\b/.test(String(source || ''));
+}
+
+function findStaticRequireSpecifiers(source) {
+    const result = [];
+    const pattern = /\brequire\s*\(\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')\s*\)/g;
+    for (const match of String(source || '').matchAll(pattern)) {
+        result.push(decodeStaticModuleSpecifier(match[1] ?? match[2] ?? ''));
+    }
+    return result;
+}
+
+function decodeStaticModuleSpecifier(value) {
+    return String(value).replace(/\\([\\'"bfnrtv])/g, (match, escaped) => ({
+        b: '\b',
+        f: '\f',
+        n: '\n',
+        r: '\r',
+        t: '\t',
+        v: '\v',
+    })[escaped] ?? escaped);
+}
+
+function esmNamespaceForRequire(namespace) {
+    const keys = namespace && typeof namespace === 'object' ? Object.keys(namespace) : [];
+    return keys.length === 1 && keys[0] === 'default' ? namespace.default : namespace;
 }
 
 function resolveLogicalPath(path, base = '') {
