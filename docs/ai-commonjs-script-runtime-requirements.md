@@ -637,9 +637,11 @@ DYNAMIC_MODULE_NOT_PRELOADED
 
 内存文件系统必须由 `MemoryProvider extends FileSystemProvider` 实现，并通过文件系统工厂注册为 `memory`。不得在脚本运行时中维护一套绕过 `FileSystemProvider` 的私有文件 Map 或另一套文件操作协议。
 
-`MemoryProvider` 只管理内存中的目录、字节文件、路径权限和版本，不直接读取工作区、解析 npm、创建 Worker 或提交 `FileSession`。环境准备器先解析全部文件及路径映射，再使用准备结果构造 `MemoryProvider` 和对应 `FileSystem`。
+`FileSystemProvider` 只定义存储后端操作契约，抽象基类不提供通用 write/copy/move 实现。每个具体 Provider 必须按照自身后端语义实现所声明支持的能力。
 
-一次脚本执行只使用一个内存 Provider 实例：CommonJS 解析器、`node:fs`、`node:fs/promises`、包资源读取和 WASM 文件读取全部委托给该实例。后续实现 Node `fs` 时，如果公共 `FileSystemProvider` 缺少必要操作，必须先补充统一 Provider 接口及能力声明，不得只在 Node 适配器中增加不可复用的私有操作。
+`MemoryProvider` 只管理内存中的目录、字节文件、路径权限和版本，不直接读取工作区、解析 npm、创建 Worker 或提交 `FileSession`。准备完成后使用它构造对应 `FileSystem`。
+
+一次脚本执行只使用一个内存 `FileSystem`：CommonJS 解析器、`node:fs`、`node:fs/promises`、包资源读取和 WASM 文件读取全部通过文件系统层访问，不直接调用 Provider。`FileSystem` 只负责路径规范化、策略校验和调度，不实现 Provider 未声明支持的 copy/move 行为。
 
 Worker 不得获得工作区文件句柄。主线程只向 Worker 传递初始化完成的内存数据。
 
@@ -697,7 +699,7 @@ fs.rmdirSync
 | `rename` | `move`、`rename` |
 | `unlink`、`rm`、`rmdir` | `remove`、`unlink`、`removeDirectory` |
 
-`MemoryProvider` 必须支持文件和目录 copy/move，并保证内存 move 原子提交。Browser Handle Provider 可以使用通用顺序复制和删除回退，能力声明必须标记 `atomicMove=false`。GitHub Provider 只支持文件级 copy/move，且一次 move 由创建目标和删除源文件的多个提交组成，必须标记为非原子；由于 Contents API 目录列表可能截断，目录 copy/move 在采用完整 Git Tree 遍历前必须返回不支持错误。
+`MemoryProvider` 必须实现文件和目录 copy/move，并保证内存 move 原子提交。Browser Handle Provider 必须实现文件和目录 copy/move，并标记 `atomicMove=false`。GitHub Provider 必须实现非原子文件 copy/move；一次 move 由创建目标和删除源文件的多个提交组成。由于 Contents API 目录列表可能截断，GitHub 目录 copy/move 在采用完整 Git Tree 遍历前必须返回不支持错误。
 
 二进制读取返回兼容的 `Buffer` 或 `Uint8Array`。文本编码至少支持 UTF-8。
 
@@ -1590,8 +1592,8 @@ openWrite在commit前不修改文件且abort后不残留文件或父目录
 copyFile、递归copy、rename、unlink和递归目录删除行为正确
 内存move一次性提交且atomicMove=true
 只读文件拒绝覆盖、删除和移动，已声明写入授权在删除后仍可用于重新创建
-Browser Handle Provider支持通用文件及目录copy/move并标记atomicMove=false
-GithubProvider支持非原子文件copy/move并拒绝目录copy/move
+Browser Handle Provider实现文件及目录copy/move并标记atomicMove=false
+GithubProvider实现非原子文件copy/move并拒绝目录copy/move
 源和目标版本前置条件冲突时不执行对应变更
 ```
 

@@ -8,6 +8,7 @@ import {
 } from '../../file-utils.js';
 import {FileSystemProvider} from '../file-system-provider.js';
 import {
+    FileAlreadyExistsError,
     FileConflictError,
     FileDirectoryNotEmptyError,
     FileIsDirectoryError,
@@ -15,6 +16,7 @@ import {
     FileNotDirectoryError,
     FilePermissionError,
     FileSystemError,
+    FileUnsupportedError,
 } from '../file-system-errors.js';
 
 class BrowserHandleProvider extends FileSystemProvider {
@@ -210,6 +212,23 @@ class BrowserHandleProvider extends FileSystemProvider {
         }
     }
 
+    async write(path, blob, options = {}) {
+        const opened = await this.openWrite(path, options);
+        try {
+            await blob.stream().pipeTo(opened.stream, {
+                preventClose: true,
+                ...(options.signal ? {signal: options.signal} : {}),
+            });
+            return await opened.commit();
+        } catch (error) {
+            try {
+                await opened.abort(error);
+            } catch {
+            }
+            throw error;
+        }
+    }
+
     async createDirectory(path, options = {}) {
         const {recursive = false} = options;
         throwIfAborted(options.signal);
@@ -292,6 +311,155 @@ class BrowserHandleProvider extends FileSystemProvider {
         }
     }
 
+    async copy(sourcePath, destinationPath, options = {}) {
+        const source = normalizeFilePath(sourcePath);
+        const destination = normalizeFilePath(destinationPath);
+        throwIfAborted(options.signal);
+        if (source === destination) throw new FileAlreadyExistsError(destination, {operation: 'copy'});
+        const sourceEntry = await this.stat(source, options);
+        assertExpectedVersion(source, sourceEntry.version, selectExpectedVersion(options.sourceExpectedVersion, options.expectedVersion));
+        if (sourceEntry.kind === 'directory'
+            && (isPathUnder(destination, source) || isPathUnder(source, destination))) {
+            throw new FileSystemError(`Cannot copy between overlapping directories: ${source} -> ${destination}`, {
+                code: 'INVALID_FILE_OPERATION',
+                operation: 'copy',
+                path: source,
+                destinationPath: destination,
+            });
+        }
+        return this.#copyEntry(sourceEntry, destination, options, true);
+    }
+
+    async move(sourcePath, destinationPath, options = {}) {
+        const source = normalizeFilePath(sourcePath);
+        const destination = normalizeFilePath(destinationPath);
+        throwIfAborted(options.signal);
+        const sourceEntry = await this.stat(source, options);
+        const sourceExpectedVersion = selectExpectedVersion(options.sourceExpectedVersion, options.expectedVersion);
+        assertExpectedVersion(source, sourceEntry.version, sourceExpectedVersion);
+        if (options.destinationExpectedVersion !== undefined && source === destination) {
+            assertExpectedVersion(destination, sourceEntry.version, options.destinationExpectedVersion);
+        }
+        if (source === destination) return sourceEntry;
+        if (source === '') throw new FileSystemError('Cannot move the file system root', {
+            code: 'INVALID_FILE_OPERATION',
+            operation: 'move',
+            path: source,
+            destinationPath: destination,
+        });
+
+        const sourceManifest = sourceEntry.kind === 'directory'
+            ? await this.#collectEntryTree(sourceEntry, options)
+            : [sourceEntry];
+        const copied = await this.copy(source, destination, {...options, sourceExpectedVersion});
+        if (sourceEntry.kind === 'directory') {
+            const currentManifest = await this.#collectEntryTree(await this.stat(source, options), options);
+            assertManifestUnchanged(source, sourceManifest, currentManifest);
+            await this.#removeManifest(sourceManifest, options);
+        } else {
+            await this.remove(source, {
+                ...copyMutationOptions(options),
+                expectedVersion: sourceExpectedVersion !== undefined ? sourceExpectedVersion : sourceEntry.version,
+                kind: 'file',
+            });
+        }
+        return copied;
+    }
+
+    async #copyEntry(sourceEntry, destinationPath, options, root) {
+        throwIfAborted(options.signal);
+        const destinationEntry = await this.#optionalStat(destinationPath, options);
+        const destinationExpectedVersion = root ? options.destinationExpectedVersion : undefined;
+        if (destinationExpectedVersion !== undefined) {
+            assertExpectedVersion(destinationPath, destinationEntry?.version ?? null, destinationExpectedVersion);
+        }
+
+        if (sourceEntry.kind === 'file') {
+            if (destinationEntry?.kind === 'directory') throw new FileIsDirectoryError(destinationPath, {operation: 'copy'});
+            if (destinationEntry && options.overwrite !== true) throw new FileAlreadyExistsError(destinationPath, {operation: 'copy'});
+            const opened = await this.openRead(sourceEntry.path, options);
+            if (opened.version !== sourceEntry.version) {
+                throw new FileConflictError(sourceEntry.path, {
+                    expectedVersion: sourceEntry.version,
+                    actualVersion: opened.version,
+                });
+            }
+            return this.write(destinationPath, opened.blob, {
+                ...copyMutationOptions(options),
+                createParents: true,
+                expectedVersion: destinationEntry?.version ?? null,
+                mimeType: opened.mimeType,
+            });
+        }
+
+        if (options.recursive !== true) {
+            throw new FileUnsupportedError('copyDirectory', {
+                path: sourceEntry.path,
+                message: `Copying a directory requires recursive: true: ${sourceEntry.path}`,
+            });
+        }
+        if (destinationEntry?.kind === 'file') {
+            if (options.overwrite !== true) throw new FileAlreadyExistsError(destinationPath, {operation: 'copy'});
+            await this.remove(destinationPath, {
+                ...copyMutationOptions(options),
+                expectedVersion: destinationEntry.version,
+                kind: 'file',
+            });
+        }
+        if (destinationEntry?.kind !== 'directory') {
+            await this.createDirectory(destinationPath, {...copyMutationOptions(options), recursive: true});
+        }
+        for (const child of await this.list(sourceEntry.path, {...options, limit: Infinity})) {
+            await this.#copyEntry(child, joinFilePath(destinationPath, child.name), {
+                ...options,
+                sourceExpectedVersion: undefined,
+                destinationExpectedVersion: undefined,
+                expectedVersion: undefined,
+            }, false);
+        }
+        return this.stat(destinationPath, options);
+    }
+
+    async #optionalStat(path, options) {
+        try {
+            return await this.stat(path, options);
+        } catch (error) {
+            if (error?.code === FileNotFoundError.code) return null;
+            throw error;
+        }
+    }
+
+    async #collectEntryTree(rootEntry, options) {
+        const result = [rootEntry];
+        const directories = rootEntry.kind === 'directory' ? [rootEntry] : [];
+        while (directories.length > 0) {
+            throwIfAborted(options.signal);
+            const directory = directories.shift();
+            for (const child of await this.list(directory.path, {...options, limit: Infinity})) {
+                result.push(child);
+                if (child.kind === 'directory') directories.push(child);
+            }
+        }
+        return result;
+    }
+
+    async #removeManifest(manifest, options) {
+        const entries = [...manifest].sort((left, right) => {
+            const depthDifference = pathDepth(right.path) - pathDepth(left.path);
+            if (depthDifference !== 0) return depthDifference;
+            if (left.kind !== right.kind) return left.kind === 'file' ? -1 : 1;
+            return right.path.localeCompare(left.path);
+        });
+        for (const entry of entries) {
+            throwIfAborted(options.signal);
+            await this.remove(entry.path, {
+                ...copyMutationOptions(options),
+                expectedVersion: entry.version,
+                kind: entry.kind,
+            });
+        }
+    }
+
     async #getDirectory(path, create = false) {
         let directory = this.#root;
         for (const name of normalizeFilePath(path).split('/').filter(Boolean)) {
@@ -365,6 +533,50 @@ function throwIfAborted(signal) {
         error.name = 'AbortError';
         throw error;
     }
+}
+
+function assertExpectedVersion(path, actualVersion, expectedVersion) {
+    if (expectedVersion !== undefined && expectedVersion !== actualVersion) {
+        throw new FileConflictError(path, {expectedVersion, actualVersion});
+    }
+}
+
+function selectExpectedVersion(primary, fallback) {
+    return primary !== undefined ? primary : fallback;
+}
+
+function assertManifestUnchanged(path, expected, actual) {
+    const summarize = (entries) => entries
+        .map((entry) => `${entry.path}\0${entry.kind}\0${entry.version ?? ''}`)
+        .sort();
+    const expectedSummary = summarize(expected);
+    const actualSummary = summarize(actual);
+    if (expectedSummary.length !== actualSummary.length
+        || expectedSummary.some((value, index) => value !== actualSummary[index])) {
+        throw new FileConflictError(path, {
+            message: `Source changed while moving: ${path}`,
+            expectedEntries: expectedSummary,
+            actualEntries: actualSummary,
+        });
+    }
+}
+
+function pathDepth(path) {
+    return path ? path.split('/').length : 0;
+}
+
+function copyMutationOptions(options) {
+    const {
+        expectedVersion,
+        sourceExpectedVersion,
+        destinationExpectedVersion,
+        limit,
+        overwrite,
+        recursive,
+        kind,
+        ...result
+    } = options;
+    return result;
 }
 
 export {BrowserHandleProvider};

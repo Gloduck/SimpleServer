@@ -12,6 +12,8 @@ import {FileOperationPolicy} from './file-operation-policy.js';
 import {FileSystemError} from './file-system-errors.js';
 import {DEFAULT_FILE_SYSTEM_CAPABILITIES, FileSystemProvider} from './file-system-provider.js';
 
+// 持久化文件系统的唯一门面：统一路径、大小限制、流适配和 Provider 返回值，
+// 但不组合 Provider 操作来伪造 copy/move 等后端语义。
 class FileSystem {
     #provider;
 
@@ -159,6 +161,7 @@ class FileSystem {
         const stream = source instanceof ReadableStream ? source : source?.stream?.();
         if (!(stream instanceof ReadableStream)) throw new TypeError('writeStream requires a ReadableStream or stream source');
 
+        // 不支持流式写入时在门面层缓冲，并仍使用同一套写入大小限制。
         if (!this.supports('streamingWrite')) {
             if (Number.isFinite(options.size)) this.policy.assertMemoryWrite(normalizedPath, options.size);
             const blob = await streamToBlob(stream, options.mimeType);
@@ -196,6 +199,7 @@ class FileSystem {
 
     async copy(sourcePath, destinationPath, options = {}) {
         const normalizedDestination = normalizeFilePath(destinationPath);
+        // 原子性、版本检查和目录语义由具体 Provider 决定，不能在这里拼装 copy/move 回退。
         return normalizeEntry(
             await this.#provider.copy(
                 normalizeFilePath(sourcePath),
@@ -284,6 +288,7 @@ function isDirectory(entry) {
 }
 
 function providerOptions(options = {}) {
+    // 这些选项只属于 FileSession 的内存视图和暂存逻辑，不能泄露给后端 Provider。
     const {view, baseEntry, createOnly, adoptBase, ...result} = options;
     return result;
 }

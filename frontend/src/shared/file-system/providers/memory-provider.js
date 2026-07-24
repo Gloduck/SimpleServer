@@ -156,6 +156,23 @@ class MemoryProvider extends FileSystemProvider {
         };
     }
 
+    async write(path, blob, options = {}) {
+        const opened = await this.openWrite(path, options);
+        try {
+            await blob.stream().pipeTo(opened.stream, {
+                preventClose: true,
+                ...(options.signal ? {signal: options.signal} : {}),
+            });
+            return await opened.commit();
+        } catch (error) {
+            try {
+                await opened.abort(error);
+            } catch {
+            }
+            throw error;
+        }
+    }
+
     async createDirectory(path, options = {}) {
         throwIfAborted(options.signal);
         const normalizedPath = normalizeFilePath(path);

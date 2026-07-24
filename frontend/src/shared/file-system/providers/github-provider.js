@@ -5,9 +5,11 @@ import {
     getMimeType,
     joinFilePath,
     normalizeFilePath,
+    streamToBlob,
 } from '../../file-utils.js';
 import {FileSystemProvider} from '../file-system-provider.js';
 import {
+    FileAlreadyExistsError,
     FileConflictError,
     FileIsDirectoryError,
     FileNotFoundError,
@@ -243,6 +245,68 @@ class GithubProvider extends FileSystemProvider {
         return true;
     }
 
+    async copy(sourcePath, destinationPath, options = {}) {
+        const source = normalizeFilePath(sourcePath);
+        const destination = normalizeFilePath(destinationPath);
+        if (source === destination) throw new FileAlreadyExistsError(destination, {operation: 'copy'});
+        const sourceEntry = await this.stat(source, options);
+        if (sourceEntry.kind === 'directory') throw new FileUnsupportedError('copyDirectory', {path: source});
+        assertExpectedVersion(source, sourceEntry.version, selectExpectedVersion(options.sourceExpectedVersion, options.expectedVersion));
+
+        const destinationEntry = await this.#optionalStat(destination, options);
+        if (options.destinationExpectedVersion !== undefined) {
+            assertExpectedVersion(destination, destinationEntry?.version ?? null, options.destinationExpectedVersion);
+        }
+        if (destinationEntry?.kind === 'directory') throw new FileIsDirectoryError(destination, {operation: 'copy'});
+        if (destinationEntry && options.overwrite !== true) throw new FileAlreadyExistsError(destination, {operation: 'copy'});
+
+        const opened = await this.openRead(source, options);
+        if (opened.version !== sourceEntry.version) {
+            throw new FileConflictError(source, {
+                expectedVersion: sourceEntry.version,
+                actualVersion: opened.version,
+            });
+        }
+        const blob = opened.blob || await streamToBlob(opened.stream, opened.mimeType);
+        return this.write(destination, blob, {
+            ...copyMutationOptions(options),
+            expectedVersion: destinationEntry?.version ?? null,
+            mimeType: opened.mimeType,
+            message: options.message || `Copy ${source} to ${destination}`,
+        });
+    }
+
+    async move(sourcePath, destinationPath, options = {}) {
+        const source = normalizeFilePath(sourcePath);
+        const destination = normalizeFilePath(destinationPath);
+        const sourceEntry = await this.stat(source, options);
+        if (sourceEntry.kind === 'directory') throw new FileUnsupportedError('moveDirectory', {path: source});
+        const sourceExpectedVersion = selectExpectedVersion(options.sourceExpectedVersion, options.expectedVersion);
+        assertExpectedVersion(source, sourceEntry.version, sourceExpectedVersion);
+        if (options.destinationExpectedVersion !== undefined && source === destination) {
+            assertExpectedVersion(destination, sourceEntry.version, options.destinationExpectedVersion);
+        }
+        if (source === destination) return sourceEntry;
+
+        const copied = await this.copy(source, destination, {...options, sourceExpectedVersion});
+        await this.remove(source, {
+            ...copyMutationOptions(options),
+            expectedVersion: sourceExpectedVersion !== undefined ? sourceExpectedVersion : sourceEntry.version,
+            kind: 'file',
+            message: options.message || `Move ${source} to ${destination}`,
+        });
+        return copied;
+    }
+
+    async #optionalStat(path, options) {
+        try {
+            return await this.stat(path, options);
+        } catch (error) {
+            if (error?.code === FileNotFoundError.code) return null;
+            throw error;
+        }
+    }
+
     async #getContent(path, options = {}) {
         return this.#requestJson(`${this.#contentUrl(path)}?ref=${encodeURIComponent(this.branch)}`, {
             method: 'GET',
@@ -317,6 +381,30 @@ class GithubProvider extends FileSystemProvider {
 
 function isVersionConflictMessage(message) {
     return /\bsha\b|already exists|does not match/i.test(String(message || ''));
+}
+
+function assertExpectedVersion(path, actualVersion, expectedVersion) {
+    if (expectedVersion !== undefined && expectedVersion !== actualVersion) {
+        throw new FileConflictError(path, {expectedVersion, actualVersion});
+    }
+}
+
+function selectExpectedVersion(primary, fallback) {
+    return primary !== undefined ? primary : fallback;
+}
+
+function copyMutationOptions(options) {
+    const {
+        expectedVersion,
+        sourceExpectedVersion,
+        destinationExpectedVersion,
+        limit,
+        overwrite,
+        recursive,
+        kind,
+        ...result
+    } = options;
+    return result;
 }
 
 function githubEntry(path, entry) {

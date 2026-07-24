@@ -14,6 +14,8 @@ import {FileAlreadyExistsError, FileNotFoundError} from './file-system-errors.js
 
 const FILE_VIEWS = new Set(['effective', 'base', 'changes']);
 
+// FileSession 在一个 FileSystem 上叠加未提交变更，只处理视图、暂存、提交和冲突基线。
+// 没有会话语义的持久化操作由其管理的 FileSystem 执行，不允许绕过到 Provider。
 class FileSession {
     #fileSystem;
     #changes;
@@ -28,6 +30,11 @@ class FileSession {
 
     get policy() {
         return this.#fileSystem.policy;
+    }
+
+    get fileSystem() {
+        // 暴露门面而非 Provider，供目录创建、外部流式写入等无视图操作复用统一约束。
+        return this.#fileSystem;
     }
 
     getCapabilities() {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     base64ToBytes,
+    bytesToBase64,
     getFileName,
     getParentFilePath,
     joinFilePath,
@@ -14,14 +15,17 @@ import {
     FileAlreadyExistsError,
     FileChangeSet,
     FileConflictError,
+    FileDirectoryNotEmptyError,
     FileIsDirectoryError,
     FileNotFoundError,
     FileOperationPolicy,
+    FilePermissionError,
     FileResourceResolver,
     FileSession,
     FileSystem,
     FileSystemProvider,
     FileTooLargeError,
+    FileUnsupportedError,
     writeFileTarget,
 } from '../../src/shared/file-system/index.js';
 
@@ -60,7 +64,7 @@ test('场景：UTF-8 内存读写限制生效且流式读取不受内存限制',
     assert.equal(provider.files.has('write-six.txt'), false);
 });
 
-test('场景：FileSystemProvider 通过 openWrite 提供通用写入实现', async () => {
+test('场景：抽象 Provider 不实现写入复制移动且具体 Provider 负责实现', async () => {
     const chunks = [];
     class StreamingProvider extends FileSystemProvider {
         getCapabilities() {
@@ -74,11 +78,106 @@ test('场景：FileSystemProvider 通过 openWrite 提供通用写入实现', as
                 abort: async () => {},
             };
         }
+
+        async write(path, blob, options = {}) {
+            const opened = await this.openWrite(path, options);
+            await blob.stream().pipeTo(opened.stream, {preventClose: true});
+            return opened.commit();
+        }
     }
 
-    const result = await new FileSystem({provider: new StreamingProvider()}).writeText('shared.txt', 'shared');
+    const provider = new StreamingProvider();
+    const abstractProvider = new FileSystemProvider();
+    await assert.rejects(abstractProvider.write('unsupported.txt', new Blob(['no'])), FileUnsupportedError);
+    await assert.rejects(abstractProvider.copy('source.txt', 'copy.txt'), FileUnsupportedError);
+    await assert.rejects(abstractProvider.move('source.txt', 'moved.txt'), FileUnsupportedError);
+    const result = await new FileSystem({provider}).writeText('shared.txt', 'shared');
     assert.equal(result.version, 'v1');
     assert.equal(await new Blob(chunks).text(), 'shared');
+});
+
+test('场景：FileSystem 规范化路径、过滤会话参数并直接调度 Provider', async () => {
+    const calls = [];
+    class RecordingProvider extends FileSystemProvider {
+        getCapabilities() {
+            return {...super.getCapabilities(), copy: false, move: false};
+        }
+
+        async createDirectory(path, options) {
+            calls.push({operation: 'createDirectory', path, options});
+            return {path, kind: 'directory'};
+        }
+
+        async copy(sourcePath, destinationPath, options) {
+            calls.push({operation: 'copy', sourcePath, destinationPath, options});
+            return {path: destinationPath, kind: 'file', size: 1, version: 'copy-v1'};
+        }
+
+        async move(sourcePath, destinationPath, options) {
+            calls.push({operation: 'move', sourcePath, destinationPath, options});
+            return {path: destinationPath, kind: 'file', size: 1, version: 'move-v1'};
+        }
+    }
+
+    const fileSystem = new FileSystem({provider: new RecordingProvider()});
+    await fileSystem.createDirectory('/docs/./nested', {recursive: true, view: 'base'});
+    await fileSystem.copy('/source/../source.txt', '/copies/./copy.txt', {
+        overwrite: true,
+        view: 'effective',
+        adoptBase: true,
+    });
+    await fileSystem.move('/copies/copy.txt', '/archive/../moved.txt', {
+        sourceExpectedVersion: 'copy-v1',
+        baseEntry: {version: 'ignored'},
+        createOnly: true,
+    });
+
+    assert.deepEqual(calls, [
+        {
+            operation: 'createDirectory',
+            path: 'docs/nested',
+            options: {recursive: true},
+        },
+        {
+            operation: 'copy',
+            sourcePath: 'source.txt',
+            destinationPath: 'copies/copy.txt',
+            options: {overwrite: true},
+        },
+        {
+            operation: 'move',
+            sourcePath: 'copies/copy.txt',
+            destinationPath: 'moved.txt',
+            options: {sourceExpectedVersion: 'copy-v1'},
+        },
+    ]);
+    assert.equal(fileSystem.supports('copy'), false);
+    assert.equal(fileSystem.supports('move'), false);
+});
+
+test('场景：FileSession 的无视图目录操作仍经过其管理的 FileSystem', async () => {
+    const calls = [];
+    class DirectoryProvider extends FileSystemProvider {
+        async createDirectory(path, options) {
+            calls.push({path, options});
+            return {path, kind: 'directory'};
+        }
+    }
+
+    const fileSystem = new FileSystem({provider: new DirectoryProvider()});
+    const session = new FileSession({fileSystem});
+    const entry = await session.createDirectory('/generated/./assets', {recursive: true});
+
+    assert.equal(session.fileSystem, fileSystem);
+    assert.deepEqual(calls, [{path: 'generated/assets', options: {recursive: true}}]);
+    assert.deepEqual(entry, {
+        path: 'generated/assets',
+        name: 'assets',
+        kind: 'directory',
+        size: 0,
+        mimeType: null,
+        version: null,
+    });
 });
 
 test('场景：FileChangeSet 暂存文本、二进制和删除时保留稳定基线元数据', () => {
@@ -109,7 +208,9 @@ test('场景：FileChangeSet 暂存文本、二进制和删除时保留稳定基
 });
 
 test('场景：FileSession 正确合并 effective、base 和 changes 视图', async () => {
-    const {session} = createSession();
+    const {fileSystem, session} = createSession();
+    assert.equal(session.fileSystem, fileSystem);
+    assert.equal('provider' in session, false);
     await session.stageText('alpha.txt', 'changed');
     await session.stageText('docs/new.txt', 'new');
     await session.stageDelete('delete.txt');
@@ -504,6 +605,22 @@ test('场景：BrowserHandleProvider unlink 不删除检查后被替换的目录
     assert.equal(removed, false);
 });
 
+test('场景：BrowserHandleProvider 自己完成文件 copy 和 move', async () => {
+    const fixture = createFlatBrowserHandleFixture({'source.txt': 'hello'});
+    const provider = new BrowserHandleProvider({root: fixture.root});
+    const fileSystem = new FileSystem({provider});
+
+    assert.equal(provider.getCapabilities().copy, true);
+    assert.equal(provider.getCapabilities().move, true);
+    await fileSystem.copyFile('source.txt', 'copy.txt');
+    assert.equal(await fixture.readText('copy.txt'), 'hello');
+    assert.equal(await fixture.readText('source.txt'), 'hello');
+
+    await fileSystem.rename('copy.txt', 'moved.txt');
+    assert.equal(fixture.has('copy.txt'), false);
+    assert.equal(await fixture.readText('moved.txt'), 'hello');
+});
+
 test('场景：createFileSystem 通过注册的来源类型隐藏 Provider 构造过程', () => {
     const handle = {kind: 'directory', name: 'root'};
     const fileSystem = createFileSystem({type: 'local', config: {directoryHandle: handle}});
@@ -672,6 +789,195 @@ test('场景：GithubProvider 保留 FileSession.openRead 观察到的 SHA', asy
     assert.equal(session.getChange('readme.md').baseVersion, 'github-v1');
 });
 
+test('场景：memory Provider 通过工厂接入并共享完整目录树', async () => {
+    const fileSystem = createFileSystem({
+        type: 'memory',
+        config: {
+            writable: false,
+            directories: [
+                {path: 'output', writable: true},
+            ],
+            files: [
+                {path: 'scripts/main.js', content: 'module.exports = 42;', writable: false},
+                {path: 'input/data.txt', content: 'input', writable: false},
+            ],
+        },
+    });
+
+    assert.equal(fileSystem.supports('copy'), true);
+    assert.equal(fileSystem.supports('move'), true);
+    assert.equal(await fileSystem.readText('scripts/main.js'), 'module.exports = 42;');
+    assert.deepEqual((await fileSystem.list('')).map((entry) => `${entry.kind}:${entry.name}`), [
+        'directory:input',
+        'directory:output',
+        'directory:scripts',
+    ]);
+    await assert.rejects(fileSystem.writeText('input/data.txt', 'changed'), FilePermissionError);
+
+    await fileSystem.writeText('output/result.txt', 'result', {
+        createParents: true,
+        expectedVersion: null,
+    });
+    assert.equal(await fileSystem.readText('output/result.txt'), 'result');
+});
+
+test('场景：memory Provider 写入提交前不改变文件且中止后无残留', async () => {
+    const fileSystem = createFileSystem({type: 'memory'});
+    const opened = await fileSystem.openWrite('temporary/data.bin', {
+        createParents: true,
+        expectedVersion: null,
+    });
+    const writer = opened.stream.getWriter();
+    await writer.write(new Uint8Array([1, 2, 3]));
+    writer.releaseLock();
+
+    assert.equal(await fileSystem.exists('temporary/data.bin'), false);
+    await opened.abort();
+    assert.equal(await fileSystem.exists('temporary/data.bin'), false);
+    assert.equal(await fileSystem.exists('temporary'), false);
+});
+
+test('场景：memory Provider 支持目录复制、文件覆盖、移动和类型约束', async () => {
+    const fileSystem = createFileSystem({
+        type: 'memory',
+        config: {
+            files: [
+                {path: 'source/a.txt', content: 'A'},
+                {path: 'source/nested/b.txt', content: 'B'},
+                {path: 'replace.txt', content: 'old'},
+            ],
+        },
+    });
+
+    await fileSystem.copy('source', 'copy', {recursive: true});
+    assert.equal(await fileSystem.readText('copy/a.txt'), 'A');
+    assert.equal(await fileSystem.readText('copy/nested/b.txt'), 'B');
+
+    await assert.rejects(fileSystem.copyFile('source/a.txt', 'replace.txt'), FileAlreadyExistsError);
+    await fileSystem.copyFile('source/a.txt', 'replace.txt', {overwrite: true});
+    assert.equal(await fileSystem.readText('replace.txt'), 'A');
+
+    await fileSystem.rename('copy/nested/b.txt', 'copy/moved.txt');
+    assert.equal(await fileSystem.exists('copy/nested/b.txt'), false);
+    assert.equal(await fileSystem.readText('copy/moved.txt'), 'B');
+    await assert.rejects(fileSystem.unlink('copy'), FileIsDirectoryError);
+    await assert.rejects(fileSystem.removeDirectory('copy'), FileDirectoryNotEmptyError);
+    await fileSystem.removeDirectory('copy', {recursive: true});
+    assert.equal(await fileSystem.exists('copy'), false);
+});
+
+test('场景：GithubProvider 自己完成非原子文件 cp 和 mv', async () => {
+    const remote = createGithubContentsFixture({'source.txt': 'hello'});
+    const provider = new GithubProvider({
+        token: 'token',
+        repo: 'owner/repo',
+        fetch: remote.fetch,
+    });
+    const fileSystem = new FileSystem({provider});
+
+    assert.equal(provider.getCapabilities().copy, true);
+    assert.equal(provider.getCapabilities().move, true);
+    assert.equal(fileSystem.getCapabilities().copy, true);
+    assert.equal(fileSystem.getCapabilities().move, true);
+    assert.equal(fileSystem.getCapabilities().atomicMove, false);
+
+    await fileSystem.copyFile('source.txt', 'copy.txt');
+    assert.equal(remote.readText('copy.txt'), 'hello');
+    assert.equal(remote.readText('source.txt'), 'hello');
+
+    await fileSystem.rename('copy.txt', 'moved.txt');
+    assert.equal(remote.has('copy.txt'), false);
+    assert.equal(remote.readText('moved.txt'), 'hello');
+});
+
+test('场景：memory Provider 保留写入授权并生成不冲突的新版本', async () => {
+    const fileSystem = createFileSystem({
+        type: 'memory',
+        config: {
+            writable: false,
+            writableFiles: ['output.txt'],
+            files: [{path: 'output.txt', content: 'one', version: 'memory-1', writable: true}],
+        },
+    });
+    const first = await fileSystem.stat('output.txt');
+    await fileSystem.writeText('output.txt', 'two', {expectedVersion: first.version});
+    const second = await fileSystem.stat('output.txt');
+    assert.equal(second.version, 'memory-2');
+
+    await fileSystem.unlink('output.txt', {expectedVersion: second.version});
+    await fileSystem.writeText('output.txt', 'three', {expectedVersion: null});
+    assert.equal(await fileSystem.readText('output.txt'), 'three');
+});
+
+test('场景：memory Provider 为 null 初始版本生成有效版本并保持创建前置条件', async () => {
+    const fileSystem = createFileSystem({
+        type: 'memory',
+        config: {files: [{path: 'existing.txt', content: 'existing', version: null}]},
+    });
+    const entry = await fileSystem.stat('existing.txt');
+    assert.match(entry.version, /^memory-\d+$/);
+    await assert.rejects(
+        fileSystem.writeText('existing.txt', 'replacement', {expectedVersion: null}),
+        FileConflictError,
+    );
+});
+
+test('场景：memory Provider 提交时重新校验未允许自动创建的父目录', async () => {
+    const fileSystem = createFileSystem({type: 'memory', config: {directories: ['parent']}});
+    const opened = await fileSystem.openWrite('parent/file.txt', {expectedVersion: null});
+    await fileSystem.removeDirectory('parent');
+
+    await assert.rejects(opened.commit());
+    assert.equal(await fileSystem.exists('parent'), false);
+});
+
+test('场景：memory Provider 不会在提交时用文件覆盖并发创建的目录', async () => {
+    const fileSystem = createFileSystem({type: 'memory'});
+    const opened = await fileSystem.openWrite('target', {expectedVersion: null});
+    await fileSystem.createDirectory('target');
+
+    await assert.rejects(opened.commit(), FileIsDirectoryError);
+    assert.equal((await fileSystem.stat('target')).kind, 'directory');
+});
+
+test('场景：copy 和同路径 move 不会绕过显式源版本前置条件', async () => {
+    const fileSystem = createFileSystem({
+        type: 'memory',
+        config: {files: [{path: 'source.txt', content: 'source'}]},
+    });
+
+    await assert.rejects(
+        fileSystem.copyFile('source.txt', 'copy.txt', {sourceExpectedVersion: null}),
+        FileConflictError,
+    );
+    await assert.rejects(
+        fileSystem.rename('source.txt', 'source.txt', {sourceExpectedVersion: null}),
+        FileConflictError,
+    );
+});
+
+test('场景：GithubProvider 明确拒绝不完整列表风险下的目录 cp 和 mv', async () => {
+    const provider = new GithubProvider({
+        token: 'token',
+        repo: 'owner/repo',
+        fetch: async () => {
+            throw new Error('Directory capability rejection should not fetch content');
+        },
+    });
+    provider.stat = async (path) => ({
+        path,
+        name: path.split('/').pop(),
+        kind: 'directory',
+        size: 0,
+        mimeType: null,
+        version: null,
+    });
+    const fileSystem = new FileSystem({provider});
+
+    await assert.rejects(fileSystem.copy('source', 'copy', {recursive: true}), FileUnsupportedError);
+    await assert.rejects(fileSystem.move('source', 'moved', {recursive: true}), FileUnsupportedError);
+});
+
 test('场景：FileResourceResolver 对对象 URL 引用计数并报告不支持环境', async () => {
     const createDescriptor = Object.getOwnPropertyDescriptor(globalThis.URL, 'createObjectURL');
     const revokeDescriptor = Object.getOwnPropertyDescriptor(globalThis.URL, 'revokeObjectURL');
@@ -731,9 +1037,123 @@ function createSession() {
         'delete.txt': {text: 'delete me', version: 'delete-v1'},
         'docs/base.txt': {text: 'base', version: 'base-v1'},
     });
+    const fileSystem = new FileSystem({provider});
+    return {provider, fileSystem, session: new FileSession({fileSystem})};
+}
+
+function createGithubContentsFixture(initialFiles) {
+    const files = new Map();
+    let nextVersion = 1;
+    for (const [path, content] of Object.entries(initialFiles)) {
+        files.set(path, {bytes: new TextEncoder().encode(content), sha: `sha-${nextVersion++}`});
+    }
+
     return {
-        provider,
-        session: new FileSession({fileSystem: new FileSystem({provider})}),
+        has: (path) => files.has(path),
+        readText: (path) => new TextDecoder().decode(files.get(path)?.bytes),
+        fetch: async (url, options = {}) => {
+            const parsed = new URL(url);
+            const marker = '/contents/';
+            const markerIndex = parsed.pathname.indexOf(marker);
+            const path = markerIndex === -1 ? '' : decodeURIComponent(parsed.pathname.slice(markerIndex + marker.length));
+            const method = options.method || 'GET';
+            const current = files.get(path);
+
+            if (method === 'GET') {
+                if (!current) return Response.json({message: 'Not Found'}, {status: 404});
+                return Response.json({
+                    type: 'file',
+                    name: path.split('/').pop(),
+                    path,
+                    sha: current.sha,
+                    size: current.bytes.byteLength,
+                    encoding: 'base64',
+                    content: bytesToBase64(current.bytes),
+                });
+            }
+            const body = JSON.parse(options.body);
+            if (method === 'PUT') {
+                if ((current?.sha ?? null) !== (body.sha ?? null)) {
+                    return Response.json({message: 'sha does not match'}, {status: 409});
+                }
+                const bytes = base64ToBytes(body.content);
+                const value = {bytes, sha: `sha-${nextVersion++}`};
+                files.set(path, value);
+                return Response.json({
+                    content: {
+                        type: 'file',
+                        name: path.split('/').pop(),
+                        path,
+                        sha: value.sha,
+                        size: bytes.byteLength,
+                    },
+                });
+            }
+            if (method === 'DELETE') {
+                if (!current) return Response.json({message: 'Not Found'}, {status: 404});
+                if (current.sha !== body.sha) return Response.json({message: 'sha does not match'}, {status: 409});
+                files.delete(path);
+                return new Response(null, {status: 204});
+            }
+            throw new Error(`Unexpected GitHub fixture request: ${method} ${url}`);
+        },
+    };
+}
+
+function createFlatBrowserHandleFixture(initialFiles) {
+    const files = new Map(Object.entries(initialFiles).map(([path, content]) => [path, {
+        blob: new Blob([content], {type: 'text/plain'}),
+        lastModified: 1,
+    }]));
+    let nextModified = 2;
+    const missing = () => Object.assign(new Error('missing'), {name: 'NotFoundError'});
+
+    const fileHandle = (name) => ({
+        kind: 'file',
+        name,
+        async getFile() {
+            const value = files.get(name);
+            if (!value) throw missing();
+            Object.defineProperty(value.blob, 'lastModified', {configurable: true, value: value.lastModified});
+            return value.blob;
+        },
+        async createWritable() {
+            const chunks = [];
+            const stream = new WritableStream({write: (chunk) => chunks.push(chunk)});
+            stream.close = async () => {
+                files.set(name, {blob: new Blob(chunks), lastModified: nextModified++});
+            };
+            stream.abort = async () => {};
+            return stream;
+        },
+        async remove() {
+            if (!files.delete(name)) throw missing();
+        },
+    });
+
+    const root = {
+        kind: 'directory',
+        name: 'root',
+        async getFileHandle(name, {create = false} = {}) {
+            if (!files.has(name) && !create) throw missing();
+            if (!files.has(name)) files.set(name, {blob: new Blob([]), lastModified: nextModified++});
+            return fileHandle(name);
+        },
+        async getDirectoryHandle() {
+            throw missing();
+        },
+        async *entries() {
+            for (const name of files.keys()) yield [name, fileHandle(name)];
+        },
+        async removeEntry(name) {
+            if (!files.delete(name)) throw missing();
+        },
+    };
+
+    return {
+        root,
+        has: (path) => files.has(path),
+        readText: async (path) => files.get(path)?.blob.text(),
     };
 }
 

@@ -1535,7 +1535,6 @@ const sshTerminalHost = ref(null);
 const editor = shallowRef(null);
 const diffEditor = shallowRef(null);
 const rootHandle = shallowRef(null);
-const fileSystem = shallowRef(null);
 const fileSession = shallowRef(null);
 let workspaceGeneration = 0;
 let refreshTreeSerial = 0;
@@ -2180,7 +2179,7 @@ function getPreviewFileContent(file) {
 async function getPreviewBlobUrl(file, objectUrls) {
   if (objectUrls.has(file.path)) return objectUrls.get(file.path);
   const source = getActiveBlobFile(file);
-  if (source) fileSystem.value.policy.assertMemoryRead(file.path, source.size);
+  if (source) fileSession.value.fileSystem.policy.assertMemoryRead(file.path, source.size);
   const blob = source || await fileSession.value.readBlob(file.path);
   const objectUrl = URL.createObjectURL(blob);
   objectUrls.set(file.path, objectUrl);
@@ -2209,7 +2208,7 @@ function getTextDataUrl(file) {
 
 async function getPreviewImageDataUrl(file) {
   const blob = getActiveImageBlob(file) || await fileSession.value.readBlob(file.path);
-  const maxSize = Math.min(PREVIEW_INLINE_IMAGE_MAX_FILE_SIZE, fileSystem.value.policy.maxMemoryReadBytes);
+  const maxSize = Math.min(PREVIEW_INLINE_IMAGE_MAX_FILE_SIZE, fileSession.value.fileSystem.policy.maxMemoryReadBytes);
   if (blob.size > maxSize) return "";
   return FileUtils.normalizeImageDataUrl(await FileUtils.readFileAsDataUrl(blob), FileUtils.getImageMimeType(file.name, blob.type));
 }
@@ -2905,7 +2904,7 @@ async function downloadSftpToWorkspace(config, remotePath, localPath, task, exte
         streamController.enqueue(chunk);
       },
     }), { signal: controller.signal });
-    await workspace.fileSystem.writeStream(localPath, progressStream, {
+    await workspace.session.fileSystem.writeStream(localPath, progressStream, {
       createParents: true,
       signal: controller.signal,
       size: task.total || undefined,
@@ -3209,7 +3208,6 @@ async function activateWorkspace(handle, name, kind) {
   rootHandle.value = handle;
   rootName.value = name;
   rootKind.value = kind;
-  fileSystem.value = nextFileSystem;
   fileSession.value = nextSession;
   await refreshTree({ collapseAll: true });
 }
@@ -3235,15 +3233,14 @@ function resetWorkspaceState() {
   resetWorkspaceEditorState();
   fileSession.value?.revertAll();
   fileSession.value = null;
-  fileSystem.value = null;
 }
 
 async function refreshTree(options = {}) {
   const workspace = options.workspace || captureWorkspace();
   const refreshSerial = ++refreshTreeSerial;
-  if (!workspace.fileSystem || !isCurrentWorkspace(workspace)) return false;
+  if (!workspace.session || !isCurrentWorkspace(workspace)) return false;
   try {
-    const nextDiskTree = await readDirectory("", { count: 0 }, workspace.fileSystem);
+    const nextDiskTree = await readDirectory("", { count: 0 }, workspace.session.fileSystem);
     const nextAgentsMdContent = await readRootAgentsMdFromDisk(workspace);
     if (!isCurrentWorkspace(workspace) || refreshSerial !== refreshTreeSerial) return false;
     diskTree.value = nextDiskTree;
@@ -3660,7 +3657,7 @@ function sortTreeNodes(nodes) {
   nodes.forEach((node) => { if (node.children?.length) sortTreeNodes(node.children); });
 }
 
-async function readDirectory(basePath, state = { count: 0 }, sourceFileSystem = fileSystem.value) {
+async function readDirectory(basePath, state = { count: 0 }, sourceFileSystem = fileSession.value.fileSystem) {
   const nodes = [];
   const entries = await sourceFileSystem.list(basePath);
   for (const entry of entries) {
@@ -3742,7 +3739,7 @@ function setBinaryFileBlob(file, blob) {
 async function stageImageFileBlob(file, blob, options = {}) {
   const workspace = options.workspace || captureWorkspace();
   assertCurrentWorkspace(workspace);
-  workspace.fileSystem.policy.assertMemoryWrite(file.path, blob.size);
+  workspace.session.fileSystem.policy.assertMemoryWrite(file.path, blob.size);
   await queueFileStage(file, (session) => session.stageBlob(file.path, blob, {
     mimeType: blob.type || file.mimeType,
     createOnly: options.createOnly === true,
@@ -3756,7 +3753,7 @@ async function stageImageFileBlob(file, blob, options = {}) {
 async function stageBinaryFileBlob(file, blob, options = {}) {
   const workspace = options.workspace || captureWorkspace();
   assertCurrentWorkspace(workspace);
-  workspace.fileSystem.policy.assertMemoryWrite(file.path, blob.size);
+  workspace.session.fileSystem.policy.assertMemoryWrite(file.path, blob.size);
   await queueFileStage(file, (session) => session.stageBlob(file.path, blob, {
     mimeType: blob.type || file.mimeType,
     createOnly: options.createOnly === true,
@@ -4036,7 +4033,7 @@ function changeActiveLanguage() {
 
 function updateDirtyState(file) {
   const blobChanged = Boolean(getActiveBlobFile(file)) && file.blob !== file.savedBlob;
-  if (isTextFileState(file)) file.size = fileSystem.value.policy.getTextSize(file.model.getValue());
+  if (isTextFileState(file)) file.size = fileSession.value.fileSystem.policy.getTextSize(file.model.getValue());
   file.dirty = Boolean(file.isNew || file.deleted || blobChanged) || (isTextFileState(file) && file.model.getValue() !== file.savedValue);
   openFiles.set(file.path, file);
   touchDirtyState();
@@ -4052,7 +4049,7 @@ function attachTextModelListener(file) {
     }
     const value = file.model.getValue();
     try {
-      fileSystem.value.policy.assertMemoryWrite(file.path, fileSystem.value.policy.getTextSize(value));
+      fileSession.value.fileSystem.policy.assertMemoryWrite(file.path, fileSession.value.fileSystem.policy.getTextSize(value));
     } catch (error) {
       restoreLastLegalText(file);
       reportFileOperationError(error);
@@ -4112,14 +4109,12 @@ function queueFileStage(file, operation, workspace = captureWorkspace()) {
 function captureWorkspace() {
   return {
     generation: workspaceGeneration,
-    fileSystem: fileSystem.value,
     session: fileSession.value,
   };
 }
 
 function isCurrentWorkspace(workspace) {
   return workspace?.generation === workspaceGeneration
-    && workspace.fileSystem === fileSystem.value
     && workspace.session === fileSession.value;
 }
 
@@ -4202,7 +4197,7 @@ async function awaitLatestStage(file) {
 
 async function replaceTextFileContent(file, value) {
   const text = String(value ?? "");
-  fileSystem.value.policy.assertMemoryWrite(file.path, fileSystem.value.policy.getTextSize(text));
+  fileSession.value.fileSystem.policy.assertMemoryWrite(file.path, fileSession.value.fileSystem.policy.getTextSize(text));
   await queueFileStage(file, (session) => !file.isNew && text === file.savedValue
     ? session.revert(file.path)
     : session.stageText(file.path, text, { mimeType: file.mimeType || getMimeType(file.path, "text/plain;charset=utf-8") }));
@@ -4355,7 +4350,7 @@ async function saveNodeAs(node) {
       } else {
         const destination = await window.showSaveFilePicker({ suggestedName: sourceNode.name });
         assertCurrentWorkspace(workspace);
-        if (await workspace.fileSystem.isSameFileTarget(sourceNode.path, destination)) throw new Error(tr("error.saveAsSource"));
+        if (await workspace.session.fileSystem.isSameFileTarget(sourceNode.path, destination)) throw new Error(tr("error.saveAsSource"));
         const source = await openSaveAsRead(sourceNode.path, { includeUnsaved, workspace });
         await writeFileTarget(destination, source.stream);
       }
@@ -4381,7 +4376,7 @@ async function saveNodeAs(node) {
     await destinationFileSystem.checkAccess("", { writable: true, request: true });
     assertCurrentWorkspace(workspace);
     const destinationPath = normalizeFilePath(sourceNode.name);
-    if (await workspace.fileSystem.isCopyDestinationInside(sourceNode.path, destinationFileSystem, destinationPath)) throw new Error(tr("error.destinationInsideSource"));
+    if (await workspace.session.fileSystem.isCopyDestinationInside(sourceNode.path, destinationFileSystem, destinationPath)) throw new Error(tr("error.destinationInsideSource"));
     assertCurrentWorkspace(workspace);
     const existing = await fileExists(destinationFileSystem, destinationPath);
     assertCurrentWorkspace(workspace);
@@ -4412,7 +4407,7 @@ async function getNodeExportBlob(node, { includeUnsaved = true, workspace = capt
     assertCurrentWorkspace(workspace);
     return workspace.session.readBlob(node.path, { view: "effective" });
   }
-  return workspace.fileSystem.readBlob(node.path);
+  return workspace.session.fileSystem.readBlob(node.path);
 }
 
 async function copyTreeNodes(nodes, destinationFileSystem, destinationPath, { includeUnsaved = true, workspace = captureWorkspace() } = {}) {
@@ -4459,7 +4454,7 @@ async function buildZipTree(nodes, { includeUnsaved = true, workspace = captureW
 
 async function openSaveAsRead(path, { includeUnsaved = true, workspace = captureWorkspace() } = {}) {
   assertCurrentWorkspace(workspace);
-  if (!includeUnsaved) return workspace.fileSystem.openRead(path);
+  if (!includeUnsaved) return workspace.session.fileSystem.openRead(path);
   const file = openFiles.get(path);
   if (file) await awaitLatestStage(file);
   assertCurrentWorkspace(workspace);
@@ -4534,7 +4529,7 @@ async function createFolderFromContext(node) {
     if (findNodeByPath(tree.value, path)) throw new Error(`File already exists: ${path}`);
     assertFilePathAncestors(path);
     if (isExternalWritePath(path)) throw new Error(`File operation is already in progress: ${path}`);
-    await workspace.fileSystem.createDirectory(path, { recursive: true });
+    await workspace.session.createDirectory(path, { recursive: true });
     if (!isCurrentWorkspace(workspace) || !await refreshTree()) return;
     setStatus(tr("status.refreshed", { name: rootName.value }), path);
   } catch (error) {
@@ -4670,7 +4665,7 @@ async function deleteNode(node) {
       const affectedFiles = getOpenFilesUnderPath(node.path);
       await Promise.all(affectedFiles.map((file) => awaitLatestStage(file).catch(() => {})));
       if (!isCurrentWorkspace(workspace)) return;
-      await workspace.fileSystem.remove(node.path, { recursive: node.kind === "directory" });
+      await workspace.session.fileSystem.remove(node.path, { recursive: node.kind === "directory" });
       if (!isCurrentWorkspace(workspace)) return;
       closeOpenFilesUnderPath(node.path);
     } finally {
@@ -4992,7 +4987,7 @@ function assertImageOutputSize(path, size) {
 }
 
 function getImageOutputLimit() {
-  return Math.min(AI_IMAGE_OUTPUT_MAX_FILE_SIZE, fileSystem.value.policy.maxMemoryWriteBytes);
+  return Math.min(AI_IMAGE_OUTPUT_MAX_FILE_SIZE, fileSession.value.fileSystem.policy.maxMemoryWriteBytes);
 }
 
 function getImageJsonResponseLimit(path) {
@@ -6408,9 +6403,9 @@ function createFileOperationPolicy() {
 }
 
 function syncFileOperationPolicy() {
-  if (!fileSystem.value) return;
-  fileSystem.value.policy.maxMemoryReadBytes = normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES);
-  fileSystem.value.policy.maxMemoryWriteBytes = normalizeMemoryLimit(settings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES);
+  if (!fileSession.value) return;
+  fileSession.value.fileSystem.policy.maxMemoryReadBytes = normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES);
+  fileSession.value.fileSystem.policy.maxMemoryWriteBytes = normalizeMemoryLimit(settings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES);
 }
 
 function shouldHideName(name) {
@@ -6424,27 +6419,27 @@ function isImageEntry(entry) {
 function isReadableTextEntry(entry) {
   if (!entry || entry.kind === "directory" || isImageEntry(entry)) return false;
   const readable = FileUtils.isTextFile({ name: entry.name, type: entry.mimeType || entry.type || "" });
-  return readable && (!Number.isFinite(entry.size) || entry.size <= fileSystem.value.policy.maxMemoryReadBytes);
+  return readable && (!Number.isFinite(entry.size) || entry.size <= fileSession.value.fileSystem.policy.maxMemoryReadBytes);
 }
 
 function assertReadableTextEntry(entry) {
   if (!entry || entry.kind === "directory" || isImageEntry(entry) || !FileUtils.isTextFile({ name: entry.name, type: entry.mimeType || entry.type || "" })) {
     throw new Error(`File is not readable text: ${entry?.path || entry?.name || ""}`);
   }
-  fileSystem.value.policy.assertMemoryRead(entry.path || entry.name, entry.size);
+  fileSession.value.fileSystem.policy.assertMemoryRead(entry.path || entry.name, entry.size);
 }
 
 function assertOpenFileMemoryRead(file) {
   if (isTextFileState(file)) {
-    fileSystem.value.policy.assertMemoryRead(file.path, fileSystem.value.policy.getTextSize(file.model.getValue()));
+    fileSession.value.fileSystem.policy.assertMemoryRead(file.path, fileSession.value.fileSystem.policy.getTextSize(file.model.getValue()));
   } else {
     const blob = getActiveBlobFile(file);
-    if (blob) fileSystem.value.policy.assertMemoryRead(file.path, blob.size);
+    if (blob) fileSession.value.fileSystem.policy.assertMemoryRead(file.path, blob.size);
   }
 }
 
 function assertSpecialReadSize(path, size, businessLimit, operation) {
-  const maxSize = Math.min(businessLimit, fileSystem.value.policy.maxMemoryReadBytes);
+  const maxSize = Math.min(businessLimit, fileSession.value.fileSystem.policy.maxMemoryReadBytes);
   if (Number.isFinite(size) && size > maxSize) throw new FileTooLargeError(path, { size, maxSize, operation });
 }
 
@@ -6591,7 +6586,7 @@ async function createVirtualFileState(path, options = {}) {
   const monacoLanguage = getMonacoLanguageId(language);
   const model = getOrCreateWorkspaceModel(content, monacoLanguage, path, true);
   workspaceModelPaths.delete(path);
-  const fileState = { name, path, fileType: "text", model, originalModel: null, savedValue: "", lastLegalValue: content, lastStagedValue: "", dirty: true, closed: options.closed ?? true, language, monacoLanguage, isNew: true, persisted: false, deleted: false, size: workspace.fileSystem.policy.getTextSize(content), mimeType: getMimeType(path, "text/plain;charset=utf-8"), version: null };
+  const fileState = { name, path, fileType: "text", model, originalModel: null, savedValue: "", lastLegalValue: content, lastStagedValue: "", dirty: true, closed: options.closed ?? true, language, monacoLanguage, isNew: true, persisted: false, deleted: false, size: workspace.session.fileSystem.policy.getTextSize(content), mimeType: getMimeType(path, "text/plain;charset=utf-8"), version: null };
   attachTextModelListener(fileState);
   openFiles.set(path, fileState);
   try {
@@ -6984,8 +6979,8 @@ async function aiToolRunJavaScript({ code, input = {}, credentials, input_files:
   }
 
   const workspace = usesWorkspace ? captureWorkspace() : null;
-  const maxReadBytes = workspace?.fileSystem?.policy.maxMemoryReadBytes ?? normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES);
-  const maxWriteBytes = workspace?.fileSystem?.policy.maxMemoryWriteBytes ?? normalizeMemoryLimit(settings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES);
+  const maxReadBytes = workspace?.session?.fileSystem.policy.maxMemoryReadBytes ?? normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES);
+  const maxWriteBytes = workspace?.session?.fileSystem.policy.maxMemoryWriteBytes ?? normalizeMemoryLimit(settings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES);
   const limits = {
     maxInputFileBytes: maxReadBytes,
     maxInputTotalBytes: maxReadBytes,
@@ -7241,12 +7236,12 @@ async function loadAiJavaScriptInputs(inputs, workspace, limits, signal) {
           const file = await ensureFileState(input.path, { closed: true, workspace });
           if (file.deleted) throw createAiJavaScriptError("FILE_NOT_FOUND", `File is marked for deletion: ${input.path}`, { phase: "input", path: input.path });
           content = file.model.getValue();
-          size = workspace.fileSystem.policy.getTextSize(content);
+          size = workspace.session.fileSystem.policy.getTextSize(content);
           mimeType = file.mimeType || getMimeType(input.path, "text/plain;charset=utf-8");
-          workspace.fileSystem.policy.assertMemoryRead(input.path, size);
+          workspace.session.fileSystem.policy.assertMemoryRead(input.path, size);
         } else {
           content = await workspace.session.readText(input.path, { view: "base" });
-          size = workspace.fileSystem.policy.getTextSize(content);
+          size = workspace.session.fileSystem.policy.getTextSize(content);
           mimeType = getMimeType(input.path, "text/plain;charset=utf-8");
         }
       } else {
@@ -7279,7 +7274,7 @@ async function readAiJavaScriptInputBlob(path, view, workspace) {
     }
     const blob = getActiveBlobFile(opened);
     if (blob) {
-      workspace.fileSystem.policy.assertMemoryRead(path, blob.size);
+      workspace.session.fileSystem.policy.assertMemoryRead(path, blob.size);
       return blob;
     }
   }
@@ -7318,7 +7313,7 @@ function validateAiJavaScriptOutputs(workerOutputs, outputFiles, outputDirectori
     let mimeType = String(output.mimeType || getMimeType(path, type === "text" ? "text/plain;charset=utf-8" : "application/octet-stream"));
     if (type === "text") {
       content = String(output.content ?? "");
-      size = workspace.fileSystem.policy.getTextSize(content);
+      size = workspace.session.fileSystem.policy.getTextSize(content);
     } else {
       if (!(output.content instanceof Uint8Array) && !(output.content instanceof ArrayBuffer)) throw createAiJavaScriptError("INVALID_BINARY_DATA", `Invalid binary output: ${path}`, { phase: "output", path });
       content = output.content instanceof Uint8Array ? output.content : new Uint8Array(output.content);
@@ -7761,7 +7756,7 @@ async function createFileOnDisk(path, workspace = captureWorkspace()) {
   const normalized = normalizeWorkspacePath(path);
   if (!isCurrentWorkspace(workspace)) throw new Error("Workspace session changed");
   if (isExternalWritePath(normalized, workspace.generation)) throw new Error(`File operation is already in progress: ${normalized}`);
-  await workspace.fileSystem.writeText(normalized, "", {
+  await workspace.session.fileSystem.writeText(normalized, "", {
     expectedVersion: null,
     createParents: true,
     mimeType: getMimeType(normalized, "text/plain;charset=utf-8"),
