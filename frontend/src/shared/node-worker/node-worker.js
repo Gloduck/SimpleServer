@@ -35,6 +35,7 @@ class NodeWorker {
         this.fileSystem = this.createFileSystem(this.options);
         this.network = this.createNetwork(this.options);
         this.moduleCache = new Map();
+        this.requireCache = createRequireCache(this.moduleCache);
         this.esmUrlCache = new Map();
         this.esmBuildStack = new Set();
         this.esmValues = new Map();
@@ -44,9 +45,7 @@ class NodeWorker {
         this.moduleUrls = [];
         this.runtimeKey = `__simpleServerNodeWorker_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         this.usesDataModuleUrls = Boolean(globalThis.process?.versions?.node);
-        this.Buffer = globalThis.process?.versions?.node && typeof globalThis.Buffer === 'function'
-            ? globalThis.Buffer
-            : createBufferClass();
+        this.Buffer = createBufferClass();
         this.process = this.createProcess(this.options);
         this.console = globalThis.console;
         this.builtins = this.createBuiltinModules(this.options);
@@ -189,8 +188,11 @@ class NodeWorker {
             }
             return {exports, exitCode: this.process.exitCode};
         } catch (error) {
-            if (error instanceof NodeProcessExit && error.exitCode === 0) {
-                return {exports: undefined, exitCode: 0};
+            if (error instanceof NodeProcessExit) {
+                if (error.exitCode === 0) return {exports: undefined, exitCode: 0};
+                throw nodeWorkerError('PROCESS_EXIT', `Process exited with code ${error.exitCode}`, {
+                    exitCode: error.exitCode,
+                });
             }
             throw error;
         } finally {
@@ -383,7 +385,7 @@ class NodeWorker {
         if (!this.esmModulePromises.has(normalizedPath)) {
             this.esmModulePromises.set(normalizedPath, (async () => {
                 const url = await this.buildEsmModuleUrl(normalizedPath);
-                const value = await import(url);
+                const value = await import(/* @vite-ignore */ url);
                 this.esmModuleValues.set(normalizedPath, value);
                 return value;
             })());
@@ -403,7 +405,7 @@ class NodeWorker {
             if (this.builtins.has(builtin)) return builtin;
             return displayPath(this.resolveModule(String(specifier), parentPath, 'require'));
         };
-        require.cache = this.moduleCache;
+        require.cache = this.requireCache;
         return require;
     }
 
@@ -450,7 +452,7 @@ class NodeWorker {
 
     async executeEsmEntry(path, source) {
         const url = await this.buildEsmModuleUrl(path, source);
-        return import(url);
+        return import(/* @vite-ignore */ url);
     }
 
     async buildEsmModuleUrl(path, sourceOverride) {
@@ -915,6 +917,37 @@ function esmNamespaceForRequire(namespace) {
     return keys.length === 1 && keys[0] === 'default' ? namespace.default : namespace;
 }
 
+function createRequireCache(moduleCache) {
+    const toKey = (value) => normalizeFilePath(String(value || ''));
+    return new Proxy(Object.create(null), {
+        ownKeys() {
+            return [...moduleCache.keys()].map(displayPath);
+        },
+        getOwnPropertyDescriptor(target, property) {
+            if (typeof property !== 'string') return undefined;
+            const key = toKey(property);
+            return moduleCache.has(key)
+                ? {configurable: true, enumerable: true, writable: true, value: moduleCache.get(key)}
+                : undefined;
+        },
+        get(target, property) {
+            if (typeof property !== 'string') return Reflect.get(target, property);
+            return moduleCache.get(toKey(property));
+        },
+        set(target, property, value) {
+            if (typeof property !== 'string') return Reflect.set(target, property, value);
+            moduleCache.set(toKey(property), value);
+            return true;
+        },
+        deleteProperty(target, property) {
+            return typeof property === 'string' ? moduleCache.delete(toKey(property)) : true;
+        },
+        has(target, property) {
+            return typeof property === 'string' ? moduleCache.has(toKey(property)) : Reflect.has(target, property);
+        },
+    });
+}
+
 function resolveLogicalPath(path, base = '') {
     const value = String(path || '');
     return value.startsWith('/') ? normalizeFilePath(value) : joinFilePath(base, value);
@@ -1186,13 +1219,46 @@ function createUrlModule() {
 
 function createQueryStringModule() {
     return {
-        parse(value) {
-            return Object.fromEntries(new URLSearchParams(String(value || '')));
+        parse(value, separator = '&', equals = '=') {
+            const result = Object.create(null);
+            const source = String(value || '');
+            if (!source) return result;
+            for (const part of source.split(separator)) {
+                const index = part.indexOf(equals);
+                const key = decodeQueryStringValue(index === -1 ? part : part.slice(0, index));
+                const item = decodeQueryStringValue(index === -1 ? '' : part.slice(index + equals.length));
+                if (!Object.prototype.hasOwnProperty.call(result, key)) result[key] = item;
+                else if (Array.isArray(result[key])) result[key].push(item);
+                else result[key] = [result[key], item];
+            }
+            return result;
         },
-        stringify(value) {
-            return new URLSearchParams(value || {}).toString();
+        stringify(value, separator = '&', equals = '=') {
+            const parts = [];
+            for (const [key, rawValue] of Object.entries(value || {})) {
+                const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+                for (const item of values) {
+                    parts.push(`${encodeURIComponent(key)}${equals}${encodeURIComponent(normalizeQueryStringValue(item))}`);
+                }
+            }
+            return parts.join(separator);
         },
+        escape: encodeURIComponent,
+        unescape: decodeQueryStringValue,
     };
+}
+
+function normalizeQueryStringValue(value) {
+    if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+    return ['string', 'bigint', 'boolean'].includes(typeof value) ? String(value) : '';
+}
+
+function decodeQueryStringValue(value) {
+    try {
+        return decodeURIComponent(String(value).replace(/\+/g, ' '));
+    } catch {
+        return String(value).replace(/\+/g, ' ');
+    }
 }
 
 function createUtilModule() {

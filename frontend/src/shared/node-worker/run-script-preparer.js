@@ -67,6 +67,7 @@ function createRunScriptPreparer(config = {}) {
         if (code === undefined && !entryFile) throw prepareError('ENTRY_REQUIRED', 'code or entryFile is required');
 
         const context = createContext(signal || defaultSignal, resolveFrom);
+        throwIfAborted(context.signal);
         await loadInputFiles(context, inputFiles);
 
         let entryPath;
