@@ -60,8 +60,10 @@ test('场景：CommonJS 扫描忽略注释、字符串、模板文本和正则�
 
 test('场景：源码格式区分 ESM、CommonJS 风格和普通全局脚本', async () => {
     assert.equal(await detectJavaScriptSourceFormat('export default 1;'), 'module');
-    assert.equal(await detectJavaScriptSourceFormat('module.exports = 1;'), 'umd');
+    assert.equal(await detectJavaScriptSourceFormat('module.exports = 1;'), 'commonjs');
+    assert.equal(await detectJavaScriptSourceFormat('const value = require("value"); exports.value = value;'), 'commonjs');
     assert.equal(await detectJavaScriptSourceFormat('define.amd && define([], () => 1);'), 'umd');
+    assert.equal(await detectJavaScriptSourceFormat('typeof module === "object" ? module.exports = 1 : globalThis.value = 1;'), 'umd');
     assert.equal(await detectJavaScriptSourceFormat('globalThis.Library = {value: 1};'), 'global');
     assert.equal(await detectJavaScriptSourceFormat('// module.exports = 1;\n"require(\\"x\\")";'), 'global');
 });

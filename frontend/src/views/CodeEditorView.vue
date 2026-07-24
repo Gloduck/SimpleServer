@@ -637,6 +637,7 @@ import {
   normalizeFilePath,
 } from "@/shared/file-utils.js";
 import { MarkdownUtils } from "@/shared/markdown-utils.js";
+import { NetworkLimit } from "@/shared/network-limit.js";
 import { enableEditorPwa } from "@/shared/pwa-install.js";
 import { RequestProxy } from "@/shared/request-proxy.js";
 import { prepareRunScript } from "@/shared/node-worker/run-script-preparer.js";
@@ -703,6 +704,7 @@ const AI_JAVASCRIPT_MAX_CODE_CHARS = 20_000;
 const AI_JAVASCRIPT_MAX_FILE_COUNT = 1000;
 const AI_JAVASCRIPT_MAX_LOGS = 100;
 const AI_JAVASCRIPT_MAX_REQUEST_COUNT = 20;
+const AI_JAVASCRIPT_MAX_PREPARE_REQUEST_COUNT = 200;
 const AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS = 100;
 const AI_JAVASCRIPT_MAX_RESULT_DEPTH = 5;
 const SSH_OUTPUT_MAX_CHARS = 120000;
@@ -5775,19 +5777,27 @@ function getAiAllToolDefinitions() {
     { type: "function", name: "run_javascript", description: aiToolDescription(
       "Execute a complete script in an isolated browser Worker using a Node-compatible JavaScript runtime. It supports CommonJS, ESM, UMD, and plain global JavaScript for computation, data transformation, browser-compatible npm packages, CDN/HTTP modules, WebAssembly, and declared workspace file processing. This is not a complete Node.js process.",
       "Provide exactly one of code or entry_file. code is complete module or script source, not an async function body. format may be auto, commonjs, module, umd, or global. When omitted, the format is inferred from the extension, package.json type, and source syntax.",
-      "CommonJS returns module.exports. Async scripts may assign module.exports = main() or use main().catch(...) as the final executed expression. Do not silently swallow errors: rethrow them or call process.exit(1). ESM supports import, export, named exports, export default, and top-level await. UMD returns module.exports when available, otherwise its global export. A global script should expose returned values through globalThis.",
-      "require and import support relative files, JSON, workspace node_modules, npm:package@version specifiers, scoped packages, package subpaths, and absolute HTTP/HTTPS URLs. Supported CDNs include jsDelivr, esm.sh, unpkg, cdnjs, and Skypack. CommonJS, ESM, UMD, and global CDN files are detected automatically, and their remote relative dependencies are resolved recursively. Bare package names resolve only from workspace node_modules; use an npm: specifier to download a Registry package. Dependencies prepared before execution must use string literals.",
+      "CommonJS returns module.exports. Async CommonJS must assign module.exports = main() or leave main().catch(...) as the final executed expression; never launch an unreturned async IIFE. Do not silently swallow errors: rethrow them or call process.exit(1). ESM supports import, export, named exports, export default, and top-level await. This tool also awaits a thenable default export, but top-level await is preferred; never launch an unawaited async IIFE. UMD returns module.exports when available, otherwise its global export. A global script should expose returned values through globalThis.",
+      "require and import support relative files, JSON, workspace node_modules, npm:package@version specifiers, scoped packages, package subpaths, and absolute HTTP/HTTPS URLs. Supported CDNs include jsDelivr, esm.sh, unpkg, cdnjs, and Skypack. CommonJS, ESM, UMD, and global CDN files are detected automatically, and their remote relative dependencies are resolved recursively. Bare package names resolve only from workspace node_modules; use an npm: specifier to download a Registry package. Dependencies prepared before execution must use string literals. Dependency downloads use a preparation-only network budget that is separate from the script execution network budget.",
+      [
+        "Dependency examples:",
+        "- CommonJS: const local = require(\"./helper.js\"); const config = require(\"./config.json\"); const workspacePackage = require(\"lodash\"); const registryPackage = require(\"npm:lodash@4.17.21\"); const scopedSubpath = require(\"npm:@scope/package@1.2.3/subpath\"); const remote = require(\"https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js\");",
+        "- ESM: import local from \"./helper.mjs\"; import config from \"./config.json\"; import workspacePackage from \"lodash\"; import registryPackage from \"npm:lodash@4.17.21\"; import scopedSubpath from \"npm:@scope/package@1.2.3/subpath\"; import { nanoid } from \"https://cdn.jsdelivr.net/npm/nanoid@5.1.5/index.browser.js\";",
+        "Use bare package names only for workspace node_modules. Use npm: to download Registry packages. Every prepared dependency must be a string literal. CommonJS must use require(), not import(); ESM may use static import or a string-literal dynamic import().",
+      ].join("\n"),
       "input is available as the global input value. env and credentials are exposed through process.env; credentials override matching env entries and missing credentials become empty strings. Read args with process.argv.slice(2). process.cwd() and relative node:fs paths use cwd.",
       "Workspace modules referenced by static import or require are loaded automatically. Declare ordinary data files read through node:fs or node:fs/promises in input_files. The virtual file system allows temporary files, but after execution only changed files within output_files and output_directories are extracted; all other temporary files are discarded. Outputs are staged in the editor and reach disk only when the user saves them. File deletion and empty-directory output are not supported.",
-      "fetch, XMLHttpRequest, node:http, and node:https share request-count, per-response-size, cumulative-download-size, and timeout limits. Requests automatically use RequestProxy when the backend is available and otherwise use the browser network directly.",
-      "Supported built-ins are node:assert, node:buffer, node:fs, node:fs/promises, node:http, node:https, node:path, node:querystring, node:url, and node:util. Unsupported features include child_process, os, native Node extensions, CommonJS import(), variable dynamic imports, and cyclic ESM dependencies.",
+      "During script execution, fetch, XMLHttpRequest, node:http, and node:https share request-count, per-response-size, cumulative-download-size, and timeout limits. Requests automatically use RequestProxy when the backend is available and otherwise use the browser network directly.",
+      "Supported built-ins are node:assert, node:buffer, node:fs, node:fs/promises, node:http, node:https, node:path, node:querystring, node:url, and node:util. node:http and node:https provide only minimal get/request plus data, end, and error events; prefer fetch, and do not use setEncoding, resume, Agent, sockets, or connection-pool APIs. Unsupported features include child_process, os, native Node extensions, CommonJS import(), variable dynamic imports, and cyclic ESM dependencies.",
       [
         "Hard limits:",
         `- code: up to ${AI_JAVASCRIPT_MAX_CODE_CHARS} characters`,
         `- timeout_ms: defaults to ${AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS}ms and is capped at ${AI_JAVASCRIPT_MAX_TIMEOUT_MS}ms`,
-        `- fetch, XMLHttpRequest, node:http, and node:https: up to ${AI_JAVASCRIPT_MAX_REQUEST_COUNT} requests in total`,
+        `- dependency preparation: up to ${AI_JAVASCRIPT_MAX_PREPARE_REQUEST_COUNT} requests and a cumulative download budget independent from execution`,
+        `- script fetch, XMLHttpRequest, node:http, and node:https: up to ${AI_JAVASCRIPT_MAX_REQUEST_COUNT} requests in total`,
         `- input_files, output_files, and output_directories: up to ${AI_JAVASCRIPT_MAX_FILE_COUNT} entries each; final output is capped at ${AI_JAVASCRIPT_MAX_FILE_COUNT} files`,
-        `- each input and network response: up to ${normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES)} bytes; cumulative downloads use the same limit`,
+        `- prepared virtual file system, including inputs, entry source, modules, and extracted packages: up to ${normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES)} bytes in total`,
+        `- each input and network response: up to ${normalizeMemoryLimit(settings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES)} bytes; preparation and execution each receive their own cumulative download budget of the same size`,
         `- each output and all outputs combined: up to ${normalizeMemoryLimit(settings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES)} bytes`,
         `- console output: up to ${AI_JAVASCRIPT_MAX_LOGS} log entries`,
         `- structured result collections: up to ${AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS} entries each and ${AI_JAVASCRIPT_MAX_RESULT_DEPTH} levels deep`,
@@ -6955,6 +6965,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
   const startedAt = performance.now();
   const logs = [];
   let credentialSelection;
+  let prepareNetwork;
 
   try {
     const hasCode = code !== undefined && code !== null;
@@ -6999,6 +7010,14 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
     const proxy = isBackendEnabled();
     const backendBaseUrl = proxy ? getBackendBaseUrl() : "";
     const requestProxy = new RequestProxy(backendBaseUrl, { baseUrl: window.location.href });
+    prepareNetwork = new NetworkLimit(requestProxy, {
+      baseUrl: window.location.href,
+      maxRequestCount: AI_JAVASCRIPT_MAX_PREPARE_REQUEST_COUNT,
+      maxResponseBytes: maxReadBytes,
+      maxResponseTotalBytes: maxReadBytes,
+      defaultTimeoutMs: Math.min(AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS, timeout),
+      maxTimeoutMs: timeout,
+    });
     const prepareStartedAt = performance.now();
     const prepared = await prepareRunScript({
       ...(hasCode ? { code: script } : { entryFile: normalizedEntryFile }),
@@ -7012,7 +7031,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
       signal,
     }, {
       workspace: workspace ? createAiRunScriptWorkspace(workspace) : null,
-      fetch: requestProxy.fetch,
+      fetch: prepareNetwork.fetch,
       limits: {
         maxSourceBytes: maxReadBytes,
         maxTotalBytes: maxReadBytes,
@@ -7021,6 +7040,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
       },
       signal,
     });
+    prepareNetwork.assertHealthy();
     const prepareElapsedMs = Math.round(performance.now() - prepareStartedAt);
     if (workspace) assertCurrentWorkspace(workspace);
 
@@ -7076,6 +7096,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
         logs,
         log_stats: data.logStats,
         network: data.network,
+        prepare_network: prepareNetwork.getUsage(),
         prepare_elapsed_ms: prepareElapsedMs,
         execute_elapsed_ms: data.elapsedMs || 0,
         elapsed_ms: Math.round(performance.now() - startedAt),
@@ -7101,6 +7122,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
       logs,
       log_stats: data.logStats,
       network: data.network,
+      prepare_network: prepareNetwork.getUsage(),
       files: stagedFiles,
       prepare_elapsed_ms: prepareElapsedMs,
       execute_elapsed_ms: data.elapsedMs || 0,
@@ -7109,6 +7131,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
       missing_credentials: credentialSelection.missing,
     };
   } catch (error) {
+    prepareNetwork?.abortAll(error);
     if (error?.name === "AbortError") throw error;
     return {
       ...aiJavaScriptErrorResult(error),
@@ -7116,6 +7139,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
       elapsed_ms: Math.round(performance.now() - startedAt),
       requested_credentials: credentialSelection?.requested || [],
       missing_credentials: credentialSelection?.missing || [],
+      prepare_network: prepareNetwork?.getUsage?.() || { requestCount: 0, responseBytes: 0 },
     };
   }
 }
@@ -7157,9 +7181,15 @@ function serializeAiJavaScriptError(error) {
     ["format", "format"],
     ["exitCode", "exit_code"],
     ["status", "status"],
+    ["operations", "operations"],
+    ["filename", "filename"],
+    ["lineno", "line"],
+    ["colno", "column"],
   ].forEach(([sourceKey, resultKey]) => {
     if (source[sourceKey] !== undefined) result[resultKey] = source[sourceKey];
   });
+  const workerFailure = source.filename || source.lineno || source.colno || String(source.code || "").startsWith("WORKER_");
+  if (source.stack && workerFailure) result.stack = String(source.stack).slice(0, AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS);
   return result;
 }
 

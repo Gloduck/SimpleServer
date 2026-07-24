@@ -9,7 +9,7 @@ async function scanJavaScriptModuleSource(source) {
     const commonJsSpecifiers = scanCommonJsModuleSpecifiers(text, codeMask);
     const format = imports.length > 0 || exports.length > 0
         ? 'module'
-        : looksLikeCommonJsOrUmd(text, codeMask) ? 'umd' : 'global';
+        : detectClassicScriptFormat(text, codeMask);
     return {
         format,
         specifiers: format === 'module' ? esmSpecifiers : commonJsSpecifiers,
@@ -166,8 +166,13 @@ function getStaticEsmKind(source, item) {
     return /^\s*export\b/.test(source.slice(item.ss, item.s)) ? 'export' : 'import';
 }
 
-function looksLikeCommonJsOrUmd(source, codeMask) {
-    const pattern = /\bmodule\s*\.\s*exports\b|\bexports\s*(?:\.|\[)|\brequire\s*\(|\btypeof\s+(?:module|exports)\b|\bdefine\s*\.\s*amd\b/g;
+function detectClassicScriptFormat(source, codeMask) {
+    if (hasCodeMatch(source, codeMask, /\btypeof\s+(?:module|exports|define)\b|\bdefine\s*\.\s*amd\b/g)) return 'umd';
+    if (hasCodeMatch(source, codeMask, /\bmodule\s*\.\s*exports\b|\bexports\s*(?:\.|\[)|\brequire\s*\(/g)) return 'commonjs';
+    return 'global';
+}
+
+function hasCodeMatch(source, codeMask, pattern) {
     for (const match of source.matchAll(pattern)) {
         if (codeMask[match.index ?? 0]) return true;
     }

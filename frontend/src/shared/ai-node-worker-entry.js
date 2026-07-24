@@ -31,6 +31,7 @@ async function execute(payload, port) {
         });
         const limits = payload.fileLimits || {};
         const walkLimit = Math.max(3000, Number(limits.maxEntryCount) || 40_000);
+        const fileOperations = createAsyncOperationTracker();
 
         class AiNodeWorker extends NodeWorker {
             createFileSystem(options) {
@@ -51,15 +52,37 @@ async function execute(payload, port) {
                     XMLHttpRequest: network.XMLHttpRequest,
                 };
             }
+
+            createBuiltinModules(options) {
+                const builtins = super.createBuiltinModules(options);
+                const promises = builtins.get('node:fs/promises');
+                if (!promises) return builtins;
+                const trackedPromises = trackAsyncModule(promises, 'node:fs/promises', fileOperations);
+                builtins.set('node:fs/promises', trackedPromises);
+                const fs = builtins.get('node:fs');
+                if (fs) builtins.set('node:fs', {...fs, promises: trackedPromises});
+                return builtins;
+            }
+
+            async executeEsmEntry(path, source) {
+                const namespace = await super.executeEsmEntry(path, source);
+                if (!isThenable(namespace?.default)) return namespace;
+                return {...namespace, default: await namespace.default};
+            }
         }
 
         const runner = new AiNodeWorker(prepared);
         runner.console = logging.console;
         const baseline = captureOutputBaseline(runner, payload.outputFiles, payload.outputDirectories);
         const executed = await runner.run();
-        if (network.hasPendingOperations()) {
-            throw runtimeError('UNAWAITED_ASYNC_OPERATION', 'The script completed while network operations were still pending', {
+        const pendingOperations = [
+            ...(network.hasPendingOperations() ? ['network'] : []),
+            ...fileOperations.getPendingOperations(),
+        ];
+        if (pendingOperations.length) {
+            throw runtimeError('UNAWAITED_ASYNC_OPERATION', 'The script completed while asynchronous operations were still pending', {
                 phase: 'execution',
+                operations: pendingOperations,
             });
         }
         network.assertHealthy();
@@ -209,6 +232,35 @@ function createLoggingConsole(port, options = {}) {
     };
 }
 
+function createAsyncOperationTracker() {
+    const pending = new Map();
+    return {
+        track(operation, value) {
+            const promise = Promise.resolve(value);
+            pending.set(promise, operation);
+            const settle = () => pending.delete(promise);
+            promise.then(settle, settle);
+            return promise;
+        },
+        getPendingOperations() {
+            return [...new Set(pending.values())].sort();
+        },
+    };
+}
+
+function trackAsyncModule(module, prefix, tracker) {
+    return Object.fromEntries(Object.entries(module).map(([name, value]) => [
+        name,
+        typeof value === 'function'
+            ? (...args) => tracker.track(`${prefix}.${name}`, value.apply(module, args))
+            : value,
+    ]));
+}
+
+function isThenable(value) {
+    return value != null && typeof value.then === 'function';
+}
+
 function toBytes(value) {
     if (typeof value === 'string') return new TextEncoder().encode(value);
     if (value instanceof ArrayBuffer) return new Uint8Array(value.slice(0));
@@ -271,6 +323,7 @@ function serializeRuntimeError(error, options = {}) {
         'parent',
         'format',
         'exitCode',
+        'operations',
     ].forEach((name) => {
         if (source[name] !== undefined) result[name] = source[name];
     });

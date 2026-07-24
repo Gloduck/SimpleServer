@@ -333,12 +333,13 @@ test('入口、路径和保留目录参数会在准备阶段校验', async ({pag
     ]);
 });
 
-test('模块数、文件数、源码大小和远程下载大小限制分别生效', async ({page}) => {
+test('模块数、文件数、虚拟文件系统总大小、源码大小和远程下载大小限制分别生效', async ({page}) => {
     const errors = await page.evaluate(async () => {
         const {prepareRunScript} = globalThis.runtimeHarness;
         const cases = [
             () => prepareRunScript({format: 'commonjs', code: 'module.exports = require("./value.js");', inputFiles: [{path: 'value.js', content: 'module.exports = 1;'}]}, {limits: {maxModuleCount: 1}}),
             () => prepareRunScript({code: '1', inputFiles: [{path: 'a.txt', content: 'a'}, {path: 'b.txt', content: 'b'}]}, {limits: {maxFileCount: 1}}),
+            () => prepareRunScript({code: '1', inputFiles: [{path: 'input.bin', content: new Uint8Array([1, 2, 3])}]}, {limits: {maxTotalBytes: 3}}),
             () => prepareRunScript({code: '"你好";'}, {limits: {maxSourceBytes: 5}}),
             () => prepareRunScript({format: 'commonjs', code: 'module.exports = require("https://limit.example.test/value.js");'}, {
                 fetch: async () => new Response('123456'),
@@ -357,7 +358,7 @@ test('模块数、文件数、源码大小和远程下载大小限制分别生�
         return result;
     });
 
-    expect(errors).toEqual(['MODULE_COUNT_EXCEEDED', 'FILE_COUNT_EXCEEDED', 'SOURCE_SIZE_EXCEEDED', 'REMOTE_MODULE_TOO_LARGE']);
+    expect(errors).toEqual(['MODULE_COUNT_EXCEEDED', 'FILE_COUNT_EXCEEDED', 'FILE_TOTAL_SIZE_EXCEEDED', 'SOURCE_SIZE_EXCEEDED', 'REMOTE_MODULE_TOO_LARGE']);
 });
 
 test('准备流程支持 AbortSignal 并保留调用方中止原因', async ({page}) => {

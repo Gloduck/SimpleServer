@@ -9,9 +9,11 @@ function runAiNodeWorker(payload, {signal, timeoutMs = 30_000, onLog} = {}) {
         });
         const channel = new MessageChannel();
         let settled = false;
+        let workerErrorTimer = 0;
 
         const cleanup = () => {
             clearTimeout(timer);
+            clearTimeout(workerErrorTimer);
             signal?.removeEventListener('abort', abort);
             channel.port1.close();
             worker.terminate();
@@ -38,11 +40,12 @@ function runAiNodeWorker(payload, {signal, timeoutMs = 30_000, onLog} = {}) {
         channel.port1.onmessageerror = () => finish(reject, workerError('WORKER_MESSAGE_ERROR', 'Failed to deserialize Worker result'));
         worker.onerror = (event) => {
             event.preventDefault?.();
-            finish(reject, workerError('WORKER_ERROR', event.message || 'Unknown Worker error', {
-                filename: event.filename,
-                lineno: event.lineno,
-                colno: event.colno,
-            }));
+            const error = createWorkerEventError(event);
+            if (!event.error && !event.message) {
+                workerErrorTimer = setTimeout(() => finish(reject, error), 25);
+                return;
+            }
+            finish(reject, error);
         };
         signal?.addEventListener('abort', abort, {once: true});
         if (signal?.aborted) {
@@ -50,8 +53,28 @@ function runAiNodeWorker(payload, {signal, timeoutMs = 30_000, onLog} = {}) {
             return;
         }
         channel.port1.start();
-        worker.postMessage({type: 'run', payload}, [channel.port2]);
+        try {
+            worker.postMessage({type: 'run', payload}, [channel.port2]);
+        } catch (error) {
+            finish(reject, error);
+        }
     });
+}
+
+function createWorkerEventError(event) {
+    const source = event?.error && typeof event.error === 'object' ? event.error : null;
+    const code = typeof source?.code === 'string' && source.code ? source.code : 'WORKER_ERROR';
+    const error = workerError(code, source?.message || event?.message || 'Unknown Worker error', {
+        filename: event?.filename || source?.filename,
+        lineno: event?.lineno || source?.lineno,
+        colno: event?.colno || source?.colno,
+    });
+    if (source?.name) error.name = source.name;
+    if (source?.stack) error.stack = source.stack;
+    for (const name of ['phase', 'path', 'url', 'operation', 'size', 'maxSize', 'specifier', 'parent', 'format', 'exitCode', 'operations']) {
+        if (source?.[name] !== undefined) error[name] = source[name];
+    }
+    return error;
 }
 
 function workerError(code, message, details = {}) {
