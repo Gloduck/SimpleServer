@@ -1,8 +1,8 @@
 const DEFAULT_LIMITS = Object.freeze({
-    maxEntryCount: 100,
-    maxTotalBytes: 20 * 1024 * 1024,
-    lruEntryCount: 50,
-    lruTotalBytes: 10 * 1024 * 1024,
+    maxEntryCount: 200,
+    maxTotalBytes: 50 * 1024 * 1024,
+    lruEntryCount: 100,
+    lruTotalBytes: 25 * 1024 * 1024,
     cleanupIntervalMs: 60_000,
 });
 
