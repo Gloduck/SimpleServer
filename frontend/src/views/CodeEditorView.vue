@@ -150,7 +150,7 @@
             <article v-for="message in aiMessages" :key="message.id" class="ai-message" :class="`ai-message-${message.role}`">
               <template v-if="message.role === 'tool' && message.tool">
                 <button type="button" class="ai-tool-toggle" @click="message.expanded = !message.expanded">
-                  <span>{{ tr('ai.role.tool') }} · {{ message.tool.name }} · {{ message.tool.pending ? tr('ai.toolRunning') : (message.tool.cancelled ? tr('ai.toolCancelled') : (message.tool.ok ? 'OK' : 'ERROR')) }}</span>
+                  <span>{{ tr('ai.role.tool') }} · {{ message.tool.name }} · {{ message.tool.pending ? tr('ai.toolRunning') : (message.tool.cancelled ? tr('ai.toolCancelled') : (message.tool.ok ? 'OK' : 'ERROR')) }} · {{ message.tool.batchIndex }}/{{ message.tool.batchSize }}</span>
                   <span class="codicon" :class="message.tool.pending ? 'codicon-loading codicon-modifier-spin' : (message.tool.cancelled ? 'codicon-circle-slash' : (message.expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'))" aria-hidden="true"></span>
                 </button>
                 <div class="ai-message-content" v-html="renderMarkdown(message.content)"></div>
@@ -5126,10 +5126,10 @@ function createAiMessage(role, content, meta = {}) {
   return { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, role, content, ...meta };
 }
 
-function addPendingAiToolMessage(call, args, session) {
+function addPendingAiToolMessage(call, args, session, batchIndex, batchSize) {
   return addAiMessage("tool", tr("ai.toolRunning"), {
     expanded: false,
-    tool: { name: call.name, pending: true, cancelled: false, ok: null, args, result: null },
+    tool: { name: call.name, pending: true, cancelled: false, ok: null, args, result: null, batchIndex, batchSize },
   }, session);
 }
 
@@ -5483,7 +5483,7 @@ async function runAiAgent(prompt, signal, session = getActiveAiSession(), runCon
     conversation.push(...getContinuationOutputItems(response));
     const imageInputs = [];
     const parsedToolCalls = toolCalls.map((call) => ({ call, args: parseAiToolArguments(call) }));
-    const pendingToolCalls = parsedToolCalls.map(({ call, args }) => ({ call, args, message: addPendingAiToolMessage(call, args, session) }));
+    const pendingToolCalls = parsedToolCalls.map(({ call, args }, index) => ({ call, args, message: addPendingAiToolMessage(call, args, session, index + 1, parsedToolCalls.length) }));
     await nextTick();
     scrollAiMessagesToBottom();
     for (let index = 0; index < pendingToolCalls.length; index += 1) {
