@@ -81,19 +81,48 @@ test('同一文件读写脚本在本地 Node 和浏览器内存文件系统结�
     }
 });
 
-test('本地 Node 支持但浏览器运行时未声明的内置模块会明确失败', async ({page}) => {
-    const nativeResult = await runNativeCommonJs('module.exports = typeof require("node:crypto").createHash;');
-    expect(nativeResult).toBe('function');
+test('同一 node:crypto Hash 和 HMAC 脚本在本地 Node 与浏览器运行时结果一致', async ({page}) => {
+    const code = [
+        'const crypto = require("node:crypto");',
+        'module.exports = {',
+        '  hash: crypto.createHash("sha512").update(input.text).digest("base64"),',
+        '  hmac: crypto.createHmac("sha256", input.key).update(input.text).digest("hex"),',
+        '};',
+    ].join('\n');
+    const input = {text: 'browser crypto', key: 'secret'};
 
-    const browserError = await page.evaluate(async () => {
-        try {
-            await new globalThis.runtimeHarness.NodeWorker({format: 'commonjs', code: 'module.exports = typeof require("node:crypto").createHash;'}).run();
-            return null;
-        } catch (error) {
-            return {code: error.code, specifier: error.specifier};
-        }
-    });
-    expect(browserError).toEqual({code: 'UNSUPPORTED_NODE_BUILTIN', specifier: 'node:crypto'});
+    const nativeResult = await runNativeCommonJs(code, {input});
+    const browserResult = await runNodeWorker(page, {format: 'commonjs', code, input});
+    expect(browserResult.exports).toEqual(nativeResult);
+});
+
+test('受支持的对称加密算法与本地 Node 产生相同密文和认证标签', async ({page}) => {
+    const code = [
+        'const crypto = require("node:crypto");',
+        'const algorithms = [',
+        '  ["aes-128-cbc", 16, 16],',
+        '  ["aes-192-ctr", 24, 16],',
+        '  ["aes-256-cfb", 32, 16],',
+        '  ["aes-128-ecb", 16, 0],',
+        '  ["aes-256-gcm", 32, 12],',
+        '  ["chacha20-poly1305", 32, 12],',
+        '];',
+        'module.exports = Object.fromEntries(algorithms.map(([algorithm, keyLength, ivLength]) => {',
+        '  const key = Buffer.alloc(keyLength, 0x11);',
+        '  const iv = ivLength ? Buffer.alloc(ivLength, 0x22) : null;',
+        '  const cipher = crypto.createCipheriv(algorithm, key, iv);',
+        '  if (algorithm.endsWith("gcm") || algorithm === "chacha20-poly1305") {',
+        '    cipher.setAAD(Buffer.from("authenticated"));',
+        '  }',
+        '  const encrypted = Buffer.concat([cipher.update("algorithm parity"), cipher.final()]);',
+        '  const tag = algorithm.endsWith("gcm") || algorithm === "chacha20-poly1305" ? cipher.getAuthTag().toString("hex") : "";',
+        '  return [algorithm, {encrypted: encrypted.toString("hex"), tag}];',
+        '}));',
+    ].join('\n');
+
+    const nativeResult = await runNativeCommonJs(code);
+    const browserResult = await runNodeWorker(page, {format: 'commonjs', code});
+    expect(browserResult.exports).toEqual(nativeResult);
 });
 
 async function runNativeCommonJs(code, {input = null, cwd} = {}) {

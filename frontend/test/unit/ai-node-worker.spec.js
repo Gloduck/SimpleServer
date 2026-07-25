@@ -68,6 +68,34 @@ test('正式 AI Worker 执行 ESM 顶层 await 并返回命名和默认导出', 
     expect(outcome.outputFiles).toEqual([]);
 });
 
+test('正式 AI Worker 可执行 node:crypto Web Crypto 和 Noble Hash', async ({page}) => {
+    const outcome = await runAiWorker(page, createPayload({
+        prepared: {
+            format: 'commonjs',
+            entryPath: 'workspace/main.cjs',
+            cwd: 'workspace',
+            input: {},
+            env: {},
+            args: [],
+            files: [],
+            code: [
+                'const crypto = require("node:crypto");',
+                'module.exports = (async () => {',
+                '  const subtle = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("worker"));',
+                '  return {',
+                '    subtle: Buffer.from(subtle).toString("hex"),',
+                '    hash: crypto.createHash("sha3-256").update("worker").digest("hex"),',
+                '  };',
+                '})();',
+            ].join('\n'),
+        },
+    }));
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result.subtle.text).toBe('87eba76e7f3164534045ba922e7770fb58bbd14ad732bbf5ba6f11cc56989e6e');
+    expect(outcome.result.hash.text).toBe('373699f7b2b39c3345a8a58f9aa27118e111f7e0ea1966d7f24f698c0b8fcefb');
+});
+
 test('正式 AI Worker 等待 ESM 默认导出的 Promise', async ({page}) => {
     await page.route('**/test/esm-default-promise', (route) => route.fulfill({body: 'awaited'}));
     const outcome = await runAiWorker(page, createPayload({

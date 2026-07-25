@@ -108,6 +108,58 @@ test('本地 node_modules 包及其提升依赖会完整装载', async ({page}) 
     expect(result.stats.packageCount).toBe(2);
 });
 
+test('本地包下载的同名冲突依赖保持各自的 Node 向上解析结果', async ({page}) => {
+    const result = await page.evaluate(async () => {
+        const {DependencyStore, FileSystem, MemoryProvider, NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
+        const workspace = new FileSystem({
+            provider: new MemoryProvider({files: [
+                {path: 'project/src/main.cjs', content: 'module.exports = [require("left"), require("right")];'},
+                {path: 'project/node_modules/left/package.json', content: '{"name":"left","version":"1.0.0","main":"index.js","dependencies":{"shared":"1.0.0"}}'},
+                {path: 'project/node_modules/left/index.js', content: 'module.exports = require("shared");'},
+                {path: 'project/node_modules/right/package.json', content: '{"name":"right","version":"1.0.0","main":"index.js","dependencies":{"shared":"2.0.0"}}'},
+                {path: 'project/node_modules/right/index.js', content: 'module.exports = require("shared");'},
+            ]}),
+            policy: null,
+        });
+        const packageDownloader = {
+            async download(name, version) {
+                return {
+                    name,
+                    version,
+                    manifest: {name, version, main: 'index.js'},
+                    files: [
+                        {path: 'package.json', content: JSON.stringify({name, version, main: 'index.js'})},
+                        {path: 'index.js', content: `module.exports = "${version}";`},
+                    ],
+                };
+            },
+        };
+        const store = new DependencyStore({limits: {cleanupIntervalMs: 0}});
+        try {
+            const prepared = await prepareRunScript({entryFile: 'project/src/main.cjs'}, {
+                workspace,
+                store,
+                packageDownloader,
+            });
+            const executed = await new NodeWorker(prepared).run();
+            return {
+                exports: executed.exports,
+                sharedManifests: prepared.files
+                    .map((file) => file.path)
+                    .filter((path) => path.endsWith('/shared/package.json')),
+            };
+        } finally {
+            store.dispose();
+        }
+    });
+
+    expect(result.exports).toEqual(['1.0.0', '2.0.0']);
+    expect(result.sharedManifests).toEqual([
+        'project/node_modules/right/node_modules/shared/package.json',
+        'project/node_modules/shared/package.json',
+    ]);
+});
+
 test('npm: 包解析版本、挂载传递依赖并支持常见 CommonJS 包形态', async ({page}) => {
     const result = await page.evaluate(async () => {
         const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
@@ -152,6 +204,167 @@ test('npm: 包解析版本、挂载传递依赖并支持常见 CommonJS 包形�
     expect(result.calls).toEqual(['lodash@^4.17.0', 'array-helper@^1.0.0']);
     expect(result.files.some((path) => path.includes('lodash@4.17.21'))).toBe(true);
     expect(result.files.some((path) => path.endsWith('node_modules/array-helper/index.js'))).toBe(true);
+});
+
+test('npm: 相同名称和版本的共享依赖提升后只挂载一次', async ({page}) => {
+    const result = await page.evaluate(async () => {
+        const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
+        const createPackage = (name, version, source, dependencies = {}) => ({
+            name,
+            version,
+            manifest: {name, version, main: 'index.js', dependencies},
+            files: [
+                {path: 'package.json', content: JSON.stringify({name, version, main: 'index.js', dependencies})},
+                {path: 'index.js', content: source},
+            ],
+        });
+        const shared = createPackage('shared', '1.2.3', 'module.exports = {count: 0};');
+        const packages = {
+            'app@1.0.0': createPackage('app', '1.0.0', 'module.exports = [require("left"), require("right")];', {
+                left: '1.0.0',
+                right: '1.0.0',
+            }),
+            'left@1.0.0': createPackage('left', '1.0.0', 'const shared = require("shared"); module.exports = ++shared.count;', {shared: '^1.0.0'}),
+            'right@1.0.0': createPackage('right', '1.0.0', 'const shared = require("shared"); module.exports = ++shared.count;', {shared: '~1.2.0'}),
+            'shared@^1.0.0': shared,
+            'shared@~1.2.0': shared,
+        };
+        const packageDownloader = {
+            async download(name, version) {
+                const record = packages[`${name}@${version}`];
+                if (!record) throw new Error(`Unexpected package: ${name}@${version}`);
+                return record;
+            },
+        };
+        const prepared = await prepareRunScript({
+            format: 'commonjs',
+            code: 'module.exports = require("npm:app@1.0.0");',
+        }, {packageDownloader});
+        const executed = await new NodeWorker(prepared).run();
+        return {
+            exports: executed.exports,
+            sharedManifests: prepared.files
+                .map((file) => file.path)
+                .filter((path) => path.endsWith('/shared/package.json')),
+        };
+    });
+
+    expect(result.exports).toEqual([1, 2]);
+    expect(result.sharedManifests).toEqual(['__runscript__/packages/node_modules/shared/package.json']);
+});
+
+test('npm: 版本冲突时仅在请求包内创建嵌套依赖', async ({page}) => {
+    const result = await page.evaluate(async () => {
+        const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
+        const createPackage = (name, version, source, dependencies = {}) => ({
+            name,
+            version,
+            manifest: {name, version, main: 'index.js', dependencies},
+            files: [
+                {path: 'package.json', content: JSON.stringify({name, version, main: 'index.js', dependencies})},
+                {path: 'index.js', content: source},
+            ],
+        });
+        const packages = {
+            'app@1.0.0': createPackage('app', '1.0.0', 'module.exports = [require("left"), require("right")];', {
+                left: '1.0.0',
+                right: '1.0.0',
+            }),
+            'left@1.0.0': createPackage('left', '1.0.0', 'module.exports = require("shared");', {shared: '1.0.0'}),
+            'right@1.0.0': createPackage('right', '1.0.0', 'module.exports = require("shared");', {shared: '2.0.0'}),
+            'shared@1.0.0': createPackage('shared', '1.0.0', 'module.exports = "1.0.0";'),
+            'shared@2.0.0': createPackage('shared', '2.0.0', 'module.exports = "2.0.0";'),
+        };
+        const packageDownloader = {
+            async download(name, version) {
+                const record = packages[`${name}@${version}`];
+                if (!record) throw new Error(`Unexpected package: ${name}@${version}`);
+                return record;
+            },
+        };
+        const prepared = await prepareRunScript({
+            format: 'commonjs',
+            code: 'module.exports = require("npm:app@1.0.0");',
+        }, {packageDownloader});
+        const executed = await new NodeWorker(prepared).run();
+        return {
+            exports: executed.exports,
+            sharedManifests: prepared.files
+                .map((file) => file.path)
+                .filter((path) => path.endsWith('/shared/package.json')),
+        };
+    });
+
+    expect(result.exports).toEqual(['1.0.0', '2.0.0']);
+    expect(result.sharedManifests).toEqual([
+        '__runscript__/packages/node_modules/right/node_modules/shared/package.json',
+        '__runscript__/packages/node_modules/shared/package.json',
+    ]);
+});
+
+test('准备器识别扩展的裸 Node 内置模块及 node: 子路径', async ({page}) => {
+    const result = await page.evaluate(async () => {
+        const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
+        const prepared = await prepareRunScript({
+            format: 'commonjs',
+            code: [
+                'const Stream = require("stream");',
+                'const zlib = require("node:zlib");',
+                'const timers = require("timers");',
+                'const punycode = require("punycode");',
+                'const crypto = require("crypto");',
+                'const processModule = require("process");',
+                'const EventEmitter = require("events");',
+                'module.exports = new Promise((resolve) => timers.setImmediate(() => {',
+                '  const zipped = zlib.gzipSync(Buffer.from("ok"));',
+                '  resolve({',
+                '    stream: typeof Stream.Readable,',
+                '    text: zlib.gunzipSync(zipped).toString(),',
+                '    domain: punycode.toASCII("mañana.test"),',
+                '    hash: crypto.createHash("sha256").update("ok").digest("hex"),',
+                '    process: processModule === process,',
+                '    events: typeof EventEmitter,',
+                '  });',
+                '}));',
+            ].join('\n'),
+        });
+        return (await new NodeWorker(prepared).run()).exports;
+    });
+
+    expect(result).toEqual({
+        stream: 'function',
+        text: 'ok',
+        domain: 'xn--maana-pta.test',
+        hash: '2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df',
+        process: true,
+        events: 'function',
+    });
+});
+
+test('远程 Webpack 浏览器全局包返回其全局导出而非空 CommonJS 对象', async ({page}) => {
+    const result = await page.evaluate(async () => {
+        const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
+        const source = [
+            '(()=>{var __webpack_modules__={1:(module)=>{module.exports={internal:true}}};',
+            'var __webpack_require__=function(){};',
+            'let target;',
+            '"undefined"!=typeof window&&"object"==typeof window&&(target=window);',
+            '"undefined"!=typeof self&&"object"==typeof self&&(target=self);',
+            'target.ImageLibrary={read(){return "global-export"}};',
+            '})()',
+        ].join('');
+        const prepared = await prepareRunScript({
+            format: 'commonjs',
+            code: [
+                'const bundle = require("https://cdn.example.test/image-library.js");',
+                'const library = bundle.ImageLibrary || bundle;',
+                'module.exports = library.read();',
+            ].join('\n'),
+        }, {fetch: async () => new Response(source)});
+        return (await new NodeWorker(prepared).run()).exports;
+    });
+
+    expect(result).toBe('global-export');
 });
 
 test('npm: 支持作用域包和包内子路径', async ({page}) => {

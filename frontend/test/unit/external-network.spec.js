@@ -49,4 +49,121 @@ test.describe('外部依赖网络集成', () => {
 
         expect(result).toBe('2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824');
     });
+
+    test('npm Jimp 完成真实 JPEG 读取、裁剪和 writeAsync 输出', async ({page}) => {
+        const result = await page.evaluate(async () => {
+            const {prepareRunScript, runAiNodeWorker} = globalThis.runtimeHarness;
+            const canvas = document.createElement('canvas');
+            canvas.width = 8;
+            canvas.height = 4;
+            const context = canvas.getContext('2d');
+            context.fillStyle = '#e63946';
+            context.fillRect(0, 0, 4, 4);
+            context.fillStyle = '#457b9d';
+            context.fillRect(4, 0, 4, 4);
+            const inputBlob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+            const inputBytes = new Uint8Array(await inputBlob.arrayBuffer());
+            const prepared = await prepareRunScript({
+                format: 'commonjs',
+                cwd: '.',
+                inputFiles: [{path: 'downloaded-image.jpg', content: inputBytes, mimeType: 'image/jpeg'}],
+                code: [
+                    'const Jimp = require("npm:jimp@0.22.12");',
+                    'const path = require("node:path");',
+                    'async function main() {',
+                    '  const inputPath = path.join(process.cwd(), "downloaded-image.jpg");',
+                    '  const outputPath = path.join(process.cwd(), "cropped-image.jpg");',
+                    '  const image = await Jimp.read(inputPath);',
+                    '  const {width, height} = image.bitmap;',
+                    '  const size = Math.min(width, height);',
+                    '  const x = Math.floor((width - size) / 2);',
+                    '  const y = Math.floor((height - size) / 2);',
+                    '  await image.crop(x, y, size, size).quality(90).writeAsync(outputPath);',
+                    '  return {width, height, size, x, y};',
+                    '}',
+                    'module.exports = main();',
+                ].join('\n'),
+            });
+            const outcome = await runAiNodeWorker({
+                prepared,
+                outputFiles: [{path: 'cropped-image.jpg', type: 'bytes', overwrite: true}],
+                outputDirectories: [],
+                fileLimits: {maxReadBytes: 64 * 1024 * 1024, maxWriteBytes: 64 * 1024 * 1024, maxEntryCount: 20_000},
+                outputLimits: {maxOutputFileBytes: 10 * 1024 * 1024, maxOutputTotalBytes: 10 * 1024 * 1024, maxOutputFileCount: 10},
+                network: {
+                    serverUrl: '',
+                    baseUrl: location.href,
+                    limits: {maxRequestCount: 20, maxResponseBytes: 10 * 1024 * 1024, maxResponseTotalBytes: 10 * 1024 * 1024, defaultTimeoutMs: 10_000, maxTimeoutMs: 30_000},
+                },
+                logging: {maxEntries: 100},
+                serialization: {maxStringLength: 5000, maxCollectionItems: 100, maxDepth: 5},
+            }, {timeoutMs: 120_000});
+            const outputBytes = outcome.outputFiles.find((file) => file.path === 'cropped-image.jpg')?.content;
+            if (!outcome.ok || !outputBytes) {
+                return {outcome, fileCount: prepared.files.length, hasJimp: false, output: null};
+            }
+            const outputImage = await createImageBitmap(new Blob([outputBytes], {type: 'image/jpeg'}));
+            return {
+                outcome,
+                fileCount: prepared.files.length,
+                hasJimp: prepared.files.some((file) => /\/jimp@0\.22\.12-[^/]+\/package\.json$/.test(file.path)),
+                output: {width: outputImage.width, height: outputImage.height, size: outputBytes.byteLength},
+            };
+        });
+
+        expect(result.outcome.error).toBeUndefined();
+        expect(result.outcome.ok).toBe(true);
+        expect(result.outcome.result).toEqual({width: 8, height: 4, size: 4, x: 2, y: 0});
+        expect(result.hasJimp).toBe(true);
+        expect(result.fileCount).toBeGreaterThan(0);
+        expect(result.fileCount).toBeLessThanOrEqual(20_000);
+        expect(result.output.width).toBe(4);
+        expect(result.output.height).toBe(4);
+        expect(result.output.size).toBeGreaterThan(0);
+    });
+
+    test('Jimp 浏览器 CDN 构建作为全局包返回可调用的 Jimp 导出', async ({page}) => {
+        const result = await page.evaluate(async () => {
+            const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
+            const canvas = document.createElement('canvas');
+            canvas.width = 6;
+            canvas.height = 4;
+            const context = canvas.getContext('2d');
+            context.fillStyle = '#2a9d8f';
+            context.fillRect(0, 0, 6, 4);
+            const inputBlob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+            const inputBytes = new Uint8Array(await inputBlob.arrayBuffer());
+            const prepared = await prepareRunScript({
+                format: 'commonjs',
+                cwd: '.',
+                inputFiles: [{path: 'downloaded-image.jpg', content: inputBytes, mimeType: 'image/jpeg'}],
+                code: [
+                    'const fs = require("node:fs");',
+                    'const browserJimp = require("https://cdn.jsdelivr.net/npm/jimp@0.22.12/browser/lib/jimp.js");',
+                    'const Jimp = browserJimp.Jimp || browserJimp;',
+                    'async function main() {',
+                    '  const image = await Jimp.read(fs.readFileSync("downloaded-image.jpg"));',
+                    '  image.crop(1, 0, 4, 4).quality(90);',
+                    '  const output = await image.getBufferAsync(Jimp.MIME_JPEG || "image/jpeg");',
+                    '  fs.writeFileSync("cropped-image.jpg", output);',
+                    '  return {hasRead: typeof Jimp.read === "function", width: image.bitmap.width, height: image.bitmap.height};',
+                    '}',
+                    'module.exports = main();',
+                ].join('\n'),
+            });
+            const worker = new NodeWorker(prepared);
+            const executed = await worker.run();
+            const outputBytes = worker.fileSystem.readBytesSync('cropped-image.jpg');
+            const outputImage = await createImageBitmap(new Blob([outputBytes], {type: 'image/jpeg'}));
+            return {
+                exports: executed.exports,
+                output: {width: outputImage.width, height: outputImage.height, size: outputBytes.byteLength},
+            };
+        });
+
+        expect(result.exports).toEqual({hasRead: true, width: 4, height: 4});
+        expect(result.output.width).toBe(4);
+        expect(result.output.height).toBe(4);
+        expect(result.output.size).toBeGreaterThan(0);
+    });
 });

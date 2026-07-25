@@ -1,5 +1,4 @@
 import {
-    getFileName,
     getMimeType,
     getParentFilePath,
     joinFilePath,
@@ -12,18 +11,48 @@ import {
     scanCommonJsModuleSpecifiers,
     scanEsmModuleSpecifiers,
 } from './module-source-scanner.js';
+import {createCryptoModule} from './node-crypto.js';
+import {Buffer as BrowserBuffer, SlowBuffer, kMaxLength} from 'buffer';
+import EventEmitter from 'events';
+import pathBrowserify from 'path-browserify';
+import punycode from 'punycode';
+import Stream from 'stream-browserify';
+import stringDecoder from 'string_decoder';
+import utilBrowserify from 'util';
+import {
+    deflateSync as rawDeflateSync,
+    gzipSync as fflateGzipSync,
+    gunzipSync as fflateGunzipSync,
+    inflateSync as rawInflateSync,
+    unzlibSync,
+    zlibSync,
+} from 'fflate';
 
 const BUILTIN_ALIASES = new Map([
     ['assert', 'node:assert'],
+    ['assert/strict', 'node:assert/strict'],
     ['buffer', 'node:buffer'],
+    ['crypto', 'node:crypto'],
+    ['events', 'node:events'],
     ['fs', 'node:fs'],
     ['fs/promises', 'node:fs/promises'],
     ['http', 'node:http'],
     ['https', 'node:https'],
     ['path', 'node:path'],
+    ['path/posix', 'node:path/posix'],
+    ['punycode', 'node:punycode'],
     ['querystring', 'node:querystring'],
+    ['process', 'node:process'],
+    ['stream', 'node:stream'],
+    ['stream/promises', 'node:stream/promises'],
+    ['stream/web', 'node:stream/web'],
+    ['string_decoder', 'node:string_decoder'],
+    ['timers', 'node:timers'],
+    ['timers/promises', 'node:timers/promises'],
     ['url', 'node:url'],
     ['util', 'node:util'],
+    ['util/types', 'node:util/types'],
+    ['zlib', 'node:zlib'],
 ]);
 
 class NodeWorker {
@@ -45,7 +74,7 @@ class NodeWorker {
         this.moduleUrls = [];
         this.runtimeKey = `__simpleServerNodeWorker_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         this.usesDataModuleUrls = Boolean(globalThis.process?.versions?.node);
-        this.Buffer = createBufferClass();
+        this.Buffer = BrowserBuffer;
         this.process = this.createProcess(this.options);
         this.console = globalThis.console;
         this.builtins = this.createBuiltinModules(this.options);
@@ -130,14 +159,30 @@ class NodeWorker {
 
     createBuiltinModules() {
         const path = createPathModule(() => this.getCwd());
+        const streamPromises = createStreamPromisesModule(Stream);
+        const streamWeb = createStreamWebModule();
+        const timers = createTimersModule();
         const builtins = new Map([
             ['node:assert', createAssertModule()],
-            ['node:buffer', {Buffer: this.Buffer}],
+            ['node:assert/strict', createAssertModule()],
+            ['node:buffer', {Buffer: this.Buffer, SlowBuffer, kMaxLength}],
+            ['node:crypto', createCryptoModule(this.Buffer)],
+            ['node:events', EventEmitter],
             ['node:path', path],
             ['node:path/posix', path],
+            ['node:process', this.process],
+            ['node:punycode', punycode],
             ['node:querystring', createQueryStringModule()],
+            ['node:stream', Stream],
+            ['node:stream/promises', streamPromises],
+            ['node:stream/web', streamWeb],
+            ['node:string_decoder', stringDecoder],
+            ['node:timers', timers],
+            ['node:timers/promises', createTimersPromisesModule(timers)],
             ['node:url', createUrlModule()],
-            ['node:util', createUtilModule()],
+            ['node:util', utilBrowserify],
+            ['node:util/types', utilBrowserify.types || {}],
+            ['node:zlib', createZlibModule(this.Buffer, Stream)],
         ]);
         const fileModules = createNodeFsModules({
             fileSystem: this.fileSystem,
@@ -535,6 +580,7 @@ class NodeWorker {
     installRuntimeGlobals() {
         const values = {
             [this.runtimeKey]: {values: this.esmValues},
+            global: globalThis,
             process: this.process,
             Buffer: this.Buffer,
             console: this.console,
@@ -663,7 +709,7 @@ function createNodeFsModules({fileSystem, Buffer, getCwd}) {
 }
 
 function createNodeFsModule(fileSystem, Buffer, promises, getCwd) {
-    return {
+    const fs = {
         promises,
         readFileSync(path, options) {
             const normalized = resolveNodeFsPath(path, getCwd());
@@ -693,7 +739,87 @@ function createNodeFsModule(fileSystem, Buffer, promises, getCwd) {
         readdirSync(path = '.', options) {
             return formatNodeFsDirectoryEntries(fileSystem.listSync(resolveNodeFsPath(path, getCwd())), options);
         },
+        mkdirSync(path, options = {}) {
+            resolveNodeFsPath(path, getCwd());
+            if (options?.recursive === false) throw nodeFsError('UNSUPPORTED_FILE_OPERATION', 'mkdirSync requires recursive: true');
+        },
+        readFile(path, options, callback) {
+            if (typeof options === 'function') {
+                callback = options;
+                options = undefined;
+            }
+            runNodeCallback(callback, () => fs.readFileSync(path, options));
+        },
+        writeFile(path, value, options, callback) {
+            if (typeof options === 'function') {
+                callback = options;
+                options = undefined;
+            }
+            runNodeCallback(callback, () => fs.writeFileSync(path, value, options));
+        },
+        createWriteStream(path, options = {}) {
+            const listeners = new Map();
+            const chunks = [];
+            let ended = false;
+            const stream = {
+                on(name, listener) {
+                    if (!listeners.has(name)) listeners.set(name, []);
+                    listeners.get(name).push(listener);
+                    return this;
+                },
+                once(name, listener) {
+                    const wrapped = (...args) => {
+                        removeListener(name, wrapped);
+                        listener(...args);
+                    };
+                    return this.on(name, wrapped);
+                },
+                write(chunk, encoding) {
+                    if (ended) throw nodeFsError('ERR_STREAM_WRITE_AFTER_END', 'write after end', {path: String(path)});
+                    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, encoding) : Buffer.from(chunk));
+                    return true;
+                },
+                end(chunk, encoding) {
+                    if (chunk !== undefined) this.write(chunk, encoding);
+                    if (ended) return this;
+                    ended = true;
+                    queueMicrotask(() => {
+                        try {
+                            fs.writeFileSync(path, Buffer.concat(chunks), options);
+                            emit('finish');
+                            emit('close');
+                        } catch (error) {
+                            emit('error', error);
+                        }
+                    });
+                    return this;
+                },
+            };
+            const removeListener = (name, listener) => {
+                const values = listeners.get(name);
+                if (!values) return;
+                const index = values.indexOf(listener);
+                if (index !== -1) values.splice(index, 1);
+            };
+            const emit = (name, ...args) => {
+                for (const listener of [...(listeners.get(name) || [])]) listener(...args);
+            };
+            queueMicrotask(() => emit('open', displayPath(resolveNodeFsPath(path, getCwd()))));
+            return stream;
+        },
     };
+    return fs;
+}
+
+function runNodeCallback(callback, operation) {
+    if (typeof callback !== 'function') throw new TypeError('Callback must be a function');
+    queueMicrotask(() => {
+        try {
+            callback(null, operation());
+        } catch (error) {
+            callback(error);
+        }
+    });
 }
 
 function createNodeFsPromisesModule(fileSystem, Buffer, getCwd) {
@@ -977,133 +1103,135 @@ function nodeWorkerError(code, message, details = {}) {
     return error;
 }
 
-function createBufferClass() {
-    return class Buffer extends Uint8Array {
-        static from(value, encoding = 'utf8') {
-            if (typeof value === 'string') return new this(decodeString(value, encoding));
-            if (value instanceof ArrayBuffer) return new this(new Uint8Array(value.slice(0)));
-            if (ArrayBuffer.isView(value)) return new this(new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength)));
-            if (Array.isArray(value)) return new this(value);
-            throw new TypeError('Unsupported Buffer input');
-        }
-
-        static alloc(size, fill = 0) {
-            const buffer = new this(Number(size) || 0);
-            buffer.fill(fill);
-            return buffer;
-        }
-
-        static concat(values, totalLength) {
-            const length = totalLength ?? values.reduce((total, value) => total + value.byteLength, 0);
-            const result = new this(length);
-            let offset = 0;
-            for (const value of values) {
-                const bytes = this.from(value);
-                result.set(bytes.subarray(0, Math.max(0, length - offset)), offset);
-                offset += bytes.byteLength;
-                if (offset >= length) break;
-            }
-            return result;
-        }
-
-        static isBuffer(value) {
-            return value instanceof this;
-        }
-
-        toString(encoding = 'utf8', start = 0, end = this.length) {
-            return encodeBytes(this.subarray(start, end), encoding);
-        }
-    };
-}
-
-function decodeString(value, encoding) {
-    const normalized = normalizeEncoding(encoding);
-    if (normalized === 'base64') {
-        const binary = atob(value);
-        return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    }
-    if (normalized === 'hex') {
-        const pairs = String(value).match(/[\da-f]{2}/gi) || [];
-        return Uint8Array.from(pairs, (pair) => Number.parseInt(pair, 16));
-    }
-    return new TextEncoder().encode(value);
-}
-
-function encodeBytes(value, encoding) {
-    const normalized = normalizeEncoding(encoding);
-    if (normalized === 'base64') {
-        let binary = '';
-        for (const byte of value) binary += String.fromCharCode(byte);
-        return btoa(binary);
-    }
-    if (normalized === 'hex') return [...value].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-    return new TextDecoder(normalized).decode(value);
-}
-
-function normalizeEncoding(encoding) {
-    const value = String(encoding || 'utf8').toLowerCase().replace(/[-_]/g, '');
-    if (value === 'utf8' || value === 'utf') return 'utf-8';
-    if (value === 'base64' || value === 'hex') return value;
-    return encoding;
-}
-
 function createPathModule(getCwd) {
-    const api = {
-        sep: '/',
-        delimiter: ':',
-        normalize(path) {
-            return normalizePosixPath(path);
-        },
-        join(...paths) {
-            return normalizePosixPath(paths.filter(Boolean).join('/'));
-        },
-        resolve(...paths) {
-            let result = displayPath(getCwd());
-            for (const path of paths) {
-                result = String(path).startsWith('/') ? String(path) : `${result}/${path}`;
-            }
-            return normalizePosixPath(result, true);
-        },
-        dirname(path) {
-            const value = normalizePosixPath(path);
-            const absolute = value.startsWith('/');
-            const parts = value.split('/').filter(Boolean);
-            parts.pop();
-            if (!parts.length) return absolute ? '/' : '.';
-            return `${absolute ? '/' : ''}${parts.join('/')}`;
-        },
-        basename(path, suffix = '') {
-            const name = getFileName(path);
-            return suffix && name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
-        },
-        extname(path) {
-            const name = getFileName(path);
-            const index = name.lastIndexOf('.');
-            return index <= 0 ? '' : name.slice(index);
-        },
-        isAbsolute(path) {
-            return String(path || '').startsWith('/');
-        },
-    };
+    const api = {...pathBrowserify};
+    api.resolve = (...paths) => pathBrowserify.resolve(displayPath(getCwd()), ...paths);
     api.posix = api;
     return api;
 }
 
-function normalizePosixPath(path, forceAbsolute = false) {
-    const value = String(path || '');
-    const absolute = forceAbsolute || value.startsWith('/');
-    const parts = [];
-    for (const part of value.split('/')) {
-        if (!part || part === '.') continue;
-        if (part === '..') {
-            if (parts.length && parts.at(-1) !== '..') parts.pop();
-            else if (!absolute) parts.push('..');
-        } else {
-            parts.push(part);
-        }
+function createStreamPromisesModule(Stream) {
+    return {
+        finished(stream, options) {
+            return new Promise((resolve, reject) => Stream.finished(stream, options || {}, (error) => error ? reject(error) : resolve()));
+        },
+        pipeline(...streams) {
+            return new Promise((resolve, reject) => Stream.pipeline(...streams, (error) => error ? reject(error) : resolve()));
+        },
+    };
+}
+
+function createStreamWebModule() {
+    return {
+        ReadableStream: globalThis.ReadableStream,
+        WritableStream: globalThis.WritableStream,
+        TransformStream: globalThis.TransformStream,
+        ByteLengthQueuingStrategy: globalThis.ByteLengthQueuingStrategy,
+        CountQueuingStrategy: globalThis.CountQueuingStrategy,
+        TextEncoderStream: globalThis.TextEncoderStream,
+        TextDecoderStream: globalThis.TextDecoderStream,
+    };
+}
+
+function createZlibModule(Buffer, Stream) {
+    const constants = {
+        Z_NO_FLUSH: 0,
+        Z_SYNC_FLUSH: 2,
+        Z_FINISH: 4,
+        Z_MIN_CHUNK: 64,
+        Z_DEFAULT_COMPRESSION: -1,
+        Z_DEFAULT_STRATEGY: 0,
+    };
+    const sync = (operation) => (value, options = {}) => Buffer.from(operation(Buffer.from(value), normalizeCompressionOptions(options)));
+    const methods = {
+        deflateSync: sync(zlibSync),
+        inflateSync: sync(unzlibSync),
+        deflateRawSync: sync(rawDeflateSync),
+        inflateRawSync: sync(rawInflateSync),
+        gzipSync: sync(fflateGzipSync),
+        gunzipSync: sync(fflateGunzipSync),
+    };
+    methods.unzipSync = (value, options = {}) => {
+        const bytes = Buffer.from(value);
+        return bytes[0] === 0x1f && bytes[1] === 0x8b
+            ? methods.gunzipSync(bytes, options)
+            : methods.inflateSync(bytes, options);
+    };
+
+    const createCodec = (operation) => function Codec(options = {}) {
+        if (!(this instanceof Codec)) return new Codec(options);
+        const chunks = [];
+        Stream.Transform.call(this, {
+            transform(chunk, encoding, callback) {
+                chunks.push(Buffer.from(chunk));
+                callback();
+            },
+            flush(callback) {
+                try {
+                    callback(null, operation(Buffer.concat(chunks), options));
+                } catch (error) {
+                    callback(error);
+                }
+            },
+        });
+        this._processChunk = (chunk, flushFlag, callback) => {
+            try {
+                const result = operation(chunk, options);
+                if (typeof callback === 'function') queueMicrotask(() => callback(null, result));
+                else return result;
+            } catch (error) {
+                if (typeof callback === 'function') queueMicrotask(() => callback(error));
+                else throw error;
+            }
+        };
+    };
+    const Deflate = createCodec(methods.deflateSync);
+    const Inflate = createCodec(methods.inflateSync);
+    const DeflateRaw = createCodec(methods.deflateRawSync);
+    const InflateRaw = createCodec(methods.inflateRawSync);
+    const Gzip = createCodec(methods.gzipSync);
+    const Gunzip = createCodec(methods.gunzipSync);
+    for (const Codec of [Deflate, Inflate, DeflateRaw, InflateRaw, Gzip, Gunzip]) inheritPrototype(Codec, Stream.Transform);
+
+    const result = {
+        ...constants,
+        constants,
+        ...methods,
+        Deflate,
+        Inflate,
+        DeflateRaw,
+        InflateRaw,
+        Gzip,
+        Gunzip,
+        createDeflate: (options) => new Deflate(options),
+        createInflate: (options) => new Inflate(options),
+        createDeflateRaw: (options) => new DeflateRaw(options),
+        createInflateRaw: (options) => new InflateRaw(options),
+        createGzip: (options) => new Gzip(options),
+        createGunzip: (options) => new Gunzip(options),
+    };
+    for (const name of ['deflate', 'inflate', 'deflateRaw', 'inflateRaw', 'gzip', 'gunzip', 'unzip']) {
+        result[name] = (value, options, callback) => {
+            if (typeof options === 'function') {
+                callback = options;
+                options = undefined;
+            }
+            runNodeCallback(callback, () => result[`${name}Sync`](value, options));
+        };
     }
-    const result = parts.join('/');
-    return absolute ? `/${result}` || '/' : result || '.';
+    return result;
+}
+
+function normalizeCompressionOptions(options) {
+    const level = Number(options?.level);
+    return Number.isFinite(level) && level >= 0 ? {level: Math.min(9, level)} : {};
+}
+
+function inheritPrototype(constructor, superConstructor) {
+    constructor.super_ = superConstructor;
+    constructor.prototype = Object.create(superConstructor.prototype, {
+        constructor: {configurable: true, value: constructor, writable: true},
+    });
 }
 
 function createHttpModule(fetch, protocol, Buffer) {
@@ -1169,6 +1297,46 @@ function createHttpTarget(protocol, input, options) {
     const hostname = source.hostname || source.host || 'localhost';
     const port = source.port ? `:${source.port}` : '';
     return new URL(`${protocol}//${hostname}${port}${source.path || source.pathname || '/'}`);
+}
+
+function createTimersModule() {
+    const setImmediate = (callback, ...args) => setTimeout(callback, 0, ...args);
+    return {
+        setTimeout,
+        clearTimeout,
+        setInterval,
+        clearInterval,
+        setImmediate,
+        clearImmediate: clearTimeout,
+    };
+}
+
+function createTimersPromisesModule(timers) {
+    return {
+        setTimeout(delay, value, options = {}) {
+            return timerPromise(timers.setTimeout, timers.clearTimeout, delay, value, options);
+        },
+        setImmediate(value, options = {}) {
+            return timerPromise(timers.setImmediate, timers.clearImmediate, 0, value, options);
+        },
+    };
+}
+
+function timerPromise(schedule, cancel, delay, value, options) {
+    return new Promise((resolve, reject) => {
+        if (options?.signal?.aborted) return reject(options.signal.reason || new DOMException('The operation was aborted', 'AbortError'));
+        const handle = schedule(() => {
+            cleanup();
+            resolve(value);
+        }, delay);
+        const abort = () => {
+            cancel(handle);
+            cleanup();
+            reject(options.signal.reason || new DOMException('The operation was aborted', 'AbortError'));
+        };
+        const cleanup = () => options?.signal?.removeEventListener?.('abort', abort);
+        options?.signal?.addEventListener?.('abort', abort, {once: true});
+    });
 }
 
 async function sendHttpRequest(fetch, target, options, chunks, callback, requestListeners, Buffer) {
@@ -1259,20 +1427,6 @@ function decodeQueryStringValue(value) {
     } catch {
         return String(value).replace(/\+/g, ' ');
     }
-}
-
-function createUtilModule() {
-    return {
-        types: {},
-        format(...values) {
-            return values.map((value) => typeof value === 'string' ? value : JSON.stringify(value)).join(' ');
-        },
-        promisify(fn) {
-            return (...args) => new Promise((resolve, reject) => {
-                fn(...args, (error, value) => error ? reject(error) : resolve(value));
-            });
-        },
-    };
 }
 
 function createAssertModule() {

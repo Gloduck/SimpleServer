@@ -167,9 +167,18 @@ function getStaticEsmKind(source, item) {
 }
 
 function detectClassicScriptFormat(source, codeMask) {
+    if (looksLikeWebpackBrowserGlobal(source)) return 'global';
     if (hasCodeMatch(source, codeMask, /\btypeof\s+(?:module|exports|define)\b|\bdefine\s*\.\s*amd\b/g)) return 'umd';
     if (hasCodeMatch(source, codeMask, /\bmodule\s*\.\s*exports\b|\bexports\s*(?:\.|\[)|\brequire\s*\(/g)) return 'commonjs';
     return 'global';
+}
+
+function looksLikeWebpackBrowserGlobal(source) {
+    const text = String(source || '');
+    return /^(?:\s|\/\*[\s\S]*?\*\/)*\(\(\)\s*=>\s*\{\s*var\s+__webpack_modules__\s*=/.test(text)
+        && text.includes('__webpack_require__')
+        && /["']undefined["']\s*!=\s*typeof\s+window\s*&&\s*["']object["']\s*==\s*typeof\s+window/.test(text)
+        && /["']undefined["']\s*!=\s*typeof\s+self\s*&&\s*["']object["']\s*==\s*typeof\s+self/.test(text);
 }
 
 function hasCodeMatch(source, codeMask, pattern) {

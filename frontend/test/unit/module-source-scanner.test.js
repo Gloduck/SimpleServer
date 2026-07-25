@@ -68,6 +68,20 @@ test('场景：源码格式区分 ESM、CommonJS 风格和普通全局脚本', a
     assert.equal(await detectJavaScriptSourceFormat('// module.exports = 1;\n"require(\\"x\\")";'), 'global');
 });
 
+test('场景：Webpack 浏览器全局包不会被内部 module.exports 误判为 CommonJS', async () => {
+    const source = [
+        '(()=>{var __webpack_modules__={1:(module)=>{module.exports={internal:true}}};',
+        'var __webpack_require__=function(){};',
+        'let target;',
+        '"undefined"!=typeof window&&"object"==typeof window&&(target=window);',
+        '"undefined"!=typeof self&&"object"==typeof self&&(target=self);',
+        'target.ImageLibrary={read(){return true}};',
+        '})()'
+    ].join('');
+
+    assert.equal(await detectJavaScriptSourceFormat(source), 'global');
+});
+
 test('场景：完整扫描同时返回 ESM 和 CommonJS 依赖集合', async () => {
     const result = await scanJavaScriptModuleSource([
         'import value from "esm-package";',

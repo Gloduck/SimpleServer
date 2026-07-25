@@ -12,16 +12,29 @@ import {
 
 const BUILTIN_MODULES = new Set([
     'assert',
+    'assert/strict',
     'buffer',
+    'crypto',
+    'events',
     'fs',
     'fs/promises',
     'http',
     'https',
     'path',
     'path/posix',
+    'punycode',
     'querystring',
+    'process',
+    'stream',
+    'stream/promises',
+    'stream/web',
+    'string_decoder',
+    'timers',
+    'timers/promises',
     'url',
     'util',
+    'util/types',
+    'zlib',
 ]);
 const DEFAULT_LIMITS = Object.freeze({
     maxModuleCount: 1000,
@@ -134,7 +147,7 @@ function createRunScriptPreparer(config = {}) {
             modulePaths: new Map(),
             remoteModules: new Map(),
             localPackages: new Map(),
-            packageMounts: new Set(),
+            packageMounts: new Map(),
             moduleCount: 0,
             totalBytes: 0,
             sourceBytes: 0,
@@ -404,20 +417,20 @@ function createRunScriptPreparer(config = {}) {
             .filter(([name]) => !Object.prototype.hasOwnProperty.call(optionalDependencies, name)));
         for (const [name, range] of Object.entries(dependencies)) {
             const localRoot = await findLocalPackageRoot(context, name, root);
-            if (localRoot) {
+            if (localRoot && !context.packageMounts.has(localRoot)) {
                 await loadLocalPackage(context, localRoot, depth + 1);
             } else {
                 const packageRecord = await downloadPackage(name, range, context.signal);
-                await mountPackage(context, packageRecord, joinFilePath(root, 'node_modules', name), depth + 1, new Set());
+                await mountPackageDependency(context, packageRecord, root, packageScopeRoot(root), depth + 1);
             }
         }
         for (const [name, range] of Object.entries(optionalDependencies)) {
             await prepareOptionalDependency(context, async () => {
                 const localRoot = await findLocalPackageRoot(context, name, root);
-                if (localRoot) await loadLocalPackage(context, localRoot, depth + 1);
+                if (localRoot && !context.packageMounts.has(localRoot)) await loadLocalPackage(context, localRoot, depth + 1);
                 else {
                     const packageRecord = await downloadPackage(name, range, context.signal);
-                    await mountPackage(context, packageRecord, joinFilePath(root, 'node_modules', name), depth + 1, new Set());
+                    await mountPackageDependency(context, packageRecord, root, packageScopeRoot(root), depth + 1);
                 }
             });
         }
@@ -501,7 +514,7 @@ function createRunScriptPreparer(config = {}) {
 
         const packageRecord = await downloadPackage(parsed.name, parsed.version, context.signal);
         const root = joinFilePath(PACKAGE_ROOT, packageDirectoryName(packageRecord.name, packageRecord.version));
-        await mountPackage(context, packageRecord, root, depth, new Set());
+        await mountPackage(context, packageRecord, root, depth, PACKAGE_ROOT);
         return parsed.subpath ? joinFilePath(root, parsed.subpath) : root;
     }
 
@@ -513,42 +526,86 @@ function createRunScriptPreparer(config = {}) {
         return packageDownloader.download(name, version, {signal});
     }
 
-    async function mountPackage(context, packageRecord, root, depth, ancestry) {
-        if (context.packageMounts.has(root)) return;
+    async function mountPackage(context, packageRecord, root, depth, scopeRoot) {
+        const existing = context.packageMounts.get(root);
+        if (existing) {
+            if (samePackage(existing, packageRecord)) return existing;
+            throw prepareError('PACKAGE_MOUNT_CONFLICT', `Conflicting packages cannot be mounted at ${root}`, {
+                path: root,
+                name: packageRecord.name,
+                version: packageRecord.version,
+                existingName: existing.name,
+                existingVersion: existing.version,
+            });
+        }
         assertDepth(depth);
-        context.packageMounts.add(root);
+        const mounted = {
+            root,
+            scopeRoot: normalizeFilePath(scopeRoot),
+            name: packageRecord.name,
+            version: packageRecord.version,
+        };
+        context.packageMounts.set(root, mounted);
         for (const file of packageRecord.files || []) {
             addFile(context, {path: joinFilePath(root, file.path), content: file.content});
         }
 
-        const packageId = `${packageRecord.name}@${packageRecord.version}`;
-        const nextAncestry = new Set(ancestry).add(packageId);
         const optionalDependencies = {...packageRecord.manifest?.optionalDependencies};
         const dependencies = Object.fromEntries(Object.entries(packageRecord.manifest?.dependencies || {})
             .filter(([name]) => !Object.prototype.hasOwnProperty.call(optionalDependencies, name)));
         for (const [name, range] of Object.entries(dependencies)) {
             const dependency = await downloadPackage(name, range, context.signal);
-            const dependencyRoot = joinFilePath(root, 'node_modules', name);
-            const recursive = !nextAncestry.has(`${dependency.name}@${dependency.version}`);
-            if (recursive) await mountPackage(context, dependency, dependencyRoot, depth + 1, nextAncestry);
-            else mountPackageFiles(context, dependency, dependencyRoot);
+            await mountPackageDependency(context, dependency, root, mounted.scopeRoot, depth + 1);
         }
         for (const [name, range] of Object.entries(optionalDependencies)) {
             await prepareOptionalDependency(context, async () => {
                 const dependency = await downloadPackage(name, range, context.signal);
-                const dependencyRoot = joinFilePath(root, 'node_modules', name);
-                const recursive = !nextAncestry.has(`${dependency.name}@${dependency.version}`);
-                if (recursive) await mountPackage(context, dependency, dependencyRoot, depth + 1, nextAncestry);
-                else mountPackageFiles(context, dependency, dependencyRoot);
+                await mountPackageDependency(context, dependency, root, mounted.scopeRoot, depth + 1);
             });
         }
+        return mounted;
     }
 
-    function mountPackageFiles(context, packageRecord, root) {
-        if (context.packageMounts.has(root)) return;
-        context.packageMounts.add(root);
-        for (const file of packageRecord.files || []) {
-            addFile(context, {path: joinFilePath(root, file.path), content: file.content});
+    async function mountPackageDependency(context, packageRecord, parentRoot, scopeRoot, depth) {
+        const candidates = packageMountCandidates(parentRoot, scopeRoot, packageRecord.name);
+        const nearestRoot = candidates[0];
+        for (const candidate of candidates) {
+            const existing = await inspectPackageRoot(context, candidate);
+            if (!existing) continue;
+            if (samePackage(existing, packageRecord)) {
+                if (existing.local) await loadLocalPackage(context, candidate, depth);
+                return existing;
+            }
+            if (context.packageMounts.has(nearestRoot) || await getWorkspaceKind(context, nearestRoot) === 'directory') {
+                throw prepareError('PACKAGE_MOUNT_CONFLICT', `Conflicting packages cannot be mounted at ${nearestRoot}`, {
+                    path: nearestRoot,
+                    name: packageRecord.name,
+                    version: packageRecord.version,
+                });
+            }
+            return mountPackage(context, packageRecord, nearestRoot, depth, scopeRoot);
+        }
+        return mountPackage(context, packageRecord, candidates.at(-1), depth, scopeRoot);
+    }
+
+    async function inspectPackageRoot(context, root) {
+        const mounted = context.packageMounts.get(root);
+        if (mounted) return mounted;
+        const local = context.localPackages.get(root);
+        if (local) return {...local, local: true};
+        if (await getWorkspaceKind(context, root) !== 'directory') return null;
+        const packagePath = joinFilePath(root, 'package.json');
+        if (await getWorkspaceKind(context, packagePath) !== 'file') return {root, opaque: true};
+        try {
+            const manifest = JSON.parse(await readWorkspaceText(context, packagePath));
+            return {
+                root,
+                name: manifest.name || getPackageNameFromRoot(root),
+                version: String(manifest.version || '0.0.0'),
+                local: true,
+            };
+        } catch {
+            return {root, opaque: true};
         }
     }
 
@@ -679,7 +736,7 @@ function createRunScriptPreparer(config = {}) {
 
     async function prepareOptionalDependency(context, callback) {
         const files = new Map(context.files);
-        const packageMounts = new Set(context.packageMounts);
+        const packageMounts = new Map(context.packageMounts);
         const localPackages = new Map(context.localPackages);
         const totalBytes = context.totalBytes;
         const sourceBytes = context.sourceBytes;
@@ -868,6 +925,42 @@ function packageDirectoryName(name, version) {
     const safeName = name.replace(/^@/, '').replace(/[^A-Za-z0-9._-]+/g, '-');
     const safeVersion = version.replace(/[^A-Za-z0-9._-]+/g, '-');
     return `${safeName}@${safeVersion}-${hashString(name)}`;
+}
+
+function packageMountCandidates(parentRoot, scopeRoot, name) {
+    const root = normalizeFilePath(parentRoot);
+    const scope = normalizeFilePath(scopeRoot);
+    if (root !== scope && scope && !root.startsWith(`${scope}/`)) {
+        throw prepareError('INVALID_PACKAGE_SCOPE', `Package root is outside its installation scope: ${root}`, {
+            path: root,
+            scope,
+        });
+    }
+
+    const candidates = [];
+    let directory = root;
+    while (true) {
+        if (directory.split('/').at(-1) !== 'node_modules') {
+            candidates.push(joinFilePath(directory, 'node_modules', name));
+        }
+        if (directory === scope) break;
+        directory = getParentFilePath(directory);
+    }
+    return [...new Set(candidates)];
+}
+
+function packageScopeRoot(root) {
+    const parts = normalizeFilePath(root).split('/');
+    const nodeModulesIndex = parts.indexOf('node_modules');
+    return nodeModulesIndex === -1
+        ? getParentFilePath(root)
+        : parts.slice(0, nodeModulesIndex).join('/');
+}
+
+function samePackage(left, right) {
+    return Boolean(left && right
+        && left.name === right.name
+        && String(left.version) === String(right.version));
 }
 
 function getPackageNameFromRoot(root) {
