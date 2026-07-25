@@ -1,4 +1,6 @@
 import {expect, test} from '@playwright/test';
+import nativeHttp from 'node:http';
+import nativeTty from 'node:tty';
 import {openRuntimeHarness, runNodeWorker} from '../test-helpers.js';
 
 test.beforeEach(async ({page}) => openRuntimeHarness(page));
@@ -21,6 +23,22 @@ test('process、input、env、args、cwd 和模块路径符合 Node 脚本预期
         cwd: '/workspace',
         filename: '/workspace/src/main.cjs',
         dirname: '/workspace/src',
+    });
+});
+
+test('node:tty isatty 与原生 Node 的非 TTY 行为一致', async ({page}) => {
+    const result = await runNodeWorker(page, {
+        format: 'commonjs',
+        code: [
+            'const tty = require("node:tty");',
+            'module.exports = {alias: require("tty") === tty, values: input.map((value) => tty.isatty(value))};',
+        ].join('\n'),
+        input: [undefined, null, -1, 0, 1, '1', {}, Number.NaN],
+    });
+
+    expect(result.exports).toEqual({
+        alias: true,
+        values: [undefined, null, -1, 0, 1, '1', {}, Number.NaN].map((value) => nativeTty.isatty(value)),
     });
 });
 
@@ -92,6 +110,9 @@ test('path、url、querystring、util 和 assert 常用接口可执行', async (
             '  parsedPath: path.parse("/a/b/file.test.js"),',
             '  query: querystring.stringify({a: "x y", b: 2}),',
             '  parsed: querystring.parse("a=x+y&b=2"),',
+            '  encodedAlias: querystring.encode({a: "x y"}),',
+            '  decodedAlias: querystring.decode("a=x+y"),',
+            '  aliasIdentity: querystring.encode === querystring.stringify && querystring.decode === querystring.parse,',
             '  host: new URL("https://example.test/path").host,',
             '  fileUrl: pathToFileURL("workspace/a.txt").href,',
             '  filePath: fileURLToPath("file:///workspace/a.txt"),',
@@ -108,6 +129,9 @@ test('path、url、querystring、util 和 assert 常用接口可执行', async (
         parsedPath: {root: '/', dir: '/a/b', base: 'file.test.js', ext: '.js', name: 'file.test'},
         query: 'a=x%20y&b=2',
         parsed: {a: 'x y', b: '2'},
+        encodedAlias: 'a=x%20y',
+        decodedAlias: {a: 'x y'},
+        aliasIdentity: true,
         host: 'example.test',
         fileUrl: 'file:///workspace/a.txt',
         filePath: '/workspace/a.txt',
@@ -596,10 +620,29 @@ test('fetch 与 node:https 使用浏览器网络实现', async ({page}) => {
         await route.fulfill({status: 200, body: url.pathname === '/fetch' ? 'fetch-ok' : 'https-ok'});
     });
 
+    const nativeErrors = {};
+    for (const [name, operation] of [
+        ['name', () => nativeHttp.validateHeaderName('bad header')],
+        ['value', () => nativeHttp.validateHeaderValue('x', 'bad\nvalue')],
+    ]) {
+        try {
+            operation();
+        } catch (error) {
+            nativeErrors[name] = {name: error.name, code: error.code, message: error.message};
+        }
+    }
     const result = await runNodeWorker(page, {
         format: 'commonjs',
+        input: {methods: nativeHttp.METHODS, status200: nativeHttp.STATUS_CODES[200], errors: nativeErrors},
         code: [
+            'const http = require("node:http");',
             'const https = require("node:https");',
+            'http.validateHeaderName("x-test");',
+            'http.validateHeaderValue("x-test", "ok");',
+            'const errors = {};',
+            'for (const [name, operation] of [["name", () => http.validateHeaderName("bad header")], ["value", () => http.validateHeaderValue("x", "bad\\nvalue")]]) {',
+            '  try { operation(); } catch (error) { errors[name] = {name: error.name, code: error.code, message: error.message}; }',
+            '}',
             'const viaHttps = new Promise((resolve, reject) => {',
             '  const request = https.get("https://example.test/https", (response) => {',
             '    const chunks = [];',
@@ -608,9 +651,20 @@ test('fetch 与 node:https 使用浏览器网络实现', async ({page}) => {
             '  });',
             '  request.on("error", reject);',
             '});',
-            'module.exports = Promise.all([fetch("https://example.test/fetch").then((response) => response.text()), viaHttps]);',
+            'module.exports = Promise.all([fetch("https://example.test/fetch").then((response) => response.text()), viaHttps])',
+            '  .then((values) => ({values, methods: http.METHODS, status200: http.STATUS_CODES[200], errors,',
+            '    mutable: !Object.isFrozen(http.METHODS) && !Object.isFrozen(http.STATUS_CODES),',
+            '    httpsMetadata: [https.METHODS, https.STATUS_CODES, https.validateHeaderName, https.validateHeaderValue].map((value) => typeof value),',
+            '  }));',
         ].join('\n'),
     });
 
-    expect(result.exports).toEqual(['fetch-ok', 'https-ok']);
+    expect(result.exports).toEqual({
+        values: ['fetch-ok', 'https-ok'],
+        methods: nativeHttp.METHODS,
+        status200: nativeHttp.STATUS_CODES[200],
+        errors: nativeErrors,
+        mutable: true,
+        httpsMetadata: ['undefined', 'undefined', 'undefined', 'undefined'],
+    });
 });

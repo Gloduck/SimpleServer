@@ -31,6 +31,7 @@ const BUILTIN_MODULES = new Set([
     'string_decoder',
     'timers',
     'timers/promises',
+    'tty',
     'url',
     'util',
     'util/types',

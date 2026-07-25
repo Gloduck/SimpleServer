@@ -49,6 +49,7 @@ const BUILTIN_ALIASES = new Map([
     ['string_decoder', 'node:string_decoder'],
     ['timers', 'node:timers'],
     ['timers/promises', 'node:timers/promises'],
+    ['tty', 'node:tty'],
     ['url', 'node:url'],
     ['util', 'node:util'],
     ['util/types', 'node:util/types'],
@@ -165,7 +166,11 @@ class NodeWorker {
         const builtins = new Map([
             ['node:assert', createAssertModule()],
             ['node:assert/strict', createAssertModule()],
-            ['node:buffer', {Buffer: this.Buffer, SlowBuffer, kMaxLength}],
+            ['node:buffer', {
+                Buffer: this.Buffer,
+                SlowBuffer,
+                kMaxLength,
+            }],
             ['node:crypto', createCryptoModule(this.Buffer)],
             ['node:events', EventEmitter],
             ['node:path', path],
@@ -179,6 +184,7 @@ class NodeWorker {
             ['node:string_decoder', stringDecoder],
             ['node:timers', timers],
             ['node:timers/promises', createTimersPromisesModule(timers)],
+            ['node:tty', createTtyModule()],
             ['node:url', createUrlModule()],
             ['node:util', utilBrowserify],
             ['node:util/types', utilBrowserify.types || {}],
@@ -1178,6 +1184,10 @@ function createPathModule(getCwd) {
     return api;
 }
 
+function createTtyModule() {
+    return {isatty: () => false};
+}
+
 function createStreamPromisesModule(Stream) {
     return {
         finished(stream, options) {
@@ -1345,7 +1355,7 @@ function createHttpModule(fetch, protocol, Buffer) {
         };
         return clientRequest;
     };
-    return {
+    const result = {
         request,
         get(input, options, callback) {
             const result = request(input, options, callback);
@@ -1353,6 +1363,13 @@ function createHttpModule(fetch, protocol, Buffer) {
             return result;
         },
     };
+    if (protocol === 'http:') Object.assign(result, {
+        METHODS: [...HTTP_METHODS],
+        STATUS_CODES: {...HTTP_STATUS_CODES},
+        validateHeaderName,
+        validateHeaderValue,
+    });
+    return result;
 }
 
 function createHttpTarget(protocol, input, options) {
@@ -1454,7 +1471,7 @@ function createUrlModule() {
 }
 
 function createQueryStringModule() {
-    return {
+    const result = {
         parse(value, separator = '&', equals = '=') {
             const result = Object.create(null);
             const source = String(value || '');
@@ -1482,6 +1499,9 @@ function createQueryStringModule() {
         escape: encodeURIComponent,
         unescape: decodeQueryStringValue,
     };
+    result.decode = result.parse;
+    result.encode = result.stringify;
+    return result;
 }
 
 function normalizeQueryStringValue(value) {
@@ -1495,6 +1515,52 @@ function decodeQueryStringValue(value) {
     } catch {
         return String(value).replace(/\+/g, ' ');
     }
+}
+
+const HTTP_METHODS = [
+    'ACL', 'BIND', 'CHECKOUT', 'CONNECT', 'COPY', 'DELETE', 'GET', 'HEAD', 'LINK', 'LOCK', 'M-SEARCH',
+    'MERGE', 'MKACTIVITY', 'MKCALENDAR', 'MKCOL', 'MOVE', 'NOTIFY', 'OPTIONS', 'PATCH', 'POST', 'PROPFIND',
+    'PROPPATCH', 'PURGE', 'PUT', 'QUERY', 'REBIND', 'REPORT', 'SEARCH', 'SOURCE', 'SUBSCRIBE', 'TRACE',
+    'UNBIND', 'UNLINK', 'UNLOCK', 'UNSUBSCRIBE',
+];
+
+const HTTP_STATUS_CODES = {
+    100: 'Continue', 101: 'Switching Protocols', 102: 'Processing', 103: 'Early Hints',
+    200: 'OK', 201: 'Created', 202: 'Accepted', 203: 'Non-Authoritative Information', 204: 'No Content',
+    205: 'Reset Content', 206: 'Partial Content', 207: 'Multi-Status', 208: 'Already Reported', 226: 'IM Used',
+    300: 'Multiple Choices', 301: 'Moved Permanently', 302: 'Found', 303: 'See Other', 304: 'Not Modified',
+    305: 'Use Proxy', 307: 'Temporary Redirect', 308: 'Permanent Redirect',
+    400: 'Bad Request', 401: 'Unauthorized', 402: 'Payment Required', 403: 'Forbidden', 404: 'Not Found',
+    405: 'Method Not Allowed', 406: 'Not Acceptable', 407: 'Proxy Authentication Required', 408: 'Request Timeout',
+    409: 'Conflict', 410: 'Gone', 411: 'Length Required', 412: 'Precondition Failed', 413: 'Payload Too Large',
+    414: 'URI Too Long', 415: 'Unsupported Media Type', 416: 'Range Not Satisfiable', 417: 'Expectation Failed',
+    418: "I'm a Teapot", 421: 'Misdirected Request', 422: 'Unprocessable Entity', 423: 'Locked',
+    424: 'Failed Dependency', 425: 'Too Early', 426: 'Upgrade Required', 428: 'Precondition Required',
+    429: 'Too Many Requests', 431: 'Request Header Fields Too Large', 451: 'Unavailable For Legal Reasons',
+    500: 'Internal Server Error', 501: 'Not Implemented', 502: 'Bad Gateway', 503: 'Service Unavailable',
+    504: 'Gateway Timeout', 505: 'HTTP Version Not Supported', 506: 'Variant Also Negotiates',
+    507: 'Insufficient Storage', 508: 'Loop Detected', 509: 'Bandwidth Limit Exceeded', 510: 'Not Extended',
+    511: 'Network Authentication Required',
+};
+
+function validateHeaderName(name) {
+    const value = String(name);
+    if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(value)) {
+        throw httpTypeError('ERR_INVALID_HTTP_TOKEN', `Header name must be a valid HTTP token [\"${value}\"]`);
+    }
+}
+
+function validateHeaderValue(name, value) {
+    if (value === undefined) throw httpTypeError('ERR_HTTP_INVALID_HEADER_VALUE', `Invalid value \"undefined\" for header \"${name}\"`);
+    if (/[\0-\x08\x0A-\x1F\x7F]/.test(String(value))) {
+        throw httpTypeError('ERR_INVALID_CHAR', `Invalid character in header content [\"${name}\"]`);
+    }
+}
+
+function httpTypeError(code, message) {
+    const error = new TypeError(message);
+    error.code = code;
+    return error;
 }
 
 function createAssertModule() {
