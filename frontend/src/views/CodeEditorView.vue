@@ -900,6 +900,7 @@ const messages = {
     "ai.reasoning.medium": "中",
     "ai.reasoning.high": "高",
     "ai.reasoning.xhigh": "极高",
+    "ai.reasoning.max": "最大",
     "ai.role.user": "你",
     "ai.role.assistant": "AI",
     "ai.role.tool": "工具",
@@ -1230,6 +1231,7 @@ const messages = {
     "ai.reasoning.medium": "Medium",
     "ai.reasoning.high": "High",
     "ai.reasoning.xhigh": "XHigh",
+    "ai.reasoning.max": "Max",
     "ai.role.user": "You",
     "ai.role.assistant": "AI",
     "ai.role.tool": "Tool",
@@ -1398,7 +1400,7 @@ const languageOptions = [
   ["plaintext", "Plain Text"], ["javascript", "JavaScript"], ["flow", "Flow"], ["typescript", "TypeScript"], ["html", "HTML"], ["vue", "Vue"], ["angular", "Angular"], ["handlebars", "Handlebars"], ["css", "CSS"], ["scss", "SCSS"], ["less", "Less"], ["json", "JSON"], ["jsonc", "JSONC"], ["json5", "JSON5"], ["markdown", "Markdown"], ["mdx", "MDX"], ["graphql", "GraphQL"], ["yaml", "YAML"], ["python", "Python"], ["go", "Go"], ["rust", "Rust"], ["java", "Java"], ["c", "C"], ["cpp", "C++"], ["csharp", "C#"], ["bat", "Batch"], ["dart", "Dart"], ["fsharp", "F#"], ["ini", "INI"], ["kotlin", "Kotlin"], ["php", "PHP"], ["r", "R"], ["ruby", "Ruby"], ["shell", "Shell"], ["powershell", "PowerShell"], ["sql", "SQL"], ["swift", "Swift"], ["xml", "XML"], ["dockerfile", "Dockerfile"], ["lua", "Lua"],
 ].map(([id, label]) => ({ id, label }));
 
-const aiReasoningEfforts = ["default", "low", "medium", "high", "xhigh"];
+const aiReasoningEfforts = ["default", "low", "medium", "high", "xhigh", "max"];
 const renderMarkdown = MarkdownUtils.renderMarkdown;
 const PREVIEW_FRAME_SANDBOX = "allow-forms allow-modals allow-popups allow-scripts";
 const PREVIEW_TYPES = Object.freeze({
