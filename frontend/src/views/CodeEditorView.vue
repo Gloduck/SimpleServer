@@ -293,6 +293,11 @@
               <span>{{ tr('settings.aiBaseUrl') }}</span>
               <input v-model="settings.ai.baseUrl" spellcheck="false" />
             </label>
+            <label class="setting-row">
+              <span>{{ tr('settings.npmRegistryUrl') }}</span>
+              <input v-model="settings.ai.npmRegistryUrl" type="url" spellcheck="false" placeholder="https://registry.npmjs.org" />
+            </label>
+            <small class="setting-hint">{{ tr('settings.npmRegistryHint') }}</small>
             <button type="button" class="setting-action-button" :disabled="aiModelsLoading || !settings.ai.apiKey.trim()" @click="fetchAiModels">
               {{ aiModelsLoading ? tr('settings.aiModelsLoading') : tr('settings.aiFetchModels') }}
             </button>
@@ -664,7 +669,7 @@ const LEGACY_AI_COMPLETE_SHORTCUT = "Ctrl+Shift+Enter";
 const LEGACY_FOLD_ALL_SHORTCUT = "Ctrl+K Ctrl+0";
 const LEGACY_UNFOLD_ALL_SHORTCUT = "Ctrl+K Ctrl+J";
 const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", preview: "Ctrl+Shift+V", toggleSidebar: "Ctrl+B", fold: "Ctrl+Shift+[", unfold: "Ctrl+Shift+]", foldAll: "Ctrl+Alt+[", unfoldAll: "Ctrl+Alt+]", aiComplete: "Ctrl+Alt+Enter" };
-const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", imageModel: "gpt-image-1", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
+const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", npmRegistryUrl: "", completionModel: "gpt-5.4-mini", imageModel: "gpt-image-1", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
 const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
 const DEFAULT_SSH_WHITELIST_TEMPLATE = [
   "pwd", "ls", "cat", "less", "more", "head", "tail", "grep", "egrep", "fgrep", "awk", "sed", "sort", "uniq", "wc", "cut", "tr", "tee", "xargs", "find", "stat", "file", "readlink", "realpath", "basename", "dirname", "tree",
@@ -774,6 +779,8 @@ const messages = {
     "settings.aiApiKey": "API Key",
     "settings.aiApiKeyPlaceholder": "仅保存在当前浏览器 localStorage",
     "settings.aiBaseUrl": "Base URL",
+    "settings.npmRegistryUrl": "自定义 npm 源",
+    "settings.npmRegistryHint": "AI 工具调用传入的 registry_url 优先；未传时使用此设置，留空则使用官方源 https://registry.npmjs.org。",
     "settings.aiFetchModels": "从 API 拉取模型",
     "settings.aiModelsLoading": "正在拉取模型...",
     "settings.aiCompletionModel": "补全模型",
@@ -1102,6 +1109,8 @@ const messages = {
     "settings.aiApiKey": "API Key",
     "settings.aiApiKeyPlaceholder": "Stored only in this browser localStorage",
     "settings.aiBaseUrl": "Base URL",
+    "settings.npmRegistryUrl": "Custom npm Registry",
+    "settings.npmRegistryHint": "A registry_url supplied by the AI tool takes priority. Otherwise this setting is used; leave it empty to use https://registry.npmjs.org.",
     "settings.aiFetchModels": "Fetch Models from API",
     "settings.aiModelsLoading": "Fetching models...",
     "settings.aiCompletionModel": "Completion Model",
@@ -5781,7 +5790,7 @@ function getAiAllToolDefinitions() {
       "This is a trimmed Node-compatible runtime. A supported module name does not mean that the module includes the complete Node.js API. Use only the modules and capabilities explicitly documented by this tool; do not assume that other methods from the standard Node.js API are available.",
       "Provide exactly one of code or entry_file. code is complete module or script source, not an async function body. format may be auto, commonjs, module, umd, or global. When omitted, the format is inferred from the extension, package.json type, and source syntax.",
       "CommonJS returns module.exports. Async generated CommonJS should assign module.exports = main() or leave main().catch(...) as the final executed expression. Do not silently swallow errors: rethrow them or call process.exit(1). ESM supports import, export, named exports, export default, and top-level await. This tool also awaits a thenable default export, and generated ESM should prefer top-level await. Existing workspace CLI entry files may use the conventional main().catch(...) pattern because tracked filesystem operations are drained before completion. UMD returns module.exports when available, otherwise its global export. A global script should expose returned values through globalThis.",
-      "require and import support relative files, JSON, workspace node_modules, npm:package@version specifiers, scoped packages, package subpaths, and absolute HTTP/HTTPS URLs. Supported CDNs include jsDelivr, esm.sh, unpkg, cdnjs, and Skypack. CommonJS, ESM, UMD, and global CDN files are detected automatically, and their remote relative dependencies are resolved recursively. For simple tasks, prefer a compact, version-pinned, browser-compatible single-file CDN build, especially from cdnjs, instead of downloading a large npm dependency tree. Use npm packages only when the task needs their complete module or resource set. Bare package names resolve from workspace node_modules first, then from matching packages declared in dependencies. Existing workspace scripts should use standard bare package imports and declare missing Registry packages through dependencies. Runtime-specific npm: and direct HTTP/HTTPS module specifiers are intended only for generated inline code and should not be written into workspace files unless the user explicitly requests this runtime-specific format. Dependencies prepared before execution must use string literals. Dependency downloads use a preparation-only network budget that is separate from the script execution network budget. registry_url may select a trusted npm-compatible mirror for dependencies and npm: specifiers. Choose a registry likely to be fast and reachable for the current browser regional context; omit it for https://registry.npmjs.org, while https://registry.npmmirror.com is a common option for mainland China. Do not use an untrusted registry or switch registries merely to retry an invalid package name or version.",
+      "require and import support relative files, JSON, workspace node_modules, npm:package@version specifiers, scoped packages, package subpaths, and absolute HTTP/HTTPS URLs. Supported CDNs include jsDelivr, esm.sh, unpkg, cdnjs, and Skypack. CommonJS, ESM, UMD, and global CDN files are detected automatically, and their remote relative dependencies are resolved recursively. For simple tasks, prefer a compact, version-pinned, browser-compatible single-file CDN build, especially from cdnjs, instead of downloading a large npm dependency tree. Use npm packages only when the task needs their complete module or resource set. Bare package names resolve from workspace node_modules first, then from matching packages declared in dependencies. Existing workspace scripts should use standard bare package imports and declare missing Registry packages through dependencies. Runtime-specific npm: and direct HTTP/HTTPS module specifiers are intended only for generated inline code and should not be written into workspace files unless the user explicitly requests this runtime-specific format. Dependencies prepared before execution must use string literals. Dependency downloads use a preparation-only network budget that is separate from the script execution network budget. registry_url may override the user's configured npm Registry with a trusted npm-compatible mirror for dependencies and npm: specifiers. Omit it to use the user's configured Registry, or https://registry.npmjs.org when the user setting is empty.  Do not use an untrusted registry or switch registries merely to retry an invalid package name or version.",
       [
         "Dependency examples:",
         "- Workspace CommonJS: const local = require(\"./helper.js\"); const config = require(\"./config.json\"); const workspacePackage = require(\"lodash\");",
@@ -5830,7 +5839,7 @@ function getAiAllToolDefinitions() {
       env: { type: "object", additionalProperties: { type: "string" }, description: "Non-sensitive environment values exposed through process.env. Values are converted to strings." },
       args: { type: "array", items: { type: "string" }, description: "Command-line arguments available through process.argv.slice(2)." },
       dependencies: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, items: { type: "string" }, description: "Optional npm package specifications for unresolved bare imports, such as jpeg-js@0.4.4. Workspace node_modules remain preferred. Use this only for npm Registry packages; local and HTTP/HTTPS modules are resolved from source imports." },
-      registry_url: { type: "string", description: "Optional trusted npm-compatible Registry base URL used by dependencies and npm: specifiers. Omit it for https://registry.npmjs.org. Choose a reliable mirror appropriate for the current browser regional context, for example https://registry.npmmirror.com in mainland China." },
+      registry_url: { type: "string", description: "Optional trusted npm-compatible Registry base URL used by dependencies and npm: specifiers. This overrides the user's configured npm Registry. Omit it to use the user setting, or https://registry.npmjs.org when that setting is empty." },
       credentials: { type: "array", items: { type: "string" }, description: "Credential Keys to inject into process.env. Pass Keys only, never values. Missing credentials become empty strings." },
       input_files: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Workspace data files that may be read through node:fs. Static import/require modules do not need to be declared again. Up to ${AI_JAVASCRIPT_MAX_FILE_COUNT} entries.`, items: { type: "object", properties: {
         path: { type: "string", description: "Workspace-relative file path." },
@@ -6346,6 +6355,7 @@ function normalizeSettings(value = {}) {
   savedSettings.maxMemoryReadBytes = normalizeMemoryLimit(savedSettings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES);
   savedSettings.maxMemoryWriteBytes = normalizeMemoryLimit(savedSettings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES);
   if (!aiReasoningEfforts.includes(ai.reasoningEffort)) ai.reasoningEffort = defaultAiSettings.reasoningEffort;
+  ai.npmRegistryUrl = String(ai.npmRegistryUrl || "").trim().replace(/\/+$/, "");
   backend.enabled = Boolean(backend.enabled);
   backend.baseUrl = normalizeBackendBaseUrlValue(backend.baseUrl) || defaultBackendSettings.baseUrl;
   if (!sshTerminalThemes[ssh.terminalTheme]) ssh.terminalTheme = defaultSshSettings.terminalTheme;
@@ -7004,7 +7014,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
     const normalizedEnv = normalizeAiJavaScriptEnv(env);
     const normalizedArgs = normalizeAiJavaScriptArgs(args);
     const normalizedDependencies = normalizeAiJavaScriptDependencies(dependencies);
-    const normalizedRegistryUrl = normalizeAiJavaScriptRegistryUrl(registryUrl);
+    const normalizedRegistryUrl = normalizeAiJavaScriptRegistryUrl(String(registryUrl || "").trim() || settings.ai.npmRegistryUrl);
     const normalizedInputs = normalizeAiJavaScriptInputs(inputFiles);
     const normalizedOutputFiles = normalizeAiJavaScriptOutputFiles(outputFiles);
     const normalizedOutputDirectories = normalizeAiJavaScriptOutputDirectories(outputDirectories);
