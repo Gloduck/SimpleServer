@@ -73,13 +73,14 @@ function createRunScriptPreparer(config = {}) {
         input,
         env,
         args,
+        dependencies = [],
         inputFiles = [],
         signal,
     } = {}) {
         if (code !== undefined && entryFile) throw prepareError('INVALID_ENTRY', 'code and entryFile are mutually exclusive');
         if (code === undefined && !entryFile) throw prepareError('ENTRY_REQUIRED', 'code or entryFile is required');
 
-        const context = createContext(signal || defaultSignal, resolveFrom);
+        const context = createContext(signal || defaultSignal, resolveFrom, dependencies);
         throwIfAborted(context.signal);
         await loadInputFiles(context, inputFiles);
 
@@ -138,10 +139,11 @@ function createRunScriptPreparer(config = {}) {
         };
     }
 
-    function createContext(signal, resolveFrom) {
+    function createContext(signal, resolveFrom, dependencies) {
         return {
             signal,
             resolveFrom: normalizeWorkspacePath(resolveFrom || ''),
+            dependencies: normalizeDeclaredDependencies(dependencies),
             files: new Map(),
             modules: new Map(),
             modulePaths: new Map(),
@@ -265,6 +267,13 @@ function createRunScriptPreparer(config = {}) {
 
         const packageTarget = await resolveLocalPackage(context, specifier, parent, parent.depth + 1);
         if (!packageTarget) {
+            const parsed = parseBarePackageSpecifier(specifier);
+            const version = context.dependencies.get(parsed.name);
+            if (version) {
+                const declaredSpecifier = `npm:${parsed.name}@${version}${parsed.subpath ? `/${parsed.subpath}` : ''}`;
+                const declaredTarget = await resolveNpmSpecifier(context, declaredSpecifier, parent, parent.depth + 1);
+                return displayVirtualPath(declaredTarget);
+            }
             throw prepareError('MODULE_NOT_FOUND', `Cannot find package '${specifier}'`, {
                 specifier,
                 parent: parent.path,
@@ -872,6 +881,30 @@ function parseBarePackageSpecifier(specifier) {
     if (!parsed.name) throw prepareError('INVALID_PACKAGE_SPECIFIER', `Invalid package specifier: ${specifier}`, {specifier});
     validatePackageName(parsed.name, specifier);
     return {name: parsed.name, subpath: normalizePackageSubpath(parsed.subpath, specifier)};
+}
+
+function normalizeDeclaredDependencies(dependencies) {
+    if (dependencies == null) return new Map();
+    if (!Array.isArray(dependencies)) throw prepareError('INVALID_DEPENDENCIES', 'dependencies must be an array');
+    const result = new Map();
+    for (const dependency of dependencies) {
+        const value = String(dependency || '').trim();
+        if (!value) throw prepareError('INVALID_NPM_SPECIFIER', 'Dependency specifier is required', {specifier: value});
+        const parsed = parseNpmSpecifier(value.startsWith('npm:') ? value : `npm:${value}`);
+        if (parsed.subpath) {
+            throw prepareError('INVALID_NPM_SPECIFIER', `Dependency must reference a package root: ${dependency}`, {specifier: value});
+        }
+        const existing = result.get(parsed.name);
+        if (existing && existing !== parsed.version) {
+            throw prepareError('PACKAGE_VERSION_CONFLICT', `Conflicting dependency versions: ${parsed.name}@${existing} and ${parsed.name}@${parsed.version}`, {
+                name: parsed.name,
+                version: parsed.version,
+                existingVersion: existing,
+            });
+        }
+        result.set(parsed.name, parsed.version);
+    }
+    return result;
 }
 
 function splitPackageSpecifier(value, allowVersion = true) {

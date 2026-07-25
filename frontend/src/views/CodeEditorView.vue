@@ -5769,7 +5769,7 @@ function getAiAllToolDefinitions() {
       "This is a trimmed Node-compatible runtime. A supported module name does not mean that the module includes the complete Node.js API. Use only the modules and capabilities explicitly documented by this tool; do not assume that other methods from the standard Node.js API are available.",
       "Provide exactly one of code or entry_file. code is complete module or script source, not an async function body. format may be auto, commonjs, module, umd, or global. When omitted, the format is inferred from the extension, package.json type, and source syntax.",
       "CommonJS returns module.exports. Async CommonJS must assign module.exports = main() or leave main().catch(...) as the final executed expression; never launch an unreturned async IIFE. Do not silently swallow errors: rethrow them or call process.exit(1). ESM supports import, export, named exports, export default, and top-level await. This tool also awaits a thenable default export, but top-level await is preferred; never launch an unawaited async IIFE. UMD returns module.exports when available, otherwise its global export. A global script should expose returned values through globalThis.",
-      "require and import support relative files, JSON, workspace node_modules, npm:package@version specifiers, scoped packages, package subpaths, and absolute HTTP/HTTPS URLs. Supported CDNs include jsDelivr, esm.sh, unpkg, cdnjs, and Skypack. CommonJS, ESM, UMD, and global CDN files are detected automatically, and their remote relative dependencies are resolved recursively. For simple tasks, prefer a compact, version-pinned, browser-compatible single-file CDN build, especially from cdnjs, instead of downloading a large npm dependency tree. Use npm packages only when the task needs their complete module or resource set. Bare package names resolve only from workspace node_modules; use an npm: specifier to download a Registry package. Dependencies prepared before execution must use string literals. Dependency downloads use a preparation-only network budget that is separate from the script execution network budget.",
+      "require and import support relative files, JSON, workspace node_modules, npm:package@version specifiers, scoped packages, package subpaths, and absolute HTTP/HTTPS URLs. Supported CDNs include jsDelivr, esm.sh, unpkg, cdnjs, and Skypack. CommonJS, ESM, UMD, and global CDN files are detected automatically, and their remote relative dependencies are resolved recursively. For simple tasks, prefer a compact, version-pinned, browser-compatible single-file CDN build, especially from cdnjs, instead of downloading a large npm dependency tree. Use npm packages only when the task needs their complete module or resource set. Bare package names resolve from workspace node_modules first, then from matching packages declared in dependencies. Use dependencies for existing scripts with bare package imports, or an npm: specifier in generated code, to download a Registry package. Dependencies prepared before execution must use string literals. Dependency downloads use a preparation-only network budget that is separate from the script execution network budget.",
       [
         "Dependency examples:",
         "- CommonJS: const local = require(\"./helper.js\"); const config = require(\"./config.json\"); const workspacePackage = require(\"lodash\"); const registryPackage = require(\"npm:lodash@4.17.21\"); const scopedSubpath = require(\"npm:@scope/package@1.2.3/subpath\"); const compactRemote = require(\"https://cdnjs.cloudflare.com/ajax/libs/dayjs/1.11.13/dayjs.min.js\");",
@@ -5815,6 +5815,7 @@ function getAiAllToolDefinitions() {
       input: { type: "object", description: "Optional JSON object exposed to the script as the global input value." },
       env: { type: "object", additionalProperties: { type: "string" }, description: "Non-sensitive environment values exposed through process.env. Values are converted to strings." },
       args: { type: "array", items: { type: "string" }, description: "Command-line arguments available through process.argv.slice(2)." },
+      dependencies: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, items: { type: "string" }, description: "Optional npm package specifications for unresolved bare imports, such as jpeg-js@0.4.4. Workspace node_modules remain preferred. Use this only for npm Registry packages; local and HTTP/HTTPS modules are resolved from source imports." },
       credentials: { type: "array", items: { type: "string" }, description: "Credential Keys to inject into process.env. Pass Keys only, never values. Missing credentials become empty strings." },
       input_files: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Workspace data files that may be read through node:fs. Static import/require modules do not need to be declared again. Up to ${AI_JAVASCRIPT_MAX_FILE_COUNT} entries.`, items: { type: "object", properties: {
         path: { type: "string", description: "Workspace-relative file path." },
@@ -6964,7 +6965,7 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
   return { summary: `${results.length} match(es)`, results };
 }
 
-async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolve_from: resolveFrom, cwd, input = {}, env, args, credentials, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs } = {}, signal, session = getActiveAiSession()) {
+async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolve_from: resolveFrom, cwd, input = {}, env, args, dependencies, credentials, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs } = {}, signal, session = getActiveAiSession()) {
   throwIfAiAborted(signal);
   const startedAt = performance.now();
   const logs = [];
@@ -6987,6 +6988,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
     const normalizedCwd = normalizeAiJavaScriptDirectory(cwd, "cwd");
     const normalizedEnv = normalizeAiJavaScriptEnv(env);
     const normalizedArgs = normalizeAiJavaScriptArgs(args);
+    const normalizedDependencies = normalizeAiJavaScriptDependencies(dependencies);
     const normalizedInputs = normalizeAiJavaScriptInputs(inputFiles);
     const normalizedOutputFiles = normalizeAiJavaScriptOutputFiles(outputFiles);
     const normalizedOutputDirectories = normalizeAiJavaScriptOutputDirectories(outputDirectories);
@@ -7031,6 +7033,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
       input,
       env: { ...normalizedEnv, ...credentialSelection.values },
       args: normalizedArgs,
+      dependencies: normalizedDependencies,
       inputFiles: loadedInputs.map((file) => ({ path: file.path, type: file.type, content: file.content, mimeType: file.mimeType })),
       signal,
     }, {
@@ -7290,6 +7293,12 @@ function normalizeAiJavaScriptArgs(value) {
     });
   }
   return value.map(String);
+}
+
+function normalizeAiJavaScriptDependencies(value) {
+  const dependencies = normalizeAiJavaScriptArray(value, "dependencies").map((item) => String(item || "").trim());
+  if (dependencies.some((item) => !item)) throw createAiJavaScriptError("INVALID_NPM_SPECIFIER", "dependencies entries must be non-empty npm package specifications", { phase: "preflight" });
+  return [...new Set(dependencies)];
 }
 
 function createAiRunScriptWorkspace(workspace) {

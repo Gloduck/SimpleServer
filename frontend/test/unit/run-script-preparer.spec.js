@@ -206,6 +206,64 @@ test('npm: 包解析版本、挂载传递依赖并支持常见 CommonJS 包形�
     expect(result.files.some((path) => path.endsWith('node_modules/array-helper/index.js'))).toBe(true);
 });
 
+test('dependencies 为未安装的裸包导入提供 npm 下载回退', async ({page}) => {
+    const result = await page.evaluate(async () => {
+        const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
+        const calls = [];
+        const packageDownloader = {
+            async download(name, version) {
+                calls.push(`${name}@${version}`);
+                return {
+                    name,
+                    version: '0.4.4',
+                    manifest: {name, version: '0.4.4', main: 'index.js'},
+                    files: [
+                        {path: 'package.json', content: JSON.stringify({name, version: '0.4.4', main: 'index.js'})},
+                        {path: 'index.js', content: 'module.exports = {encode: (value) => `encoded:${value}`};'},
+                    ],
+                };
+            },
+        };
+        const prepared = await prepareRunScript({
+            format: 'module',
+            code: 'import jpeg from "jpeg-js"; export default jpeg.encode("image");',
+            dependencies: ['jpeg-js@0.4.4'],
+        }, {packageDownloader});
+        const executed = await new NodeWorker(prepared).run();
+        return {exports: {...executed.exports}, calls, code: prepared.code};
+    });
+
+    expect(result.exports.default).toBe('encoded:image');
+    expect(result.calls).toEqual(['jpeg-js@0.4.4']);
+    expect(result.code).toContain('/__runscript__/packages/jpeg-js@0.4.4-');
+});
+
+test('dependencies 不覆盖工作区已安装的裸包', async ({page}) => {
+    const result = await page.evaluate(async () => {
+        const {FileSystem, MemoryProvider, NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
+        const workspace = new FileSystem({
+            provider: new MemoryProvider({files: [
+                {path: 'project/main.cjs', content: 'module.exports = require("example-package");'},
+                {path: 'project/node_modules/example-package/package.json', content: '{"name":"example-package","version":"1.0.0","main":"index.js"}'},
+                {path: 'project/node_modules/example-package/index.js', content: 'module.exports = "local";'},
+            ]}),
+            policy: null,
+        });
+        let downloads = 0;
+        const prepared = await prepareRunScript({
+            entryFile: 'project/main.cjs',
+            dependencies: ['example-package@2.0.0'],
+        }, {
+            workspace,
+            packageDownloader: {async download() { downloads += 1; throw new Error('Unexpected download'); }},
+        });
+        const executed = await new NodeWorker(prepared).run();
+        return {exports: executed.exports, downloads};
+    });
+
+    expect(result).toEqual({exports: 'local', downloads: 0});
+});
+
 test('npm: 相同名称和版本的共享依赖提升后只挂载一次', async ({page}) => {
     const result = await page.evaluate(async () => {
         const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
