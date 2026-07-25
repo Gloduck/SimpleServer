@@ -8390,7 +8390,8 @@ function getTreeIconClass(node, collapsed = false) {
   .code-editor-view.app-shell.side-panel-hidden { grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .code-editor-view .activity-bar { grid-row: 1 / -1; }
   .code-editor-view .editor-shell { grid-column: 2; grid-row: 1; }
-  .code-editor-view .side-panel { z-index: 2; grid-column: 2; grid-row: 1; border-top: 0; border-right: 0; }
+  .code-editor-view.app-shell:not(.side-panel-hidden) .editor-shell { display: none; }
+  .code-editor-view .side-panel { z-index: 2; grid-column: 2; grid-row: 1; width: 100%; height: 100%; border-top: 0; border-right: 0; }
   .code-editor-view.side-panel-hidden .side-panel { display: none; }
   .code-editor-view .side-panel-resizer { display: none; }
   .code-editor-view .activity-button { width: 44px; height: 44px; }
