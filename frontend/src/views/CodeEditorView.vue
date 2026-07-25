@@ -664,7 +664,7 @@ const LEGACY_AI_COMPLETE_SHORTCUT = "Ctrl+Shift+Enter";
 const LEGACY_FOLD_ALL_SHORTCUT = "Ctrl+K Ctrl+0";
 const LEGACY_UNFOLD_ALL_SHORTCUT = "Ctrl+K Ctrl+J";
 const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", preview: "Ctrl+Shift+V", toggleSidebar: "Ctrl+B", fold: "Ctrl+Shift+[", unfold: "Ctrl+Shift+]", foldAll: "Ctrl+Alt+[", unfoldAll: "Ctrl+Alt+]", aiComplete: "Ctrl+Alt+Enter" };
-const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", imageModel: "gpt-image-1", agentModel: "gpt-5.5", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
+const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", completionModel: "gpt-5.4-mini", imageModel: "gpt-image-1", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
 const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
 const DEFAULT_SSH_WHITELIST_TEMPLATE = [
   "pwd", "ls", "cat", "less", "more", "head", "tail", "grep", "egrep", "fgrep", "awk", "sed", "sort", "uniq", "wc", "cut", "tr", "tee", "xargs", "find", "stat", "file", "readlink", "realpath", "basename", "dirname", "tree",
@@ -1599,7 +1599,7 @@ const aiPrompt = computed({
   set: (value) => { getActiveAiSession().prompt = value; },
 });
 const aiSessionAgentModel = computed({
-  get: () => activeAiSession.value?.agentModel || settings.ai.agentModel,
+  get: () => activeAiSession.value?.agentModel || getAgentModels()[0] || "",
   set: (value) => { getActiveAiSession().agentModel = String(value || "").trim(); },
 });
 const aiSessionReasoningEffort = computed({
@@ -1618,13 +1618,7 @@ const searchResults = ref([]);
 const searchBusy = ref(false);
 const searchSearched = ref(false);
 let searchSerial = 0;
-const aiAgentModelOptions = computed(() => {
-  const configured = parseCommaList(settings.ai.agentModels);
-  return uniqueStrings([
-    ...(configured.length ? configured : [settings.ai.agentModel, defaultAiSettings.agentModel]),
-    ...aiSessions.map((session) => session.agentModel),
-  ]);
-});
+const aiAgentModelOptions = computed(() => uniqueStrings([...getAgentModels(), ...aiSessions.map((session) => session.agentModel)]));
 const aiModelOptions = computed(() => uniqueStrings([settings.ai.completionModel, settings.ai.imageModel, ...aiAgentModelOptions.value, defaultAiSettings.completionModel, defaultAiSettings.imageModel, ...aiAvailableModels.value]));
 const aiContextLength = computed(() => formatAiUsage(activeAiSession.value?.contextUsage));
 const canResetAiConversation = computed(() => Boolean(aiPrompt.value.trim() || aiMessages.value.length || getAiTouchedFiles().length));
@@ -1688,7 +1682,6 @@ const dialogIconClass = computed(() => {
 });
 
 watch(() => settings.locale, () => { document.documentElement.lang = settings.locale; });
-watch(() => settings.ai.agentModels, syncSelectedAgentModel);
 watch(() => aiMessages.value.length, () => { nextTick(scrollAiMessagesToBottom); });
 watch(activeSshTerminalId, () => { nextTick(attachActiveSshTerminal); });
 watch(activeAiSessionId, () => { nextTick(scrollAiMessagesToBottom); });
@@ -4793,23 +4786,21 @@ function parseCommaList(value) {
   return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
 }
 
-function syncSelectedAgentModel() {
+function getAgentModels() {
   const models = parseCommaList(settings.ai.agentModels);
-  if (models.length && !models.includes(settings.ai.agentModel)) settings.ai.agentModel = models[0];
+  return models.length ? models : parseCommaList(defaultAiSettings.agentModels);
 }
 
 function normalizeAgentModelsInput() {
   const models = uniqueStrings(parseCommaList(settings.ai.agentModels));
   if (!models.length) return;
   settings.ai.agentModels = models.join(",");
-  syncSelectedAgentModel();
 }
 
 function addAgentModelFromSelect() {
   if (!agentModelToAdd.value) return;
   const models = uniqueStrings([...parseCommaList(settings.ai.agentModels), agentModelToAdd.value]);
   settings.ai.agentModels = models.join(",");
-  if (!settings.ai.agentModel || !models.includes(settings.ai.agentModel)) settings.ai.agentModel = agentModelToAdd.value;
   agentModelToAdd.value = "";
 }
 
@@ -5051,7 +5042,6 @@ async function fetchAiModels() {
     aiAvailableModels.value = models;
     if (models.length) {
       if (!settings.ai.completionModel.trim()) settings.ai.completionModel = models[0];
-      if (!settings.ai.agentModel.trim()) settings.ai.agentModel = models[0];
       if (!parseCommaList(settings.ai.agentModels).length) settings.ai.agentModels = models[0];
     }
     setStatus(tr("status.aiModelsLoaded", { count: models.length }), getAiBaseUrl());
@@ -5087,7 +5077,7 @@ function createAiSession(options = {}) {
   return {
     id: `ai-session-${Date.now()}-${aiSessionSerial}`,
     title: tr("ai.defaultSessionTitle", { count: aiSessionSerial }),
-    agentModel: String(options.agentModel || settings.ai.agentModel || defaultAiSettings.agentModel).trim(),
+    agentModel: String(options.agentModel || getAgentModels()[0] || "").trim(),
     reasoningEffort: aiReasoningEfforts.includes(reasoningEffort) ? reasoningEffort : defaultAiSettings.reasoningEffort,
     prompt: "",
     messages: [],
