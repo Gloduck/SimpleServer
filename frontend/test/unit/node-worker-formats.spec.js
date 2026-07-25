@@ -56,6 +56,38 @@ test('ESM 从 node_modules 按 exports 和 type 加载包', async ({page}) => {
     expect(result.exports.default).toBe('esm-package');
 });
 
+test('包子路径按嵌套 exports 条件分别解析 CommonJS 和 ESM', async ({page}) => {
+    const files = [
+        {
+            path: 'workspace/node_modules/example/package.json',
+            content: JSON.stringify({
+                type: 'module',
+                exports: {
+                    './feature': {
+                        import: {types: './dist/esm/feature.d.ts', default: './dist/esm/feature.js'},
+                        require: {types: './dist/commonjs/feature.d.ts', default: './dist/commonjs/feature.cjs'},
+                    },
+                },
+            }),
+        },
+        {path: 'workspace/node_modules/example/dist/esm/feature.js', content: 'export default "esm-subpath";'},
+        {path: 'workspace/node_modules/example/dist/commonjs/feature.cjs', content: 'module.exports = "commonjs-subpath";'},
+    ];
+    const [commonjs, esm] = await Promise.all([
+        runNodeWorker(page, {
+            entryPath: 'workspace/src/main.cjs',
+            files: [{path: 'workspace/src/main.cjs', content: 'module.exports = require("example/feature");'}, ...files],
+        }),
+        runNodeWorker(page, {
+            entryPath: 'workspace/src/main.mjs',
+            files: [{path: 'workspace/src/main.mjs', content: 'import value from "example/feature"; export default value;'}, ...files],
+        }),
+    ]);
+
+    expect(commonjs.exports).toBe('commonjs-subpath');
+    expect(esm.exports.default).toBe('esm-subpath');
+});
+
 test('CommonJS 加载相对模块、扩展名省略和 JSON', async ({page}) => {
     const result = await runNodeWorker(page, {
         entryPath: 'workspace/main.cjs',

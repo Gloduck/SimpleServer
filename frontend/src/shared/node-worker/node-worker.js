@@ -624,18 +624,25 @@ class NodeWorker {
         const candidates = [];
         if (specifier.startsWith('/') || specifier.startsWith('./') || specifier.startsWith('../')) {
             const base = specifier.startsWith('/') ? '' : getParentFilePath(parentPath);
-            candidates.push(resolveLogicalPath(specifier, base));
+            candidates.push({path: resolveLogicalPath(specifier, base), subpath: ''});
         } else {
+            const packageSpecifier = splitPackageSpecifier(specifier);
             let directory = getParentFilePath(parentPath);
             while (true) {
-                candidates.push(joinFilePath(directory, 'node_modules', specifier));
+                candidates.push({
+                    path: joinFilePath(directory, 'node_modules', packageSpecifier.name),
+                    subpath: packageSpecifier.subpath,
+                });
                 if (!directory) break;
                 directory = getParentFilePath(directory);
             }
         }
 
         for (const candidate of candidates) {
-            const resolved = this.resolveModuleCandidate(candidate, mode, new Set());
+            const visited = new Set();
+            const resolved = candidate.subpath
+                ? this.resolvePackageSubpath(candidate.path, candidate.subpath, mode, visited)
+                : this.resolveModuleCandidate(candidate.path, mode, visited);
             if (resolved) return resolved;
         }
         throw nodeWorkerError('MODULE_NOT_FOUND', `Cannot find module '${specifier}' from ${displayPath(parentPath)}`, {
@@ -675,6 +682,25 @@ class NodeWorker {
             if (this.isFile(candidate)) return candidate;
         }
         return null;
+    }
+
+    resolvePackageSubpath(root, subpath, mode, visited) {
+        const normalizedRoot = normalizeFilePath(root);
+        if (!this.isDirectory(normalizedRoot)) return null;
+        const packagePath = joinFilePath(normalizedRoot, 'package.json');
+        if (this.isFile(packagePath)) {
+            try {
+                const manifest = JSON.parse(this.readModuleText(packagePath));
+                const target = packageExport(manifest, `./${subpath}`, mode);
+                if (target) {
+                    const resolved = this.resolveModuleCandidate(joinFilePath(normalizedRoot, target), mode, visited);
+                    if (resolved) return resolved;
+                }
+            } catch (error) {
+                if (error?.code) throw error;
+            }
+        }
+        return this.resolveModuleCandidate(joinFilePath(normalizedRoot, subpath), mode, visited);
     }
 
     isFile(path) {
@@ -978,17 +1004,56 @@ function isJavaScriptFile(file) {
 }
 
 function packageEntry(manifest, mode) {
-    const exports = manifest?.exports;
-    if (typeof exports === 'string') return exports;
-    if (exports && typeof exports === 'object') {
-        const root = exports['.'] || exports;
-        if (typeof root === 'string') return root;
-        if (root && typeof root === 'object') {
-            const value = root[mode] || root.default || root.require || root.import;
-            if (typeof value === 'string') return value;
-        }
-    }
+    const target = packageExport(manifest, '.', mode);
+    if (target) return target;
     return typeof manifest?.main === 'string' ? manifest.main : '';
+}
+
+function packageExport(manifest, subpath, mode) {
+    const exports = manifest?.exports;
+    if (!exports) return '';
+    const target = exports && typeof exports === 'object' && !Array.isArray(exports)
+        && Object.keys(exports).some((key) => key.startsWith('.'))
+        ? exports[subpath]
+        : subpath === '.' ? exports : undefined;
+    return conditionalPackageExport(target, mode);
+}
+
+function conditionalPackageExport(target, mode) {
+    if (typeof target === 'string') return target;
+    if (Array.isArray(target)) {
+        for (const value of target) {
+            const resolved = conditionalPackageExport(value, mode);
+            if (resolved) return resolved;
+        }
+        return '';
+    }
+    if (!target || typeof target !== 'object') return '';
+    const conditions = mode === 'import'
+        ? ['import', 'browser', 'default', 'require']
+        : ['require', 'browser', 'default', 'import'];
+    for (const condition of conditions) {
+        const resolved = conditionalPackageExport(target[condition], mode);
+        if (resolved) return resolved;
+    }
+    return '';
+}
+
+function splitPackageSpecifier(specifier) {
+    const value = String(specifier || '');
+    if (value.startsWith('@')) {
+        const scopeEnd = value.indexOf('/');
+        const subpathStart = scopeEnd === -1 ? -1 : value.indexOf('/', scopeEnd + 1);
+        return {
+            name: subpathStart === -1 ? value : value.slice(0, subpathStart),
+            subpath: subpathStart === -1 ? '' : value.slice(subpathStart + 1),
+        };
+    }
+    const subpathStart = value.indexOf('/');
+    return {
+        name: subpathStart === -1 ? value : value.slice(0, subpathStart),
+        subpath: subpathStart === -1 ? '' : value.slice(subpathStart + 1),
+    };
 }
 
 function applyReplacements(source, replacements) {
