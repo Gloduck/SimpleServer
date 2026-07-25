@@ -264,6 +264,34 @@ test('dependencies 不覆盖工作区已安装的裸包', async ({page}) => {
     expect(result).toEqual({exports: 'local', downloads: 0});
 });
 
+test('自定义 registryUrl 用于 npm 依赖元数据请求', async ({page}) => {
+    const result = await page.evaluate(async () => {
+        const {prepareRunScript} = globalThis.runtimeHarness;
+        let requestedUrl = '';
+        let errorCode = '';
+        try {
+            await prepareRunScript({
+                format: 'commonjs',
+                code: 'module.exports = require("npm:example@1.0.0");',
+            }, {
+                registryUrl: 'https://registry.example.test/npm/',
+                fetch: async (url) => {
+                    requestedUrl = String(url);
+                    return new Response(JSON.stringify({name: 'example', versions: {}}));
+                },
+            });
+        } catch (error) {
+            errorCode = error.code;
+        }
+        return {requestedUrl, errorCode};
+    });
+
+    expect(result).toEqual({
+        requestedUrl: 'https://registry.example.test/npm/example',
+        errorCode: 'PACKAGE_VERSION_NOT_FOUND',
+    });
+});
+
 test('npm: 相同名称和版本的共享依赖提升后只挂载一次', async ({page}) => {
     const result = await page.evaluate(async () => {
         const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;

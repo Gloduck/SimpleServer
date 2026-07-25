@@ -850,6 +850,9 @@ function runNodeCallback(callback, operation) {
 
 function createNodeFsPromisesModule(fileSystem, Buffer, getCwd) {
     return {
+        async access(path) {
+            await fileSystem.stat(resolveNodeFsPath(path, getCwd()));
+        },
         async readFile(path, options) {
             const normalized = resolveNodeFsPath(path, getCwd());
             const encoding = getNodeFsEncoding(options);

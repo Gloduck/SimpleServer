@@ -54,6 +54,7 @@ function createRunScriptPreparer(config = {}) {
         workspace = null,
         fetch: configuredFetch = globalThis.fetch,
         store = dependencyStore,
+        registryUrl,
         packageDownloader: configuredPackageDownloader = null,
         limits: configuredLimits = {},
         signal: defaultSignal,
@@ -61,7 +62,7 @@ function createRunScriptPreparer(config = {}) {
     const fetch = typeof configuredFetch === 'function' ? configuredFetch.bind(globalThis) : null;
     const limits = {...DEFAULT_LIMITS, ...configuredLimits};
     const packageDownloader = configuredPackageDownloader || (fetch
-        ? new PackageDownloader({fetch, store, limits: configuredLimits, signal: defaultSignal})
+        ? new PackageDownloader({fetch, store, registryUrl, limits: configuredLimits, signal: defaultSignal})
         : null);
 
     async function prepare({

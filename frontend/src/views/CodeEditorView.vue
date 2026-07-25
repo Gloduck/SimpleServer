@@ -5574,6 +5574,7 @@ function getAgentInstructions() {
   const instructions = [
     "You are an autonomous coding assistant inside a browser-based Monaco editor.",
     "You run in a browser sandbox, not on the user's local machine. Be accurate about what you can and cannot access.",
+    getBrowserRegionalContextInstruction(),
     "Be concise, direct, and answer the user's request without unnecessary preamble or postamble.",
     "Before changing code, understand the surrounding conventions and follow the existing style, patterns, naming, and libraries.",
     "Do not assume a library or framework is available just because it is common; rely on what the project already uses.",
@@ -5589,6 +5590,17 @@ function getAgentInstructions() {
   const agentsMd = getRootAgentsMdContent();
   if (agentsMd) instructions.push(formatAgentsMdInstructions(agentsMd));
   return instructions.join(" ");
+}
+
+function getBrowserRegionalContextInstruction() {
+  const now = new Date();
+  const resolved = Intl.DateTimeFormat().resolvedOptions();
+  const offsetMinutes = -now.getTimezoneOffset();
+  const offsetSign = offsetMinutes >= 0 ? "+" : "-";
+  const offsetHours = String(Math.floor(Math.abs(offsetMinutes) / 60)).padStart(2, "0");
+  const offsetRemainder = String(Math.abs(offsetMinutes) % 60).padStart(2, "0");
+  const languages = Array.from(new Set([...(navigator.languages || []), navigator.language].filter(Boolean)));
+  return `Current browser regional context: local time ${now.toLocaleString()}; UTC time ${now.toISOString()}; time zone ${resolved.timeZone || "unknown"}; UTC offset ${offsetSign}${offsetHours}:${offsetRemainder}; locale ${resolved.locale || navigator.language || "unknown"}; preferred languages ${languages.join(", ") || "unknown"}. These browser-derived values are approximate regional hints, not precise geolocation.`;
 }
 
 function getRootAgentsMdContent() {
@@ -5769,7 +5781,7 @@ function getAiAllToolDefinitions() {
       "This is a trimmed Node-compatible runtime. A supported module name does not mean that the module includes the complete Node.js API. Use only the modules and capabilities explicitly documented by this tool; do not assume that other methods from the standard Node.js API are available.",
       "Provide exactly one of code or entry_file. code is complete module or script source, not an async function body. format may be auto, commonjs, module, umd, or global. When omitted, the format is inferred from the extension, package.json type, and source syntax.",
       "CommonJS returns module.exports. Async CommonJS must assign module.exports = main() or leave main().catch(...) as the final executed expression; never launch an unreturned async IIFE. Do not silently swallow errors: rethrow them or call process.exit(1). ESM supports import, export, named exports, export default, and top-level await. This tool also awaits a thenable default export, but top-level await is preferred; never launch an unawaited async IIFE. UMD returns module.exports when available, otherwise its global export. A global script should expose returned values through globalThis.",
-      "require and import support relative files, JSON, workspace node_modules, npm:package@version specifiers, scoped packages, package subpaths, and absolute HTTP/HTTPS URLs. Supported CDNs include jsDelivr, esm.sh, unpkg, cdnjs, and Skypack. CommonJS, ESM, UMD, and global CDN files are detected automatically, and their remote relative dependencies are resolved recursively. For simple tasks, prefer a compact, version-pinned, browser-compatible single-file CDN build, especially from cdnjs, instead of downloading a large npm dependency tree. Use npm packages only when the task needs their complete module or resource set. Bare package names resolve from workspace node_modules first, then from matching packages declared in dependencies. Existing workspace scripts should use standard bare package imports and declare missing Registry packages through dependencies. Runtime-specific npm: and direct HTTP/HTTPS module specifiers are intended only for generated inline code and should not be written into workspace files unless the user explicitly requests this runtime-specific format. Dependencies prepared before execution must use string literals. Dependency downloads use a preparation-only network budget that is separate from the script execution network budget.",
+      "require and import support relative files, JSON, workspace node_modules, npm:package@version specifiers, scoped packages, package subpaths, and absolute HTTP/HTTPS URLs. Supported CDNs include jsDelivr, esm.sh, unpkg, cdnjs, and Skypack. CommonJS, ESM, UMD, and global CDN files are detected automatically, and their remote relative dependencies are resolved recursively. For simple tasks, prefer a compact, version-pinned, browser-compatible single-file CDN build, especially from cdnjs, instead of downloading a large npm dependency tree. Use npm packages only when the task needs their complete module or resource set. Bare package names resolve from workspace node_modules first, then from matching packages declared in dependencies. Existing workspace scripts should use standard bare package imports and declare missing Registry packages through dependencies. Runtime-specific npm: and direct HTTP/HTTPS module specifiers are intended only for generated inline code and should not be written into workspace files unless the user explicitly requests this runtime-specific format. Dependencies prepared before execution must use string literals. Dependency downloads use a preparation-only network budget that is separate from the script execution network budget. registry_url may select a trusted npm-compatible mirror for dependencies and npm: specifiers. Choose a registry likely to be fast and reachable for the current browser regional context; omit it for https://registry.npmjs.org, while https://registry.npmmirror.com is a common option for mainland China. Do not use an untrusted registry or switch registries merely to retry an invalid package name or version.",
       [
         "Dependency examples:",
         "- Workspace CommonJS: const local = require(\"./helper.js\"); const config = require(\"./config.json\"); const workspacePackage = require(\"lodash\");",
@@ -5780,7 +5792,7 @@ function getAiAllToolDefinitions() {
       ].join("\n"),
       "input is available as the global input value. env and credentials are exposed through process.env; credentials override matching env entries and missing credentials become empty strings. Read args with process.argv.slice(2). process.cwd() and relative node:fs paths use cwd.",
       "Workspace modules referenced by static import or require are loaded automatically. Declare ordinary data files read through node:fs or node:fs/promises in input_files. The virtual file system allows temporary files, but after execution only changed files within output_files and output_directories are extracted; all other temporary files are discarded. Outputs are staged in the editor and reach disk only when the user saves them. File deletion and empty-directory output are not supported.",
-      "node:fs is trimmed. It exposes promises, readFileSync, writeFileSync, statSync, existsSync, readdirSync, readFile, writeFile, createWriteStream, and a compatibility-only mkdirSync that accepts recursive directory preparation while writes create missing parents automatically. node:fs/promises exposes readFile, writeFile, stat, readdir, mkdir, unlink, and rm. Unsupported file APIs include rename, createReadStream, file watchers, permission changes, and file-descriptor operations.",
+      "node:fs is trimmed. It exposes promises, readFileSync, writeFileSync, statSync, existsSync, readdirSync, readFile, writeFile, createWriteStream, and a compatibility-only mkdirSync that accepts recursive directory preparation while writes create missing parents automatically. node:fs/promises exposes access, readFile, writeFile, stat, readdir, mkdir, unlink, and rm. Unsupported file APIs include rename, createReadStream, file watchers, permission changes, and file-descriptor operations.",
       "Do not rely on mkdirSync to declare extracted output directories. Declare files with known names in output_files, or declare output_directories for dynamically named child files. Only changed files within the declared output scope are extracted; all other temporary files are discarded after execution.",
       "During script execution, fetch, XMLHttpRequest, node:http, and node:https share request-count, per-response-size, cumulative-download-size, and timeout limits. Requests automatically use RequestProxy when the backend is available and otherwise use the browser network directly.",
       "Network support does not mean that every target is reachable. Direct browser requests remain subject to CORS, DNS, TLS, and browser security policies. The backend proxy can bypass some CORS restrictions.",
@@ -5818,6 +5830,7 @@ function getAiAllToolDefinitions() {
       env: { type: "object", additionalProperties: { type: "string" }, description: "Non-sensitive environment values exposed through process.env. Values are converted to strings." },
       args: { type: "array", items: { type: "string" }, description: "Command-line arguments available through process.argv.slice(2)." },
       dependencies: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, items: { type: "string" }, description: "Optional npm package specifications for unresolved bare imports, such as jpeg-js@0.4.4. Workspace node_modules remain preferred. Use this only for npm Registry packages; local and HTTP/HTTPS modules are resolved from source imports." },
+      registry_url: { type: "string", description: "Optional trusted npm-compatible Registry base URL used by dependencies and npm: specifiers. Omit it for https://registry.npmjs.org. Choose a reliable mirror appropriate for the current browser regional context, for example https://registry.npmmirror.com in mainland China." },
       credentials: { type: "array", items: { type: "string" }, description: "Credential Keys to inject into process.env. Pass Keys only, never values. Missing credentials become empty strings." },
       input_files: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: `Workspace data files that may be read through node:fs. Static import/require modules do not need to be declared again. Up to ${AI_JAVASCRIPT_MAX_FILE_COUNT} entries.`, items: { type: "object", properties: {
         path: { type: "string", description: "Workspace-relative file path." },
@@ -6967,7 +6980,7 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
   return { summary: `${results.length} match(es)`, results };
 }
 
-async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolve_from: resolveFrom, cwd, input = {}, env, args, dependencies, credentials, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs } = {}, signal, session = getActiveAiSession()) {
+async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolve_from: resolveFrom, cwd, input = {}, env, args, dependencies, registry_url: registryUrl, credentials, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs } = {}, signal, session = getActiveAiSession()) {
   throwIfAiAborted(signal);
   const startedAt = performance.now();
   const logs = [];
@@ -6991,6 +7004,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
     const normalizedEnv = normalizeAiJavaScriptEnv(env);
     const normalizedArgs = normalizeAiJavaScriptArgs(args);
     const normalizedDependencies = normalizeAiJavaScriptDependencies(dependencies);
+    const normalizedRegistryUrl = normalizeAiJavaScriptRegistryUrl(registryUrl);
     const normalizedInputs = normalizeAiJavaScriptInputs(inputFiles);
     const normalizedOutputFiles = normalizeAiJavaScriptOutputFiles(outputFiles);
     const normalizedOutputDirectories = normalizeAiJavaScriptOutputDirectories(outputDirectories);
@@ -7041,6 +7055,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
     }, {
       workspace: workspace ? createAiRunScriptWorkspace(workspace) : null,
       fetch: prepareNetwork.fetch,
+      registryUrl: normalizedRegistryUrl || undefined,
       limits: {
         maxSourceBytes: maxReadBytes,
         maxTotalBytes: maxReadBytes,
@@ -7301,6 +7316,21 @@ function normalizeAiJavaScriptDependencies(value) {
   const dependencies = normalizeAiJavaScriptArray(value, "dependencies").map((item) => String(item || "").trim());
   if (dependencies.some((item) => !item)) throw createAiJavaScriptError("INVALID_NPM_SPECIFIER", "dependencies entries must be non-empty npm package specifications", { phase: "preflight" });
   return [...new Set(dependencies)];
+}
+
+function normalizeAiJavaScriptRegistryUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw createAiJavaScriptError("INVALID_REGISTRY_URL", `Invalid registry_url: ${raw}`, { phase: "preflight", url: raw });
+  }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw createAiJavaScriptError("INVALID_REGISTRY_URL", `registry_url must be an HTTP/HTTPS base URL without credentials, query, or hash: ${raw}`, { phase: "preflight", url: raw });
+  }
+  return url.href.replace(/\/+$/, "");
 }
 
 function createAiRunScriptWorkspace(workspace) {

@@ -240,6 +240,23 @@ test('node:fs/promises 支持异步读写、mkdir、stat、readdir、unlink 和 
     expect(result.outputs['workspace/output/nested/result.txt'].text).toBe('async-ok');
 });
 
+test('ESM 可以命名导入 node:fs/promises access', async ({page}) => {
+    const result = await runNodeWorker(page, {
+        format: 'module',
+        cwd: 'workspace',
+        files: [{path: 'workspace/input.txt', content: 'available'}],
+        code: [
+            'import { access } from "node:fs/promises";',
+            'await access("input.txt");',
+            'let missingCode = "";',
+            'try { await access("missing.txt"); } catch (error) { missingCode = error.code; }',
+            'export default missingCode;',
+        ].join('\n'),
+    });
+
+    expect(result.exports.default).toBe('FILE_NOT_FOUND');
+});
+
 test('node:stream、node:zlib 和 util.inherits 支持传统 CommonJS 依赖', async ({page}) => {
     const result = await runNodeWorker(page, {
         format: 'commonjs',
