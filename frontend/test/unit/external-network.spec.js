@@ -122,6 +122,49 @@ test.describe('外部依赖网络集成', () => {
         expect(result.output.size).toBeGreaterThan(0);
     });
 
+    test('npm Jimp 1.6 使用 ESM API 读取并重新编码 JPEG', async ({page}) => {
+        const result = await page.evaluate(async () => {
+            const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
+            const canvas = document.createElement('canvas');
+            canvas.width = 8;
+            canvas.height = 4;
+            const context = canvas.getContext('2d');
+            context.fillStyle = '#e63946';
+            context.fillRect(0, 0, 8, 4);
+            const inputBlob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+            const inputBytes = new Uint8Array(await inputBlob.arrayBuffer());
+            const prepared = await prepareRunScript({
+                format: 'module',
+                args: ['input.jpg', 'output.jpg', '--quality', '75'],
+                inputFiles: [{path: 'input.jpg', content: inputBytes, mimeType: 'image/jpeg'}],
+                code: [
+                    'import {access, mkdir, stat, writeFile} from "node:fs/promises";',
+                    'import path from "node:path";',
+                    'import process from "node:process";',
+                    'import {Jimp, JimpMime} from "npm:jimp@1.6.0";',
+                    'const inputPath = path.resolve(process.argv[2]);',
+                    'const outputPath = path.resolve(process.argv[3]);',
+                    'await access(inputPath);',
+                    'await mkdir(path.dirname(outputPath), {recursive: true});',
+                    'const image = await Jimp.read(inputPath);',
+                    'const output = await image.getBuffer(JimpMime.jpeg, {quality: 75});',
+                    'await writeFile(outputPath, output);',
+                    'const outputStat = await stat(outputPath);',
+                    'export default {width: image.bitmap.width, height: image.bitmap.height, size: outputStat.size};',
+                ].join('\n'),
+            });
+            try {
+                const executed = await new NodeWorker(prepared).run();
+                return {ok: true, result: executed.exports.default};
+            } catch (error) {
+                return {ok: false, name: error.name, code: error.code, message: error.message, stack: error.stack};
+            }
+        });
+
+        expect(result).toEqual({ok: true, result: {width: 8, height: 4, size: expect.any(Number)}});
+        expect(result.result.size).toBeGreaterThan(0);
+    });
+
     test('Jimp 浏览器 CDN 构建作为全局包返回可调用的 Jimp 导出', async ({page}) => {
         const result = await page.evaluate(async () => {
             const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;

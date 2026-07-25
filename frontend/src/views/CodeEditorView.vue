@@ -7212,8 +7212,7 @@ function serializeAiJavaScriptError(error) {
   ].forEach(([sourceKey, resultKey]) => {
     if (source[sourceKey] !== undefined) result[resultKey] = source[sourceKey];
   });
-  const workerFailure = source.filename || source.lineno || source.colno || String(source.code || "").startsWith("WORKER_");
-  if (source.stack && workerFailure) result.stack = String(source.stack).slice(0, AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS);
+  if (source.stack) result.stack = String(source.stack).slice(0, AI_TOOL_OUTPUT_DEFAULT_MAX_CHARS);
   return result;
 }
 
