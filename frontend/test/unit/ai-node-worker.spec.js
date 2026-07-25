@@ -253,31 +253,33 @@ test('依赖准备下载与脚本执行下载使用独立累计预算', async ({
     });
 });
 
-test('未等待的异步文件写入返回明确的待处理操作错误', async ({page}) => {
+test('标准 Node CLI 写法会等待未直接返回的文件操作排空', async ({page}) => {
     const outcome = await runAiWorker(page, createPayload({
         prepared: {
-            format: 'commonjs',
-            entryPath: 'main.cjs',
+            format: 'module',
+            entryPath: 'main.mjs',
             cwd: '',
             input: {},
             env: {},
             args: [],
-            files: [],
+            files: [{path: 'input.txt', content: 'source'}],
             code: [
-                'const fs = require("node:fs/promises");',
-                'fs.writeFile("output.bin", new Uint8Array(8 * 1024 * 1024));',
-                'module.exports = "finished";',
+                'import {readFile, writeFile} from "node:fs/promises";',
+                'async function main() {',
+                '  const value = await readFile("input.txt", "utf8");',
+                '  await writeFile("output.txt", `${value}-done`);',
+                '}',
+                'main().catch((error) => { console.error(error); process.exitCode = 1; });',
             ].join('\n'),
         },
-        outputFiles: [{path: 'output.bin', type: 'bytes', overwrite: true}],
+        outputFiles: [{path: 'output.txt', type: 'text', overwrite: true}],
         fileLimits: {maxReadBytes: 16 * 1024 * 1024, maxWriteBytes: 16 * 1024 * 1024, maxEntryCount: 100},
         outputLimits: {maxOutputFileBytes: 16 * 1024 * 1024, maxOutputTotalBytes: 16 * 1024 * 1024, maxOutputFileCount: 100},
     }));
 
-    expect(outcome.ok).toBe(false);
-    expect(outcome.error.code).toBe('UNAWAITED_ASYNC_OPERATION');
-    expect(outcome.error.operations).toContain('node:fs/promises.writeFile');
-    expect(outcome.outputFiles).toEqual([]);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.outputFiles).toHaveLength(1);
+    expect(outcome.outputFiles[0].content).toBe('source-done');
 });
 
 test('页面侧超时会终止无响应的正式 AI Worker', async ({page}) => {

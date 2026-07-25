@@ -75,6 +75,7 @@ async function execute(payload, port) {
         runner.console = logging.console;
         const baseline = captureOutputBaseline(runner, payload.outputFiles, payload.outputDirectories);
         const executed = await runner.run();
+        await fileOperations.waitForIdle();
         const pendingOperations = [
             ...(network.hasPendingOperations() ? ['network'] : []),
             ...fileOperations.getPendingOperations(),
@@ -244,6 +245,12 @@ function createAsyncOperationTracker() {
         },
         getPendingOperations() {
             return [...new Set(pending.values())].sort();
+        },
+        async waitForIdle() {
+            while (pending.size) {
+                await Promise.allSettled([...pending.keys()]);
+                await Promise.resolve();
+            }
         },
     };
 }
