@@ -119,7 +119,7 @@
         </div>
       </section>
 
-      <section v-show="activeView === 'ai'" class="panel-view active">
+      <section v-show="activeView === 'ai'" class="panel-view active ai-panel-view">
         <header class="panel-header ai-panel-header">
           <div>
             <p class="eyebrow">Assistant</p>
@@ -127,22 +127,52 @@
             <span class="ai-context-length">{{ tr('ai.contextLength', { count: aiContextLength }) }}</span>
           </div>
           <div class="ai-header-actions">
-            <button type="button" class="small-button" :disabled="aiBusy || aiMessages.length === 0" @click="compressAiContext">{{ tr('ai.compressContext') }}</button>
-            <button type="button" class="small-button" :disabled="aiBusy || !canResetAiConversation" @click="resetAiConversation">{{ tr('ai.resetConversation') }}</button>
+            <button class="icon-button" :title="tr('ai.switchSession')" :aria-label="tr('ai.switchSession')" @click.stop="openAiHistory">
+              <span class="codicon codicon-history" aria-hidden="true"></span>
+            </button>
+            <button class="icon-button" :title="tr('ai.newSession')" :aria-label="tr('ai.newSession')" :disabled="!activeAiSession" @click="createAiSessionAndActivate">
+              <span class="codicon codicon-add" aria-hidden="true"></span>
+            </button>
             <button class="icon-button" :title="tr('ai.stop')" :aria-label="tr('ai.stop')" :disabled="!aiBusy" @click="stopAiTask">
               <span class="codicon codicon-debug-stop" aria-hidden="true"></span>
             </button>
           </div>
         </header>
-        <div class="ai-session-bar">
-          <label class="ai-session-select">
-            <span>{{ tr('ai.session') }}</span>
-            <select v-model="activeAiSessionId">
-              <option v-for="session in aiSessions" :key="session.id" :value="session.id">{{ session.title }} · {{ session.messages.length }}{{ session.busy ? ` · ${tr('ai.running')}` : '' }}</option>
-            </select>
-          </label>
-          <button type="button" class="small-button" @click="createAiSessionAndActivate">{{ tr('ai.newSession') }}</button>
-          <button type="button" class="small-button" :disabled="aiBusy || aiSessions.length <= 1" @click="deleteActiveAiSession">{{ tr('ai.deleteSession') }}</button>
+        <div class="ai-session-toolbar" @click.stop>
+          <div class="ai-session-identity">
+            <input v-if="aiSessionTitleEditing" ref="aiSessionTitleInput" v-model="aiSessionTitle" class="ai-session-title-input" type="text" maxlength="80" :placeholder="tr('ai.sessionNamePlaceholder')" @blur="finishAiSessionTitleEdit" @keydown.enter.prevent="finishAiSessionTitleEdit" @keydown.esc.prevent="finishAiSessionTitleEdit" />
+            <button v-else type="button" class="ai-session-title-button" :title="tr('ai.editSessionName')" @click="startAiSessionTitleEdit">
+              {{ aiSessionTitle || tr('ai.newSessionDraft') }}
+            </button>
+            <div class="ai-session-meta">
+              <span class="ai-session-save-status" :class="{ saved: activeAiSession && aiSessionSaved }">
+                <span class="ai-session-status-dot" aria-hidden="true"></span>
+                {{ activeAiSession ? (aiSessionSaved ? tr('ai.savedSession') : tr('ai.temporarySession')) : tr('ai.sessionDraft') }}
+              </span>
+              <span>{{ aiSessionAgentModel || tr('ai.noModel') }}</span>
+              <span>{{ tr('ai.messageCount', { count: aiMessages.length }) }}</span>
+            </div>
+          </div>
+          <button type="button" class="icon-button" :title="tr('ai.generateSessionName')" :aria-label="tr('ai.generateSessionName')" :disabled="aiBusy || aiMessages.length === 0" @click="generateAiSessionTitle">
+            <span class="codicon" :class="activeAiSession?.titleBusy ? 'codicon-loading codicon-modifier-spin' : 'codicon-sparkle'" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="icon-button" :class="{ active: aiSessionMenuVisible }" :title="tr('ai.moreActions')" :aria-label="tr('ai.moreActions')" @click="aiSessionMenuVisible = !aiSessionMenuVisible">
+            <span class="codicon codicon-ellipsis" aria-hidden="true"></span>
+          </button>
+          <div v-if="aiSessionMenuVisible" class="ai-session-menu" role="menu" @click.stop>
+            <label class="ai-session-menu-save">
+              <input v-model="aiSessionSaved" type="checkbox" />
+              <span>
+                <strong>{{ tr('ai.saveSession') }}</strong>
+                <small>{{ activeAiSession ? (aiSessionSaved ? tr('ai.savedSessionHint') : tr('ai.temporarySessionHint')) : tr('ai.sessionDraftSaveHint') }}</small>
+              </span>
+            </label>
+            <div class="context-separator" aria-hidden="true"></div>
+            <button type="button" role="menuitem" :disabled="aiBusy || aiMessages.length === 0" @click="runAiSessionMenuAction('compress')">{{ tr('ai.compressContext') }}</button>
+            <button type="button" role="menuitem" :disabled="aiBusy || !canResetAiConversation" @click="runAiSessionMenuAction('reset')">{{ tr('ai.resetConversation') }}</button>
+            <div class="context-separator" aria-hidden="true"></div>
+            <button type="button" role="menuitem" class="danger" :disabled="aiBusy || !activeAiSession" @click="runAiSessionMenuAction('delete')">{{ tr('ai.deleteSession') }}</button>
+          </div>
         </div>
         <div class="ai-chat">
           <div ref="aiMessagesEl" class="ai-chat-messages">
@@ -194,6 +224,39 @@
             </div>
           </form>
         </div>
+        <aside v-if="aiHistoryVisible" class="ai-history-drawer" :aria-label="tr('ai.sessions')" @click.stop @keydown.esc.prevent.stop="closeAiHistory">
+          <header class="ai-history-header">
+            <div>
+              <p class="eyebrow">Sessions</p>
+              <h2>{{ tr('ai.sessions') }}</h2>
+            </div>
+            <button type="button" class="icon-button" :title="tr('ai.closeHistory')" :aria-label="tr('ai.closeHistory')" @click="closeAiHistory">
+              <span class="codicon codicon-close" aria-hidden="true"></span>
+            </button>
+          </header>
+          <div class="ai-history-search">
+            <span class="codicon codicon-search" aria-hidden="true"></span>
+            <input ref="aiHistorySearchInput" v-model="aiHistoryQuery" type="search" :placeholder="tr('ai.searchHistory')" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="ai-history-list">
+            <div v-if="aiHistoryGroups.length === 0" class="workspace-card">{{ tr('ai.noMatchingSessions') }}</div>
+            <section v-for="group in aiHistoryGroups" :key="group.label" class="ai-history-group">
+              <h3>{{ group.label }}</h3>
+              <article v-for="session in group.sessions" :key="session.id" class="ai-history-item" :class="{ active: session.id === activeAiSessionId }">
+                <button type="button" class="ai-history-item-main" @click="activateAiHistorySession(session.id)">
+                  <strong>{{ session.title }}</strong>
+                  <small>
+                    <span v-if="session.busy || session.titleBusy" class="codicon codicon-loading codicon-modifier-spin" aria-hidden="true"></span>
+                    {{ formatAiSessionState(session) }} · {{ tr('ai.messageCount', { count: session.messages.length }) }} · {{ formatAiHistoryTime(session.updatedAt) }}
+                  </small>
+                </button>
+                <button type="button" class="ai-history-delete" :title="tr('ai.deleteSession')" :aria-label="tr('ai.deleteSession')" :disabled="session.busy || session.titleBusy" @click="deleteAiSessionById(session.id)">
+                  <span class="codicon codicon-trash" aria-hidden="true"></span>
+                </button>
+              </article>
+            </section>
+          </div>
+        </aside>
       </section>
 
       <section v-show="activeView === 'ssh'" class="panel-view active">
@@ -323,6 +386,10 @@
             <datalist id="ai-model-options">
               <option v-for="model in aiModelOptions" :key="model" :value="model"></option>
             </datalist>
+            <label class="setting-row checkbox-row">
+              <input v-model="settings.ai.autoSaveSessions" type="checkbox" />
+              <span>{{ tr('settings.aiAutoSaveSessions') }}</span>
+            </label>
             <small class="setting-hint">{{ tr('settings.aiHint') }}</small>
           </section>
           <section class="setting-row keybinding-card">
@@ -657,6 +724,9 @@ import {
 } from "@/shared/file-system/index.js";
 
 const STORAGE_KEY = "browser-code-editor-settings";
+const AI_SESSION_DATABASE_NAME = "browser-code-editor";
+const AI_SESSION_DATABASE_VERSION = 1;
+const AI_SESSION_STORE_NAME = "aiSessions";
 const SETTINGS_URL_PARAM = "settings";
 const MEBIBYTE = 1024 * 1024;
 const DEFAULT_MAX_MEMORY_READ_BYTES = 50 * MEBIBYTE;
@@ -669,7 +739,7 @@ const LEGACY_AI_COMPLETE_SHORTCUT = "Ctrl+Shift+Enter";
 const LEGACY_FOLD_ALL_SHORTCUT = "Ctrl+K Ctrl+0";
 const LEGACY_UNFOLD_ALL_SHORTCUT = "Ctrl+K Ctrl+J";
 const vscodeShortcuts = { save: "Ctrl+S", format: "Shift+Alt+F", commandPalette: "Ctrl+P", search: "Ctrl+Shift+F", findReferences: "Shift+F12", preview: "Ctrl+Shift+V", toggleSidebar: "Ctrl+B", fold: "Ctrl+Shift+[", unfold: "Ctrl+Shift+]", foldAll: "Ctrl+Alt+[", unfoldAll: "Ctrl+Alt+]", aiComplete: "Ctrl+Alt+Enter" };
-const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", npmRegistryUrl: "", completionModel: "gpt-5.4-mini", imageModel: "gpt-image-1", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default" };
+const defaultAiSettings = { apiKey: "", baseUrl: "https://api.openai.com/v1", npmRegistryUrl: "", completionModel: "gpt-5.4-mini", imageModel: "gpt-image-1", agentModels: "gpt-5.5,gpt-5.4-mini", reasoningEffort: "default", autoSaveSessions: false };
 const defaultBackendSettings = { enabled: false, baseUrl: getCurrentBackendBaseUrl() };
 const DEFAULT_SSH_WHITELIST_TEMPLATE = [
   "pwd", "ls", "cat", "less", "more", "head", "tail", "grep", "egrep", "fgrep", "awk", "sed", "sort", "uniq", "wc", "cut", "tr", "tee", "xargs", "find", "stat", "file", "readlink", "realpath", "basename", "dirname", "tree",
@@ -689,6 +759,70 @@ const PREVIEW_MIN_WIDTH = 280;
 const PREVIEW_MAX_WIDTH = 900;
 const DEFAULT_PREVIEW_WIDTH = 480;
 const defaultSettings = { theme: "vs-dark", locale: "zh-CN", fontSize: 14, wordWrap: false, minimap: true, maxMemoryReadBytes: DEFAULT_MAX_MEMORY_READ_BYTES, maxMemoryWriteBytes: DEFAULT_MAX_MEMORY_WRITE_BYTES, shortcuts: { ...vscodeShortcuts }, ai: { ...defaultAiSettings }, backend: { ...defaultBackendSettings }, ssh: { ...defaultSshSettings } };
+
+class AiSessionStore {
+  constructor() {
+    this.databasePromise = null;
+  }
+
+  async list() {
+    const database = await this.open();
+    const transaction = database.transaction(AI_SESSION_STORE_NAME, "readonly");
+    const completed = waitForAiSessionTransaction(transaction);
+    const records = await waitForAiSessionRequest(transaction.objectStore(AI_SESSION_STORE_NAME).getAll());
+    await completed;
+    return records.sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0));
+  }
+
+  async replace(records) {
+    const database = await this.open();
+    const transaction = database.transaction(AI_SESSION_STORE_NAME, "readwrite");
+    const completed = waitForAiSessionTransaction(transaction);
+    const store = transaction.objectStore(AI_SESSION_STORE_NAME);
+    store.clear();
+    records.forEach((record) => store.put(record));
+    await completed;
+  }
+
+  async open() {
+    if (!globalThis.indexedDB) throw new Error("IndexedDB is unavailable");
+    if (!this.databasePromise) {
+      const request = globalThis.indexedDB.open(AI_SESSION_DATABASE_NAME, AI_SESSION_DATABASE_VERSION);
+      this.databasePromise = waitForAiSessionRequest(request, (event) => {
+        const database = event.target.result;
+        if (!database.objectStoreNames.contains(AI_SESSION_STORE_NAME)) {
+          const store = database.createObjectStore(AI_SESSION_STORE_NAME, { keyPath: "id" });
+          store.createIndex("updatedAt", "updatedAt");
+        }
+      });
+    }
+    return this.databasePromise;
+  }
+
+  async close() {
+    if (!this.databasePromise) return;
+    const database = await this.databasePromise;
+    database.close();
+    this.databasePromise = null;
+  }
+}
+
+function waitForAiSessionRequest(request, onUpgradeNeeded) {
+  return new Promise((resolve, reject) => {
+    if (onUpgradeNeeded) request.onupgradeneeded = onUpgradeNeeded;
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("IndexedDB request failed"));
+    request.onblocked = () => reject(new Error("IndexedDB request was blocked"));
+  });
+}
+
+function waitForAiSessionTransaction(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("IndexedDB transaction failed"));
+    transaction.onabort = () => reject(transaction.error || new Error("IndexedDB transaction was aborted"));
+  });
+}
 const AI_COMPLETION_MANUAL_PREFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_SUFFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_MAX_OUTPUT_TOKENS = 512;
@@ -787,6 +921,7 @@ const messages = {
     "settings.aiImageModel": "图片生成模型",
     "settings.aiAgentModel": "Agent 模型",
     "settings.aiAgentModelsPlaceholder": "用逗号分隔，例如 gpt-5.5,gpt-5.4-mini",
+    "settings.aiAutoSaveSessions": "新建 AI 会话默认保存到浏览器",
     "settings.aiAgentModelToAdd": "选择模型添加",
     "settings.aiAddAgentModel": "添加",
     "settings.aiHint": "当前直接从浏览器请求 OpenAI-compatible API，Base URL 可填根地址或 /v1 地址；适合本机自用，公开部署会暴露 API Key。",
@@ -893,6 +1028,36 @@ const messages = {
     "ai.deleteSession": "删除会话",
     "ai.sessionCreated": "已新建会话",
     "ai.sessionDeleted": "会话已删除",
+    "ai.sessionName": "会话名称",
+    "ai.sessionNamePlaceholder": "输入会话名称",
+    "ai.newSessionDraft": "新会话",
+    "ai.sessionDraft": "草稿",
+    "ai.sessionDraftSaveHint": "首次发送消息后按此选项保存会话",
+    "ai.editSessionName": "编辑会话名称",
+    "ai.generateSessionName": "AI 总结名称",
+    "ai.generatingSessionName": "正在总结...",
+    "ai.saveSession": "保存会话",
+    "ai.savedSession": "已保存",
+    "ai.temporarySession": "临时会话",
+    "ai.savedSessionHint": "消息变化会同步保存到浏览器",
+    "ai.temporarySessionHint": "关闭页面后不会保留此会话",
+    "ai.sessionNameGenerated": "已生成会话名称",
+    "ai.sessions": "会话",
+    "ai.switchSession": "切换会话",
+    "ai.history": "历史会话",
+    "ai.closeHistory": "关闭历史会话",
+    "ai.searchHistory": "搜索会话名称或消息",
+    "ai.noHistory": "没有已保存的会话",
+    "ai.noMatchingSessions": "没有匹配的会话",
+    "ai.runningSessions": "运行中",
+    "ai.temporarySessions": "临时会话",
+    "ai.savedSessions": "已保存会话",
+    "ai.historyToday": "今天",
+    "ai.historyYesterday": "昨天",
+    "ai.historyEarlier": "更早",
+    "ai.messageCount": "{count} 条消息",
+    "ai.moreActions": "更多会话操作",
+    "ai.noModel": "未选择模型",
     "ai.agentModel": "对话模型",
     "ai.reasoningEffort": "思考等级",
     "ai.reasoning.default": "默认",
@@ -910,6 +1075,7 @@ const messages = {
     "ai.toolCancelled": "已取消",
     "ai.imageGenerated": "已生成图片 {path}",
     "ai.imageEdited": "已编辑图片 {path}",
+    "ai.error.emptySessionName": "AI 未返回有效的会话名称。",
     "ai.error.missingConfig": "请先在设置中填写 API Key 和模型。",
     "ai.error.missingApiKey": "请先在设置中填写 API Key。",
     "ai.error.noWorkspace": "请先打开工作区。",
@@ -1118,6 +1284,7 @@ const messages = {
     "settings.aiImageModel": "Image Generation Model",
     "settings.aiAgentModel": "Agent Model",
     "settings.aiAgentModelsPlaceholder": "Comma-separated, for example gpt-5.5,gpt-5.4-mini",
+    "settings.aiAutoSaveSessions": "Save new AI sessions in this browser by default",
     "settings.aiAgentModelToAdd": "Select model to add",
     "settings.aiAddAgentModel": "Add",
     "settings.aiHint": "Requests are sent directly from the browser to an OpenAI-compatible API. Base URL can be the root or /v1 URL. This is suitable for local use; public deployment exposes the API key.",
@@ -1224,6 +1391,36 @@ const messages = {
     "ai.deleteSession": "Delete Session",
     "ai.sessionCreated": "Session created",
     "ai.sessionDeleted": "Session deleted",
+    "ai.sessionName": "Session Name",
+    "ai.sessionNamePlaceholder": "Enter a session name",
+    "ai.newSessionDraft": "New Session",
+    "ai.sessionDraft": "Draft",
+    "ai.sessionDraftSaveHint": "This setting takes effect after the first message is sent",
+    "ai.editSessionName": "Edit session name",
+    "ai.generateSessionName": "Generate Name",
+    "ai.generatingSessionName": "Generating...",
+    "ai.saveSession": "Save Session",
+    "ai.savedSession": "Saved",
+    "ai.temporarySession": "Temporary",
+    "ai.savedSessionHint": "Message changes are saved in this browser",
+    "ai.temporarySessionHint": "This session is discarded when the page closes",
+    "ai.sessionNameGenerated": "Session name generated",
+    "ai.sessions": "Sessions",
+    "ai.switchSession": "Switch session",
+    "ai.history": "Session History",
+    "ai.closeHistory": "Close session history",
+    "ai.searchHistory": "Search names or messages",
+    "ai.noHistory": "No saved sessions",
+    "ai.noMatchingSessions": "No matching sessions",
+    "ai.runningSessions": "Running",
+    "ai.temporarySessions": "Temporary Sessions",
+    "ai.savedSessions": "Saved Sessions",
+    "ai.historyToday": "Today",
+    "ai.historyYesterday": "Yesterday",
+    "ai.historyEarlier": "Earlier",
+    "ai.messageCount": "{count} messages",
+    "ai.moreActions": "More session actions",
+    "ai.noModel": "No model selected",
     "ai.agentModel": "Chat Model",
     "ai.reasoningEffort": "Reasoning",
     "ai.reasoning.default": "Default",
@@ -1241,6 +1438,7 @@ const messages = {
     "ai.toolCancelled": "CANCELLED",
     "ai.imageGenerated": "Generated image {path}",
     "ai.imageEdited": "Edited image {path}",
+    "ai.error.emptySessionName": "AI did not return a valid session name.",
     "ai.error.missingConfig": "Fill in API key and model in Settings first.",
     "ai.error.missingApiKey": "Fill in API key in Settings first.",
     "ai.error.noWorkspace": "Open a workspace first.",
@@ -1599,25 +1797,61 @@ const sftpDialog = reactive({ visible: false, mode: "upload", connectionId: "", 
 const sftpTasks = reactive([]);
 const sftpTasksCollapsed = ref(true);
 const aiCredentialStore = markRaw(new AiCredentialStore());
+const aiSessionStore = markRaw(new AiSessionStore());
 let disableEditorPwa = null;
 let aiSessionSerial = 0;
-const aiSessions = reactive([createAiSession()]);
-const activeAiSessionId = ref(aiSessions[0].id);
-const activeAiSession = computed(() => aiSessions.find((session) => session.id === activeAiSessionId.value) || aiSessions[0] || null);
+const aiSessions = reactive([]);
+const aiSessionDraft = reactive(createAiSessionDraft());
+const activeAiSessionId = ref("");
+const activeAiSession = computed(() => aiSessions.find((session) => session.id === activeAiSessionId.value) || null);
 const aiMessages = computed(() => activeAiSession.value?.messages || []);
+const aiSessionTitleInput = ref(null);
+const aiHistorySearchInput = ref(null);
+const aiSessionTitleEditing = ref(false);
+const aiSessionMenuVisible = ref(false);
+const aiHistoryVisible = ref(false);
+const aiHistoryQuery = ref("");
+const aiSessionFingerprints = new Map();
+let aiSessionsReady = false;
+let updatingAiSessionTimestamps = false;
+let aiSessionPersistTask = Promise.resolve();
 const aiPrompt = computed({
-  get: () => activeAiSession.value?.prompt || "",
-  set: (value) => { getActiveAiSession().prompt = value; },
+  get: () => activeAiSession.value?.prompt ?? aiSessionDraft.prompt,
+  set: (value) => {
+    if (activeAiSession.value) activeAiSession.value.prompt = value;
+    else aiSessionDraft.prompt = value;
+  },
 });
 const aiSessionAgentModel = computed({
-  get: () => activeAiSession.value?.agentModel || getAgentModels()[0] || "",
-  set: (value) => { getActiveAiSession().agentModel = String(value || "").trim(); },
+  get: () => activeAiSession.value?.agentModel ?? aiSessionDraft.agentModel,
+  set: (value) => {
+    if (activeAiSession.value) activeAiSession.value.agentModel = String(value || "").trim();
+    else aiSessionDraft.agentModel = String(value || "").trim();
+  },
 });
 const aiSessionReasoningEffort = computed({
-  get: () => activeAiSession.value?.reasoningEffort || settings.ai.reasoningEffort,
-  set: (value) => { getActiveAiSession().reasoningEffort = aiReasoningEfforts.includes(value) ? value : defaultAiSettings.reasoningEffort; },
+  get: () => activeAiSession.value?.reasoningEffort ?? aiSessionDraft.reasoningEffort,
+  set: (value) => {
+    const reasoningEffort = aiReasoningEfforts.includes(value) ? value : defaultAiSettings.reasoningEffort;
+    if (activeAiSession.value) activeAiSession.value.reasoningEffort = reasoningEffort;
+    else aiSessionDraft.reasoningEffort = reasoningEffort;
+  },
 });
-const aiBusy = computed(() => Boolean(activeAiSession.value?.busy));
+const aiSessionTitle = computed({
+  get: () => activeAiSession.value?.title ?? aiSessionDraft.title,
+  set: (value) => {
+    if (activeAiSession.value) activeAiSession.value.title = String(value || "");
+    else aiSessionDraft.title = String(value || "");
+  },
+});
+const aiSessionSaved = computed({
+  get: () => Boolean(activeAiSession.value?.saved ?? aiSessionDraft.saved),
+  set: (value) => {
+    if (activeAiSession.value) activeAiSession.value.saved = Boolean(value);
+    else aiSessionDraft.saved = Boolean(value);
+  },
+});
+const aiBusy = computed(() => Boolean(activeAiSession.value?.busy || activeAiSession.value?.titleBusy));
 const aiAvailableModels = ref([]);
 const aiModelsLoading = ref(false);
 const agentsMdContent = ref("");
@@ -1632,7 +1866,10 @@ let searchSerial = 0;
 const aiAgentModelOptions = computed(() => uniqueStrings([...getAgentModels(), ...aiSessions.map((session) => session.agentModel)]));
 const aiModelOptions = computed(() => uniqueStrings([settings.ai.completionModel, settings.ai.imageModel, ...aiAgentModelOptions.value, defaultAiSettings.completionModel, defaultAiSettings.imageModel, ...aiAvailableModels.value]));
 const aiContextLength = computed(() => formatAiUsage(activeAiSession.value?.contextUsage));
-const canResetAiConversation = computed(() => Boolean(aiPrompt.value.trim() || aiMessages.value.length || getAiTouchedFiles().length));
+const canResetAiConversation = computed(() => Boolean(aiPrompt.value.trim() || aiMessages.value.length || (activeAiSession.value && getAiTouchedFiles(activeAiSession.value).length)));
+const aiHistoryGroups = computed(() => groupAiSessionDrawerItems(aiSessions
+  .filter((session) => matchesAiHistoryQuery(session, aiHistoryQuery.value))
+  .sort((left, right) => right.updatedAt - left.updatedAt)));
 const tree = computed(() => {
   dirtyRevision.value;
   return mergePendingFilesIntoTree(diskTree.value, Array.from(openFiles.values()).filter((file) => file.isNew || file.deleted));
@@ -1695,7 +1932,12 @@ const dialogIconClass = computed(() => {
 watch(() => settings.locale, () => { document.documentElement.lang = settings.locale; });
 watch(() => aiMessages.value.length, () => { nextTick(scrollAiMessagesToBottom); });
 watch(activeSshTerminalId, () => { nextTick(attachActiveSshTerminal); });
-watch(activeAiSessionId, () => { nextTick(scrollAiMessagesToBottom); });
+watch(activeAiSessionId, () => {
+  aiSessionTitleEditing.value = false;
+  aiSessionMenuVisible.value = false;
+  nextTick(scrollAiMessagesToBottom);
+});
+watch(aiSessions, handleAiSessionsChanged, { deep: true, flush: "sync" });
 watch(searchMatchCase, () => { if (searchSearched.value && searchQuery.value.trim()) runGlobalSearch(); });
 watch(() => dirtyFiles.value.map((file) => file.path).join("\0"), pruneSelectedChangePaths);
 watch(previewPaneVisible, () => { nextTick(layoutVisibleEditors); });
@@ -1725,6 +1967,7 @@ onMounted(async () => {
   });
   applyChromeTheme();
   await promptImportSettingsFromUrl();
+  await restoreSavedAiSessions();
   monaco = await loadMonaco();
   registerFormatters();
   editor.value = markRaw(monaco.editor.create(editorHost.value, {
@@ -1779,7 +2022,10 @@ onBeforeUnmount(() => {
   inlineCompletionDisposables.splice(0).forEach((disposable) => disposable.dispose());
   abortAiCompletionRequest();
   cancelRunningSftpTasks();
+  queuePersistSavedAiSessions();
   aiSessions.forEach((session) => session.abortController?.abort());
+  aiSessions.forEach((session) => session.titleAbortController?.abort());
+  void aiSessionPersistTask.then(() => aiSessionStore.close()).catch((error) => console.warn("Failed to close AI session storage", error));
   aiSessions.forEach((session) => disposeAiMessageResources(session.messages));
   closeAllSshSessions({ disposeTerminal: true });
   diffEditor.value?.setModel(null);
@@ -2316,9 +2562,11 @@ function loadMonaco() {
 function showPanel(view) {
   if (activeView.value === view && sidePanelVisible.value) {
     sidePanelVisible.value = false;
+    if (view === "ai") closeAiHistory();
     nextTick(layoutVisibleEditors);
     return;
   }
+  if (view !== "ai") closeAiHistory();
   activeView.value = view;
   sidePanelVisible.value = true;
   nextTick(layoutVisibleEditors);
@@ -4288,6 +4536,7 @@ function hideContextMenu() {
 function hideAllContextMenus() {
   hideContextMenu();
   hideChangesContextMenu();
+  aiSessionMenuVisible.value = false;
 }
 
 async function runContextAction(action) {
@@ -5082,47 +5331,342 @@ function extractFunctionCalls(response) {
   return (response.output || []).filter((item) => item.type === "function_call" && item.name);
 }
 
+function createAiSessionDraft() {
+  return {
+    title: "",
+    agentModel: String(getAgentModels()[0] || "").trim(),
+    reasoningEffort: settings.ai.reasoningEffort,
+    prompt: "",
+    saved: Boolean(settings.ai.autoSaveSessions),
+  };
+}
+
+function resetAiSessionDraft() {
+  Object.assign(aiSessionDraft, createAiSessionDraft());
+}
+
 function createAiSession(options = {}) {
   aiSessionSerial += 1;
   const reasoningEffort = options.reasoningEffort || settings.ai.reasoningEffort;
+  const now = Date.now();
+  const fallbackTitle = tr("ai.defaultSessionTitle", { count: aiSessionSerial });
   return {
     id: `ai-session-${Date.now()}-${aiSessionSerial}`,
-    title: tr("ai.defaultSessionTitle", { count: aiSessionSerial }),
+    title: String(options.title || "").trim() || fallbackTitle,
     agentModel: String(options.agentModel || getAgentModels()[0] || "").trim(),
     reasoningEffort: aiReasoningEfforts.includes(reasoningEffort) ? reasoningEffort : defaultAiSettings.reasoningEffort,
     prompt: "",
     messages: [],
     touchedPaths: new Set(),
+    saved: options.saved ?? Boolean(settings.ai.autoSaveSessions),
     busy: false,
     abortController: null,
+    titleBusy: false,
+    titleAbortController: null,
     contextUsage: null,
+    createdAt: Number(options.createdAt) || now,
+    updatedAt: Number(options.updatedAt) || now,
+  };
+}
+
+async function restoreSavedAiSessions() {
+  try {
+    const stored = await aiSessionStore.list();
+    const sessions = stored.map(normalizeStoredAiSession).filter(Boolean);
+    if (sessions.length) {
+      updatingAiSessionTimestamps = true;
+      aiSessions.splice(0, aiSessions.length, ...sessions);
+      updatingAiSessionTimestamps = false;
+      aiSessionSerial = Math.max(sessions.length, ...sessions.map((session) => getAiSessionSerialFromId(session.id)));
+    }
+  } catch (error) {
+    console.warn("Failed to load saved AI sessions", error);
+  } finally {
+    aiSessionsReady = true;
+    resetAiSessionDraft();
+    refreshAiSessionFingerprints();
+    queuePersistSavedAiSessions();
+  }
+}
+
+function getAiSessionSerialFromId(id) {
+  const match = String(id || "").match(/-(\d+)$/);
+  return match ? Number(match[1]) : 0;
+}
+
+function normalizeStoredAiSession(value, index) {
+  if (!value || typeof value !== "object" || !Array.isArray(value.messages)) return null;
+  const fallbackTitle = tr("ai.defaultSessionTitle", { count: index + 1 });
+  return {
+    id: String(value.id || `ai-session-${Date.now()}-saved-${index + 1}`),
+    title: String(value.title || fallbackTitle).trim() || fallbackTitle,
+    agentModel: String(getAgentModels()[0] || "").trim(),
+    reasoningEffort: settings.ai.reasoningEffort,
+    prompt: "",
+    messages: value.messages.map(normalizeStoredAiMessage).filter(Boolean),
+    touchedPaths: new Set(),
+    saved: true,
+    busy: false,
+    abortController: null,
+    titleBusy: false,
+    titleAbortController: null,
+    contextUsage: null,
+    createdAt: normalizeAiSessionTimestamp(value.createdAt),
+    updatedAt: normalizeAiSessionTimestamp(value.updatedAt || value.createdAt),
+  };
+}
+
+function normalizeStoredAiMessage(value) {
+  if (!value || typeof value !== "object" || !["user", "assistant", "tool"].includes(value.role)) return null;
+  return {
+    id: String(value.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`),
+    role: value.role,
+    content: String(value.content || ""),
+  };
+}
+
+function normalizeAiSessionTimestamp(value) {
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now();
+}
+
+function handleAiSessionsChanged() {
+  if (updatingAiSessionTimestamps) return;
+  const now = Date.now();
+  updatingAiSessionTimestamps = true;
+  aiSessions.forEach((session) => {
+    const fingerprint = createAiSessionFingerprint(session);
+    if (aiSessionFingerprints.get(session.id) === fingerprint) return;
+    session.updatedAt = now;
+    aiSessionFingerprints.set(session.id, fingerprint);
+  });
+  Array.from(aiSessionFingerprints.keys()).forEach((id) => {
+    if (!aiSessions.some((session) => session.id === id)) aiSessionFingerprints.delete(id);
+  });
+  updatingAiSessionTimestamps = false;
+  queuePersistSavedAiSessions();
+}
+
+function refreshAiSessionFingerprints() {
+  aiSessionFingerprints.clear();
+  aiSessions.forEach((session) => aiSessionFingerprints.set(session.id, createAiSessionFingerprint(session)));
+}
+
+function createAiSessionFingerprint(session) {
+  return JSON.stringify({ saved: session.saved, prompt: session.prompt, ...serializeAiSessionContent(session) });
+}
+
+function queuePersistSavedAiSessions() {
+  if (!aiSessionsReady) return;
+  const records = aiSessions.filter((session) => session.saved).map(serializeAiSession);
+  aiSessionPersistTask = aiSessionPersistTask
+    .catch(() => {})
+    .then(() => aiSessionStore.replace(records))
+    .catch((error) => console.warn("Failed to save AI sessions", error));
+}
+
+function serializeAiSession(session) {
+  return {
+    ...serializeAiSessionContent(session),
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  };
+}
+
+function serializeAiSessionContent(session) {
+  return {
+    id: session.id,
+    title: String(session.title || "").trim() || tr("ai.defaultSessionTitle", { count: aiSessions.indexOf(session) + 1 }),
+    messages: session.messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.tool?.pending ? tr("ai.toolCancelled") : String(message.content || ""),
+    })),
   };
 }
 
 function getActiveAiSession() {
   if (activeAiSession.value) return activeAiSession.value;
-  const session = createAiSession();
-  aiSessions.push(session);
-  activeAiSessionId.value = session.id;
-  return session;
+  throw new Error("No active AI session");
 }
 
 function createAiSessionAndActivate() {
-  const session = createAiSession();
-  aiSessions.push(session);
+  if (!activeAiSession.value) return;
+  activeAiSessionId.value = "";
+  resetAiSessionDraft();
+  closeAiHistory();
+}
+
+function normalizeActiveAiSessionTitle() {
+  if (activeAiSession.value) {
+    activeAiSession.value.title = activeAiSession.value.title.trim() || tr("ai.defaultSessionTitle", { count: aiSessions.indexOf(activeAiSession.value) + 1 });
+  } else {
+    aiSessionDraft.title = aiSessionDraft.title.trim();
+  }
+}
+
+function startAiSessionTitleEdit() {
+  aiSessionMenuVisible.value = false;
+  aiSessionTitleEditing.value = true;
+  nextTick(() => {
+    aiSessionTitleInput.value?.focus();
+    aiSessionTitleInput.value?.select();
+  });
+}
+
+function finishAiSessionTitleEdit() {
+  if (!aiSessionTitleEditing.value) return;
+  normalizeActiveAiSessionTitle();
+  aiSessionTitleEditing.value = false;
+}
+
+function openAiHistory() {
+  aiSessionMenuVisible.value = false;
+  aiHistoryVisible.value = true;
+  nextTick(() => aiHistorySearchInput.value?.focus());
+}
+
+function closeAiHistory() {
+  aiHistoryVisible.value = false;
+  aiHistoryQuery.value = "";
+}
+
+function activateAiHistorySession(id) {
+  const session = aiSessions.find((item) => item.id === id);
+  if (!session) return;
+  resetAiSessionDraft();
   activeAiSessionId.value = session.id;
-  setStatus(tr("ai.sessionCreated"), session.title);
+  closeAiHistory();
+}
+
+function matchesAiHistoryQuery(session, query) {
+  const normalizedQuery = String(query || "").trim().toLocaleLowerCase(settings.locale);
+  if (!normalizedQuery) return true;
+  return [session.title, session.prompt, ...session.messages.map((message) => message.content)]
+    .some((value) => String(value || "").toLocaleLowerCase(settings.locale).includes(normalizedQuery));
+}
+
+function groupAiSessionDrawerItems(sessions) {
+  const running = sessions.filter((session) => session.busy || session.titleBusy);
+  const temporary = sessions.filter((session) => !session.saved && !session.busy && !session.titleBusy);
+  const saved = sessions.filter((session) => session.saved && !session.busy && !session.titleBusy);
+  const groups = [];
+  if (running.length) groups.push({ label: tr("ai.runningSessions"), sessions: running });
+  if (temporary.length) groups.push({ label: tr("ai.temporarySessions"), sessions: temporary });
+  const savedByDate = new Map();
+  saved.forEach((session) => {
+    const label = `${tr("ai.savedSessions")} · ${getAiHistoryDateLabel(session.updatedAt)}`;
+    if (!savedByDate.has(label)) savedByDate.set(label, []);
+    savedByDate.get(label).push(session);
+  });
+  savedByDate.forEach((groupedSessions, label) => groups.push({ label, sessions: groupedSessions }));
+  return groups;
+}
+
+function getAiHistoryDateLabel(timestamp) {
+  const date = new Date(timestamp);
+  const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1).getTime();
+  if (startOfDate === startOfToday) return tr("ai.historyToday");
+  if (startOfDate === yesterday) return tr("ai.historyYesterday");
+  return tr("ai.historyEarlier");
+}
+
+function formatAiHistoryTime(timestamp) {
+  return new Intl.DateTimeFormat(settings.locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(timestamp));
+}
+
+function formatAiSessionState(session) {
+  if (session.busy || session.titleBusy) return tr("ai.running");
+  return session.saved ? tr("ai.savedSession") : tr("ai.temporarySession");
+}
+
+async function runAiSessionMenuAction(action) {
+  aiSessionMenuVisible.value = false;
+  if (action === "compress") await compressAiContext();
+  if (action === "reset") resetAiConversation();
+  if (action === "delete") await deleteActiveAiSession();
+}
+
+async function generateAiSessionTitle() {
+  const session = getActiveAiSession();
+  if (session.busy || session.titleBusy || !session.messages.length) return;
+  const model = session.agentModel.trim();
+  try {
+    validateAiConfig(model);
+  } catch (error) {
+    await showAlert(error.message || String(error), { tone: "danger" });
+    return;
+  }
+  const controller = markRaw(new AbortController());
+  session.titleBusy = true;
+  session.titleAbortController = controller;
+  try {
+    const response = await callOpenAiResponses({
+      model,
+      store: false,
+      instructions: "Create a concise, specific title for this coding-agent conversation. Return only the title, with no quotes, label, markdown, or trailing punctuation. Use the same language as the user's request and keep it within 80 characters.",
+      input: buildAiSessionTitleContext(session),
+      max_output_tokens: 64,
+    }, controller.signal);
+    const title = normalizeGeneratedAiSessionTitle(extractResponseText(response));
+    if (!title) throw new Error(tr("ai.error.emptySessionName"));
+    session.title = title;
+    setStatus(tr("ai.sessionNameGenerated"), title);
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      setStatus("AI Error", error.message || String(error));
+      await showAlert(error.message || String(error), { tone: "danger" });
+    }
+  } finally {
+    if (session.titleAbortController === controller) {
+      session.titleBusy = false;
+      session.titleAbortController = null;
+    }
+  }
+}
+
+function buildAiSessionTitleContext(session) {
+  const context = session.messages
+    .filter((message) => message.role !== "tool")
+    .map((message) => `${message.role}: ${String(message.content || "")}`)
+    .join("\n---\n");
+  if (context.length <= 12000) return context;
+  return `${context.slice(0, 6000)}\n---\n${context.slice(-6000)}`;
+}
+
+function normalizeGeneratedAiSessionTitle(value) {
+  return String(value || "")
+    .trim()
+    .split(/\r?\n/, 1)[0]
+    .replace(/^#+\s*/, "")
+    .replace(/^(?:title|session title|会话名称)\s*[:：]\s*/i, "")
+    .replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, "")
+    .replace(/[。.!！]+$/, "")
+    .trim()
+    .slice(0, 80);
 }
 
 async function deleteActiveAiSession() {
-  if (aiBusy.value || aiSessions.length <= 1) return;
-  const index = aiSessions.findIndex((session) => session.id === activeAiSessionId.value);
+  if (aiBusy.value || !activeAiSession.value) return;
+  await deleteAiSessionById(activeAiSessionId.value);
+}
+
+async function deleteAiSessionById(id) {
+  const index = aiSessions.findIndex((session) => session.id === id);
   if (index === -1) return;
+  const session = aiSessions[index];
+  if (session.busy || session.titleBusy) return;
   const confirmed = await showConfirm(tr("confirm.deleteAiSession"), { title: tr("ai.deleteSession"), tone: "danger" });
   if (!confirmed) return;
-  disposeAiMessageResources(aiSessions[index].messages);
+  disposeAiMessageResources(session.messages);
   aiSessions.splice(index, 1);
-  activeAiSessionId.value = aiSessions[Math.min(index, aiSessions.length - 1)].id;
+  if (activeAiSessionId.value === id) {
+    activeAiSessionId.value = aiSessions[Math.min(index, aiSessions.length - 1)]?.id || "";
+    if (!activeAiSessionId.value) resetAiSessionDraft();
+  }
   refreshAiTouchedFlags();
   touchDirtyState();
   setStatus(tr("ai.sessionDeleted"), "");
@@ -5374,20 +5918,37 @@ async function requestAiCompletion(file, model, position, signal) {
 }
 
 async function sendAiPrompt() {
-  const session = getActiveAiSession();
-  const prompt = session.prompt.trim();
-  if (!prompt || session.busy) return;
-  const model = session.agentModel.trim();
-  const reasoningEffort = session.reasoningEffort;
+  let session = activeAiSession.value;
+  const creatingSession = !session;
+  const prompt = aiPrompt.value.trim();
+  if (!prompt || session?.busy) return;
+  const model = aiSessionAgentModel.value.trim();
+  const reasoningEffort = aiSessionReasoningEffort.value;
   try {
     validateAiConfig(model);
   } catch (error) {
-    addAiMessage("assistant", error.message, {}, session);
+    if (session) addAiMessage("assistant", error.message, {}, session);
+    else await showAlert(error.message || String(error), { tone: "danger" });
     return;
+  }
+  if (creatingSession) {
+    session = createAiSession({
+      title: aiSessionDraft.title,
+      agentModel: model,
+      reasoningEffort,
+      saved: aiSessionDraft.saved,
+    });
   }
   session.prompt = "";
   session.busy = true;
   addAiMessage("user", prompt, {}, session);
+  if (creatingSession) {
+    aiSessions.push(session);
+    activeAiSessionId.value = session.id;
+    session = aiSessions.find((item) => item.id === session.id);
+    resetAiSessionDraft();
+    setStatus(tr("ai.sessionCreated"), session.title);
+  }
   const controller = markRaw(new AbortController());
   session.abortController = controller;
   try {
@@ -5412,13 +5973,19 @@ async function sendAiPrompt() {
 function stopAiTask() {
   const session = activeAiSession.value;
   session?.abortController?.abort();
+  session?.titleAbortController?.abort();
   session?.messages.forEach(cancelAiToolMessage);
   void nextTick(scrollAiMessagesToBottom);
 }
 
 function resetAiConversation() {
   if (aiBusy.value || !canResetAiConversation.value) return;
-  const session = getActiveAiSession();
+  const session = activeAiSession.value;
+  if (!session) {
+    resetAiSessionDraft();
+    setStatus(tr("ai.conversationReset"), "");
+    return;
+  }
   aiPrompt.value = "";
   disposeAiMessageResources(session.messages);
   session.messages.splice(0, session.messages.length);
@@ -6290,6 +6857,7 @@ function beforeUnload(event) {
 }
 
 function handlePageHide() {
+  queuePersistSavedAiSessions();
   cancelRunningSftpTasks();
   closeAllSshSessions({ disposeTerminal: true });
 }
@@ -6378,6 +6946,7 @@ function normalizeSettings(value = {}) {
   savedSettings.maxMemoryReadBytes = normalizeMemoryLimit(savedSettings.maxMemoryReadBytes, DEFAULT_MAX_MEMORY_READ_BYTES);
   savedSettings.maxMemoryWriteBytes = normalizeMemoryLimit(savedSettings.maxMemoryWriteBytes, DEFAULT_MAX_MEMORY_WRITE_BYTES);
   if (!aiReasoningEfforts.includes(ai.reasoningEffort)) ai.reasoningEffort = defaultAiSettings.reasoningEffort;
+  ai.autoSaveSessions = Boolean(ai.autoSaveSessions);
   ai.npmRegistryUrl = String(ai.npmRegistryUrl || "").trim().replace(/\/+$/, "");
   backend.enabled = Boolean(backend.enabled);
   backend.baseUrl = normalizeBackendBaseUrlValue(backend.baseUrl) || defaultBackendSettings.baseUrl;
@@ -8205,8 +8774,10 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .panel-workspace-name { display: block; overflow: hidden; margin-top: 4px; color: var(--muted); font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .icon-button { width: 28px; height: 28px; padding: 0; }
 .code-editor-view .small-button { padding: 5px 8px; font-size: 12px; }
-.code-editor-view .ai-panel-header { align-items: stretch; flex-direction: column; }
-.code-editor-view .ai-header-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.code-editor-view .ai-panel-view { position: relative; }
+.code-editor-view .ai-panel-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.code-editor-view .ai-panel-header > div:first-child { min-width: 0; }
+.code-editor-view .ai-header-actions { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .code-editor-view .ai-header-actions button { flex: 0 0 auto; }
 .code-editor-view .ai-context-length { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .code-editor-view .panel-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 0 12px 12px; }
@@ -8310,9 +8881,49 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .sftp-task-card progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .code-editor-view .sftp-task-error { margin: 0; color: #ffb3b3; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .code-editor-view .sftp-task-completed { border-color: color-mix(in srgb, var(--accent-strong) 45%, var(--border)); }
-.code-editor-view .ai-session-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 8px; padding: 0 12px 10px; }
-.code-editor-view .ai-session-select { display: grid; min-width: 0; gap: 5px; color: var(--muted); font-size: 12px; }
-.code-editor-view .ai-session-select select { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--input); color: var(--text); padding: 6px 7px; }
+.code-editor-view .ai-session-toolbar { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 6px; margin: 0 12px 10px; padding: 9px 8px 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-soft); }
+.code-editor-view .ai-session-identity { display: grid; min-width: 0; gap: 4px; }
+.code-editor-view .ai-session-title-button { width: 100%; min-width: 0; overflow: hidden; padding: 0; border: 0; background: transparent; color: var(--text); font-size: 13px; font-weight: 700; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.code-editor-view .ai-session-title-button:hover:not(:disabled) { border-color: transparent; background: transparent; color: var(--accent-strong); }
+.code-editor-view .ai-session-title-input { width: 100%; min-width: 0; border: 1px solid var(--accent-strong); border-radius: 4px; outline: none; background: var(--input); color: var(--text); padding: 4px 6px; font-size: 13px; font-weight: 700; }
+.code-editor-view .ai-session-meta { display: flex; align-items: center; min-width: 0; gap: 7px; overflow: hidden; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.code-editor-view .ai-session-meta > span { overflow: hidden; text-overflow: ellipsis; }
+.code-editor-view .ai-session-save-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+.code-editor-view .ai-session-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.code-editor-view .ai-session-save-status.saved .ai-session-status-dot { background: var(--accent-strong); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-strong) 20%, transparent); }
+.code-editor-view .ai-session-toolbar > .icon-button { border-color: transparent; background: transparent; color: var(--muted); }
+.code-editor-view .ai-session-toolbar > .icon-button:hover:not(:disabled),
+.code-editor-view .ai-session-toolbar > .icon-button.active { border-color: var(--border); background: var(--button-hover); color: var(--text); }
+.code-editor-view .ai-session-menu { position: absolute; top: calc(100% + 5px); right: 0; z-index: 12; display: grid; width: min(260px, calc(100vw - 76px)); padding: 5px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); box-shadow: 0 12px 32px var(--shadow); }
+.code-editor-view .ai-session-menu > button { width: 100%; padding: 7px 9px; border: 0; background: transparent; text-align: left; }
+.code-editor-view .ai-session-menu > button:hover:not(:disabled) { border-color: transparent; background: var(--context-hover); }
+.code-editor-view .ai-session-menu > button.danger { color: #ffb3b3; }
+.code-editor-view .ai-session-menu-save { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 7px 9px; cursor: pointer; }
+.code-editor-view .ai-session-menu-save input { margin: 0; accent-color: var(--accent); }
+.code-editor-view .ai-session-menu-save span { display: grid; min-width: 0; gap: 2px; }
+.code-editor-view .ai-session-menu-save strong { font-size: 12px; }
+.code-editor-view .ai-session-menu-save small { color: var(--muted); font-size: 10px; line-height: 1.35; }
+.code-editor-view .ai-history-drawer { position: absolute; z-index: 15; inset: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-width: 0; background: var(--panel); box-shadow: 8px 0 24px var(--shadow); }
+.code-editor-view .ai-history-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 14px 10px; border-bottom: 1px solid var(--border); }
+.code-editor-view .ai-history-header h2 { margin: 0; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; }
+.code-editor-view .ai-history-search { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 7px; margin: 10px 12px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--input); color: var(--muted); }
+.code-editor-view .ai-history-search:focus-within { border-color: var(--accent-strong); }
+.code-editor-view .ai-history-search input { width: 100%; min-width: 0; padding: 7px 0; border: 0; outline: none; background: transparent; color: var(--text); }
+.code-editor-view .ai-history-list { min-height: 0; overflow: auto; padding: 0 0 16px; }
+.code-editor-view .ai-history-group { display: grid; gap: 2px; }
+.code-editor-view .ai-history-group h3 { margin: 10px 12px 4px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.code-editor-view .ai-history-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-width: 0; }
+.code-editor-view .ai-history-item:hover,
+.code-editor-view .ai-history-item.active { background: var(--button-hover); }
+.code-editor-view .ai-history-item-main { display: grid; min-width: 0; gap: 3px; padding: 8px 8px 8px 14px; border: 0; background: transparent; color: var(--text); text-align: left; }
+.code-editor-view .ai-history-item-main:hover:not(:disabled) { border-color: transparent; background: transparent; }
+.code-editor-view .ai-history-item-main strong,
+.code-editor-view .ai-history-item-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-editor-view .ai-history-item-main strong { font-size: 12px; }
+.code-editor-view .ai-history-item-main small { color: var(--muted); font-size: 10px; }
+.code-editor-view .ai-history-item-main small .codicon { margin-right: 3px; font-size: 10px; }
+.code-editor-view .ai-history-delete { width: 28px; height: 28px; margin-right: 8px; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
+.code-editor-view .ai-history-delete:hover:not(:disabled) { border-color: var(--border); background: var(--panel-soft); color: #ffb3b3; }
 .code-editor-view .ai-chat { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; flex: 1; }
 .code-editor-view .ai-chat-messages { display: grid; align-content: start; gap: 10px; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 0 12px 12px; }
 .code-editor-view .ai-message { display: grid; min-width: 0; gap: 5px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-soft); }
@@ -8458,6 +9069,10 @@ function getTreeIconClass(node, collapsed = false) {
   .code-editor-view.side-panel-hidden .side-panel { display: none; }
   .code-editor-view .side-panel-resizer { display: none; }
   .code-editor-view .activity-button { width: 44px; height: 44px; }
+  .code-editor-view .ai-panel-header { grid-template-columns: minmax(0, 1fr) max-content; align-items: start; gap: 12px; padding-right: 12px; }
+  .code-editor-view .ai-header-actions { width: max-content; justify-content: flex-end; gap: 8px; }
+  .code-editor-view .ai-header-actions .icon-button { width: 36px; height: 36px; }
+  .code-editor-view .ai-context-length { font-size: 10px; }
   .code-editor-view .shortcut-row { grid-template-columns: 1fr; }
   .code-editor-view .command-center-shortcut { display: none; }
   .code-editor-view .status-right-group { display: none; }
