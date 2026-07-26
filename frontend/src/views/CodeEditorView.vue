@@ -207,7 +207,21 @@
           </div>
           <form class="ai-chat-form" @submit.prevent="sendAiPrompt">
             <textarea v-model="aiPrompt" :placeholder="tr('ai.placeholder')" :disabled="aiBusy" rows="4" @keydown="handleAiPromptKeydown"></textarea>
-            <button type="submit" :disabled="aiBusy || !aiPrompt.trim()">{{ aiBusy ? tr('ai.running') : tr('ai.send') }}</button>
+            <input ref="aiAttachmentInput" class="ai-attachment-input" type="file" multiple accept="text/*,image/png,image/jpeg,image/webp,.json,.js,.jsx,.ts,.tsx,.vue,.css,.scss,.html,.md,.xml,.yaml,.yml,.java,.py,.go,.rs,.c,.h,.cpp,.hpp,.cs,.php,.rb,.sh,.sql" @change="handleAiAttachmentSelection" />
+            <div v-if="aiAttachments.length" class="ai-attachment-list">
+              <span v-for="attachment in aiAttachments" :key="attachment.id" class="ai-attachment-chip" :title="attachment.name">
+                <span class="codicon" :class="attachment.kind === 'image' ? 'codicon-file-media' : 'codicon-file-code'" aria-hidden="true"></span>
+                <span>{{ attachment.name }}</span>
+                <small>{{ FileUtils.formatFileSize(attachment.size) }}</small>
+                <button type="button" :title="tr('ai.removeAttachment', { name: attachment.name })" :aria-label="tr('ai.removeAttachment', { name: attachment.name })" :disabled="aiBusy" @click="removeAiAttachment(attachment.id)">×</button>
+              </span>
+            </div>
+            <div class="ai-chat-submit-row">
+              <button type="button" class="ai-attach-button" :title="tr('ai.attachFiles')" :aria-label="tr('ai.attachFiles')" :disabled="aiBusy || aiAttachments.length >= AI_ATTACHMENT_MAX_COUNT" @click="aiAttachmentInput?.click()">
+                <span class="codicon codicon-attach" aria-hidden="true"></span>
+              </button>
+              <button type="submit" :disabled="aiBusy || (!aiPrompt.trim() && aiAttachments.length === 0)">{{ aiBusy ? tr('ai.running') : tr('ai.send') }}</button>
+            </div>
             <div class="ai-chat-options">
               <label>
                 <span>{{ tr('ai.agentModel') }}</span>
@@ -829,6 +843,10 @@ const AI_COMPLETION_MANUAL_MAX_OUTPUT_TOKENS = 512;
 const AI_IMAGE_MAX_FILE_SIZE = 20 * 1024 * 1024;
 const AI_IMAGE_MASK_MAX_FILE_SIZE = 4 * 1024 * 1024;
 const AI_IMAGE_OUTPUT_MAX_FILE_SIZE = 25 * 1024 * 1024;
+const AI_ATTACHMENT_MAX_COUNT = 10;
+const AI_TEXT_ATTACHMENT_MAX_FILE_SIZE = 2 * 1024 * 1024;
+const AI_ATTACHMENT_MAX_TOTAL_SIZE = 50 * 1024 * 1024;
+const AI_ATTACHMENT_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const PREVIEW_INLINE_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
 const AI_AGENTS_FILE_NAME = "AGENTS.md";
 const AI_AGENTS_MAX_CHARS = 30000;
@@ -1010,6 +1028,10 @@ const messages = {
     "ai.empty": "告诉 AI 你想做什么，它会尽力帮你完成。",
     "ai.placeholder": "描述你想让 AI 完成的修改...",
     "ai.send": "发送",
+    "ai.attachFiles": "添加文件",
+    "ai.removeAttachment": "移除附件 {name}",
+    "ai.attachmentOnlyPrompt": "请查看并处理附件。",
+    "ai.attachmentsSummary": "附件：{names}",
     "ai.running": "运行中...",
     "ai.stop": "停止 AI 任务",
     "ai.contextLength": "上次用量 {count}",
@@ -1076,6 +1098,12 @@ const messages = {
     "ai.imageGenerated": "已生成图片 {path}",
     "ai.imageEdited": "已编辑图片 {path}",
     "ai.error.emptySessionName": "AI 未返回有效的会话名称。",
+    "ai.error.unsupportedAttachment": "仅支持文本文件和 PNG、JPEG、WebP 图片：{name}",
+    "ai.error.tooManyAttachments": "单次最多添加 {count} 个附件。",
+    "ai.error.textAttachmentTooLarge": "文本附件不能超过 {size}：{name}",
+    "ai.error.imageAttachmentTooLarge": "图片附件不能超过 {size}：{name}",
+    "ai.error.attachmentsTooLarge": "附件总大小不能超过 {size}。",
+    "ai.error.readAttachment": "读取附件失败：{name}",
     "ai.error.missingConfig": "请先在设置中填写 API Key 和模型。",
     "ai.error.missingApiKey": "请先在设置中填写 API Key。",
     "ai.error.noWorkspace": "请先打开工作区。",
@@ -1373,6 +1401,10 @@ const messages = {
     "ai.empty": "Enter a request to use AI. File read, search, and edit tools are unavailable until a folder is opened.",
     "ai.placeholder": "Describe the change you want AI to make...",
     "ai.send": "Send",
+    "ai.attachFiles": "Add Files",
+    "ai.removeAttachment": "Remove attachment {name}",
+    "ai.attachmentOnlyPrompt": "Review and process the attached files.",
+    "ai.attachmentsSummary": "Attachments: {names}",
     "ai.running": "Running...",
     "ai.stop": "Stop AI task",
     "ai.contextLength": "Last usage {count}",
@@ -1439,6 +1471,12 @@ const messages = {
     "ai.imageGenerated": "Generated image {path}",
     "ai.imageEdited": "Edited image {path}",
     "ai.error.emptySessionName": "AI did not return a valid session name.",
+    "ai.error.unsupportedAttachment": "Only text files and PNG, JPEG, or WebP images are supported: {name}",
+    "ai.error.tooManyAttachments": "You can attach up to {count} files at a time.",
+    "ai.error.textAttachmentTooLarge": "Text attachments must not exceed {size}: {name}",
+    "ai.error.imageAttachmentTooLarge": "Image attachments must not exceed {size}: {name}",
+    "ai.error.attachmentsTooLarge": "Total attachment size must not exceed {size}.",
+    "ai.error.readAttachment": "Failed to read attachment: {name}",
     "ai.error.missingConfig": "Fill in API key and model in Settings first.",
     "ai.error.missingApiKey": "Fill in API key in Settings first.",
     "ai.error.noWorkspace": "Open a workspace first.",
@@ -1805,7 +1843,9 @@ const aiSessionDraft = reactive(createAiSessionDraft());
 const activeAiSessionId = ref("");
 const activeAiSession = computed(() => aiSessions.find((session) => session.id === activeAiSessionId.value) || null);
 const aiMessages = computed(() => activeAiSession.value?.messages || []);
+const aiAttachments = computed(() => activeAiSession.value?.pendingAttachments || aiSessionDraft.pendingAttachments);
 const aiSessionTitleInput = ref(null);
+const aiAttachmentInput = ref(null);
 const aiHistorySearchInput = ref(null);
 const aiSessionTitleEditing = ref(false);
 const aiSessionMenuVisible = ref(false);
@@ -5338,6 +5378,7 @@ function createAiSessionDraft() {
     reasoningEffort: settings.ai.reasoningEffort,
     prompt: "",
     saved: Boolean(settings.ai.autoSaveSessions),
+    pendingAttachments: [],
   };
 }
 
@@ -5357,6 +5398,7 @@ function createAiSession(options = {}) {
     reasoningEffort: aiReasoningEfforts.includes(reasoningEffort) ? reasoningEffort : defaultAiSettings.reasoningEffort,
     prompt: "",
     messages: [],
+    pendingAttachments: [],
     touchedPaths: new Set(),
     saved: options.saved ?? Boolean(settings.ai.autoSaveSessions),
     busy: false,
@@ -5404,6 +5446,7 @@ function normalizeStoredAiSession(value, index) {
     reasoningEffort: settings.ai.reasoningEffort,
     prompt: "",
     messages: value.messages.map(normalizeStoredAiMessage).filter(Boolean),
+    pendingAttachments: [],
     touchedPaths: new Set(),
     saved: true,
     busy: false,
@@ -5751,6 +5794,77 @@ function handleAiPromptKeydown(event) {
   sendAiPrompt();
 }
 
+async function handleAiAttachmentSelection(event) {
+  const input = event.target;
+  const files = Array.from(input.files || []);
+  input.value = "";
+  if (!files.length) return;
+  const existingKeys = new Set(aiAttachments.value.map(getAiAttachmentFileKey));
+  const additions = files.filter((file) => !existingKeys.has(getAiAttachmentFileKey(file)));
+  try {
+    if (aiAttachments.value.length + additions.length > AI_ATTACHMENT_MAX_COUNT) {
+      throw new Error(tr("ai.error.tooManyAttachments", { count: AI_ATTACHMENT_MAX_COUNT }));
+    }
+    const normalized = additions.map(createAiAttachment);
+    const totalSize = [...aiAttachments.value, ...normalized].reduce((total, attachment) => total + attachment.size, 0);
+    if (totalSize > AI_ATTACHMENT_MAX_TOTAL_SIZE) {
+      throw new Error(tr("ai.error.attachmentsTooLarge", { size: FileUtils.formatFileSize(AI_ATTACHMENT_MAX_TOTAL_SIZE) }));
+    }
+    aiAttachments.value.push(...normalized);
+  } catch (error) {
+    await showAlert(error.message || String(error), { tone: "danger" });
+  }
+}
+
+function createAiAttachment(file) {
+  const mimeType = String(file.type || getMimeType(file.name, "")).split(";", 1)[0].toLowerCase();
+  const image = AI_ATTACHMENT_IMAGE_TYPES.has(mimeType);
+  const text = FileUtils.isTextFile(file);
+  if (!image && !text) throw new Error(tr("ai.error.unsupportedAttachment", { name: file.name }));
+  const maxSize = image ? AI_IMAGE_MAX_FILE_SIZE : AI_TEXT_ATTACHMENT_MAX_FILE_SIZE;
+  if (file.size > maxSize) {
+    const key = image ? "ai.error.imageAttachmentTooLarge" : "ai.error.textAttachmentTooLarge";
+    throw new Error(tr(key, { name: file.name, size: FileUtils.formatFileSize(maxSize) }));
+  }
+  return {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name: file.name,
+    mimeType: mimeType || (image ? "image/png" : "text/plain"),
+    size: file.size,
+    lastModified: file.lastModified,
+    kind: image ? "image" : "text",
+    file: markRaw(file),
+  };
+}
+
+function getAiAttachmentFileKey(value) {
+  return `${value.name}\0${value.size}\0${value.lastModified || 0}`;
+}
+
+function removeAiAttachment(id) {
+  if (aiBusy.value) return;
+  const index = aiAttachments.value.findIndex((attachment) => attachment.id === id);
+  if (index !== -1) aiAttachments.value.splice(index, 1);
+}
+
+function clearAiAttachments(attachments) {
+  attachments.splice(0, attachments.length);
+}
+
+async function prepareAiAttachments(attachments) {
+  return Promise.all(attachments.map(async (attachment) => {
+    try {
+      if (attachment.kind === "image") {
+        const dataUrl = FileUtils.normalizeImageDataUrl(await FileUtils.readFileAsDataUrl(attachment.file), attachment.mimeType);
+        return { ...attachment, dataUrl, file: undefined };
+      }
+      return { ...attachment, text: await attachment.file.text(), file: undefined };
+    } catch {
+      throw new Error(tr("ai.error.readAttachment", { name: attachment.name }));
+    }
+  }));
+}
+
 function formatJsonForDisplay(value) {
   try {
     return JSON.stringify(value ?? null, null, 2);
@@ -5920,8 +6034,10 @@ async function requestAiCompletion(file, model, position, signal) {
 async function sendAiPrompt() {
   let session = activeAiSession.value;
   const creatingSession = !session;
-  const prompt = aiPrompt.value.trim();
-  if (!prompt || session?.busy) return;
+  const rawPrompt = aiPrompt.value.trim();
+  const selectedAttachments = [...aiAttachments.value];
+  if ((!rawPrompt && !selectedAttachments.length) || session?.busy) return;
+  const prompt = rawPrompt || tr("ai.attachmentOnlyPrompt");
   const model = aiSessionAgentModel.value.trim();
   const reasoningEffort = aiSessionReasoningEffort.value;
   try {
@@ -5929,6 +6045,13 @@ async function sendAiPrompt() {
   } catch (error) {
     if (session) addAiMessage("assistant", error.message, {}, session);
     else await showAlert(error.message || String(error), { tone: "danger" });
+    return;
+  }
+  let preparedAttachments;
+  try {
+    preparedAttachments = await prepareAiAttachments(selectedAttachments);
+  } catch (error) {
+    await showAlert(error.message || String(error), { tone: "danger" });
     return;
   }
   if (creatingSession) {
@@ -5941,18 +6064,20 @@ async function sendAiPrompt() {
   }
   session.prompt = "";
   session.busy = true;
-  addAiMessage("user", prompt, {}, session);
+  addAiMessage("user", formatAiUserMessage(prompt, preparedAttachments), {}, session);
   if (creatingSession) {
     aiSessions.push(session);
     activeAiSessionId.value = session.id;
     session = aiSessions.find((item) => item.id === session.id);
     resetAiSessionDraft();
     setStatus(tr("ai.sessionCreated"), session.title);
+  } else {
+    clearAiAttachments(session.pendingAttachments);
   }
   const controller = markRaw(new AbortController());
   session.abortController = controller;
   try {
-    await runAiAgent(prompt, controller.signal, session, { model, reasoningEffort });
+    await runAiAgent(prompt, controller.signal, session, { model, reasoningEffort, attachments: preparedAttachments });
     setStatus(tr("status.aiCompleted"), model);
   } catch (error) {
     if (error.name === "AbortError") {
@@ -5989,6 +6114,7 @@ function resetAiConversation() {
   aiPrompt.value = "";
   disposeAiMessageResources(session.messages);
   session.messages.splice(0, session.messages.length);
+  clearAiAttachments(session.pendingAttachments);
   session.touchedPaths.clear();
   session.contextUsage = null;
   session.title = tr("ai.defaultSessionTitle", { count: aiSessions.indexOf(session) + 1 });
@@ -6045,7 +6171,7 @@ async function compressAiContext() {
 }
 
 async function runAiAgent(prompt, signal, session = getActiveAiSession(), runConfig = {}) {
-  const conversation = buildAgentInputMessages(prompt, session);
+  const conversation = buildAgentInputMessages(prompt, session, runConfig.attachments);
   const agentInstructions = getAgentInstructions();
   const model = runConfig.model || session.agentModel.trim();
   const reasoningEffort = runConfig.reasoningEffort || session.reasoningEffort;
@@ -6212,13 +6338,34 @@ function formatAgentsMdInstructions(content) {
   ].filter(Boolean).join("\n");
 }
 
-function buildAgentInputMessages(prompt, session = getActiveAiSession()) {
+function buildAgentInputMessages(prompt, session = getActiveAiSession(), attachments = []) {
   return [
     { role: "user", content: buildAgentWorkspaceContext() },
     ...buildAgentRecentChatMessages(session),
     { role: "user", content: buildAgentTouchedFilesContext(session) },
-    { role: "user", content: buildAgentRequestContext(prompt, session) },
+    buildAgentRequestInputMessage(prompt, session, attachments),
   ];
+}
+
+function buildAgentRequestInputMessage(prompt, session, attachments) {
+  const requestContext = buildAgentRequestContext(prompt, session);
+  if (!attachments?.length) return { role: "user", content: requestContext };
+  const content = [{ type: "input_text", text: requestContext }];
+  attachments.forEach((attachment) => {
+    const description = `Local attachment: ${attachment.name} (${attachment.mimeType || "unknown"}, ${attachment.size} bytes)`;
+    if (attachment.kind === "image") {
+      content.push({ type: "input_text", text: description });
+      content.push({ type: "input_image", image_url: attachment.dataUrl, detail: "auto" });
+    } else {
+      content.push({ type: "input_text", text: `${description}\n\n${attachment.text}` });
+    }
+  });
+  return { role: "user", content };
+}
+
+function formatAiUserMessage(prompt, attachments) {
+  if (!attachments?.length) return prompt;
+  return `${prompt}\n\n${tr("ai.attachmentsSummary", { names: attachments.map((attachment) => attachment.name).join(", ") })}`;
 }
 
 function buildAgentWorkspaceContext() {
@@ -8948,6 +9095,16 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .ai-chat-form { display: grid; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--border); background: var(--panel); }
 .code-editor-view .ai-chat-form textarea { width: 100%; resize: vertical; min-height: 78px; max-height: 180px; border: 1px solid var(--border); border-radius: 5px; background: var(--input); color: var(--text); padding: 8px; line-height: 1.4; }
 .code-editor-view .ai-chat-form button { padding: 7px 10px; }
+.code-editor-view .ai-attachment-input { display: none; }
+.code-editor-view .ai-attachment-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.code-editor-view .ai-attachment-chip { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; max-width: 100%; gap: 5px; padding: 4px 5px 4px 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel-soft); color: var(--text); font-size: 11px; }
+.code-editor-view .ai-attachment-chip > span:not(.codicon) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-editor-view .ai-attachment-chip > .codicon { color: var(--accent-strong); }
+.code-editor-view .ai-attachment-chip small { color: var(--muted); white-space: nowrap; }
+.code-editor-view .ai-chat-form .ai-attachment-chip button { display: grid; width: 20px; height: 20px; place-items: center; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
+.code-editor-view .ai-chat-form .ai-attachment-chip button:hover:not(:disabled) { border-color: var(--border); background: var(--button-hover); color: var(--text); }
+.code-editor-view .ai-chat-submit-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
+.code-editor-view .ai-chat-submit-row .ai-attach-button { display: grid; width: 36px; height: 36px; place-items: center; padding: 0; }
 .code-editor-view .ai-chat-options { display: grid; grid-template-columns: minmax(0, 1fr) minmax(90px, 0.8fr); gap: 8px; }
 .code-editor-view .ai-chat-options label { display: grid; min-width: 0; gap: 5px; color: var(--muted); font-size: 12px; }
 .code-editor-view .ai-chat-options select { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 4px; background: var(--input); color: var(--text); padding: 6px 7px; }
