@@ -488,7 +488,7 @@
         <button type="button" class="command-icon-button" :title="tr('action.findReferences')" :aria-label="tr('action.findReferences')" :disabled="!activeFile" @click="triggerFindReferences">
           <span class="codicon codicon-references" aria-hidden="true"></span>
         </button>
-        <button type="button" class="command-icon-button" :class="{ active: previewVisible }" :title="tr('action.preview')" :aria-label="tr('action.preview')" :disabled="!previewVisible && !canPreviewActiveFile" @click="togglePreview">
+        <button type="button" class="command-icon-button" :class="{ active: activeFilePreviewVisible }" :title="tr('action.preview')" :aria-label="tr('action.preview')" :disabled="!activeFilePreviewVisible && !canPreviewActiveFile" @click="togglePreview">
           <span class="codicon codicon-open-preview" aria-hidden="true"></span>
         </button>
       </div>
@@ -1790,10 +1790,12 @@ const pendingFileLoads = new Set();
 const selectedChangePaths = reactive(new Set());
 const activePath = ref("");
 const activeDiffPath = ref("");
+const previewOpenPaths = reactive(new Set());
 const previewVisible = ref(false);
 const previewContent = ref("");
 const previewPageUrl = ref("");
 const previewFrameKey = ref(0);
+const previewOwnerPath = ref("");
 const previewPath = ref("");
 const previewUrlSuffix = ref("");
 const previewType = ref("");
@@ -1953,7 +1955,8 @@ const activeLanguage = computed({ get: () => activeFile.value?.language || "plai
 const activePreviewType = computed(() => getPreviewType(activeTextFile.value));
 const canPreviewActiveFile = computed(() => Boolean(activePreviewType.value));
 const previewLabelKey = computed(() => getPreviewTypeDefinition(previewType.value)?.labelKey || "action.preview");
-const previewPaneVisible = computed(() => Boolean(previewVisible.value && previewPath.value && previewType.value && !activeSshTerminal.value));
+const activeFilePreviewVisible = computed(() => Boolean(activePath.value && previewOpenPaths.has(activePath.value)));
+const previewPaneVisible = computed(() => Boolean(activeFilePreviewVisible.value && previewVisible.value && previewOwnerPath.value === activePath.value && previewPath.value && previewType.value && !activeSshTerminal.value));
 const sshFeatureEnabled = computed(() => isBackendEnabled());
 const sshTerminalTabs = computed(() => {
   sshRevision.value;
@@ -2095,7 +2098,7 @@ function tr(key, params = {}) {
 }
 
 function togglePreview() {
-  if (previewVisible.value) {
+  if (activeFilePreviewVisible.value) {
     closePreview();
   } else {
     openPreview();
@@ -2106,6 +2109,8 @@ function openPreview() {
   const file = activeTextFile.value;
   const type = getPreviewType(file);
   if (!file || !type) return;
+  previewOpenPaths.add(file.path);
+  previewOwnerPath.value = file.path;
   previewPath.value = file.path;
   previewUrlSuffix.value = "";
   previewType.value = type;
@@ -2113,9 +2118,12 @@ function openPreview() {
   void nextTick(() => updatePreviewContent({ remountFrame: true }));
 }
 
-function closePreview() {
+function closePreview(path = activePath.value || previewOwnerPath.value) {
+  if (path) previewOpenPaths.delete(path);
+  if (previewOwnerPath.value !== path) return;
   previewRenderSerial += 1;
   previewVisible.value = false;
+  previewOwnerPath.value = "";
   if (standalonePreviewClients.size) return;
   clearPreviewContent();
 }
@@ -2130,7 +2138,9 @@ function clearPreviewContent() {
 function resetPreviewState() {
   previewRenderSerial += 1;
   previewNavigationSerial += 1;
+  previewOpenPaths.clear();
   previewVisible.value = false;
+  previewOwnerPath.value = "";
   previewPath.value = "";
   previewUrlSuffix.value = "";
   previewType.value = "";
@@ -4102,6 +4112,7 @@ function activateFile(path) {
   activeDiffPath.value = "";
   diffEditor.value?.setModel(null);
   activePath.value = path;
+  if (previewOpenPaths.has(path)) openPreview();
   if (file.fileType === "image") {
     activateReadonlyPreviewEditor(file);
     setStatus(path, `${tr("imagePreview.type")} | ${FileUtils.formatFileSize(file.size)}`);
@@ -4152,6 +4163,7 @@ function activateDiff(path) {
 function closeFile(path) {
   const file = openFiles.get(path);
   if (!file) return;
+  closePreview(path);
   if (file.dirty) {
     file.closed = true;
     openFiles.set(path, file);
@@ -4182,6 +4194,7 @@ function activateLastOpenFile(excludedPath = "") {
 function removeFileState(path) {
   const file = openFiles.get(path);
   if (!file) return;
+  closePreview(path);
   disposeFileModels(file, { force: true });
   openFiles.delete(path);
   removeAiTouchedPath(path);
@@ -4306,13 +4319,13 @@ function changeActiveLanguage() {
   activeFile.value.monacoLanguage = getMonacoLanguageId(activeFile.value.language);
   monaco.editor.setModelLanguage(activeFile.value.model, activeFile.value.monacoLanguage);
   if (activeFile.value.originalModel) monaco.editor.setModelLanguage(activeFile.value.originalModel, activeFile.value.monacoLanguage);
-  if (previewPath.value === activeFile.value.path) {
+  if (previewOwnerPath.value === activeFile.value.path) {
     const type = getPreviewType(activeFile.value);
     if (type) {
       previewType.value = type;
       void updatePreviewContent({ remountFrame: true });
     } else {
-      resetPreviewState();
+      closePreview();
     }
   }
   setStatus(activeFile.value.path, `${getLanguageLabel(activeFile.value.language)} | ${activeFile.value.dirty ? tr("status.unsaved") : tr("status.saved")}`);
@@ -8699,6 +8712,7 @@ function getOpenFilesUnderPath(path) {
 function closeOpenFilesUnderPath(path) {
   getOpenFilesUnderPath(path).forEach((file) => {
     fileSession.value?.revert(file.path);
+    closePreview(file.path);
     disposeFileModels(file, { force: true });
     openFiles.delete(file.path);
   });
