@@ -201,7 +201,8 @@
               </template>
               <template v-else>
                 <strong>{{ tr(`ai.role.${message.role}`) }}</strong>
-                <div class="ai-message-content" v-html="renderMarkdown(message.content)"></div>
+                <div v-if="message.role === 'user'" class="ai-message-content ai-message-plain">{{ message.content }}</div>
+                <div v-else class="ai-message-content" v-html="renderMarkdown(message.content)"></div>
               </template>
             </article>
           </div>
@@ -9102,6 +9103,7 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .ai-image-result img { width: 100%; max-height: 260px; border-radius: 4px; object-fit: contain; background: var(--panel); }
 .code-editor-view .ai-image-result span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .ai-message-content { min-width: 0; max-width: 100%; overflow-wrap: anywhere; color: var(--text); font-size: 12px; word-break: break-word; }
+.code-editor-view .ai-message-plain { white-space: pre-wrap; }
 .code-editor-view .ai-message-content * { max-width: 100%; }
 .code-editor-view .ai-message-content pre { overflow-x: auto; white-space: pre-wrap; }
 .code-editor-view .ai-message-content code { white-space: break-spaces; }
