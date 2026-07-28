@@ -324,7 +324,9 @@ export default {
                         });
 
                         if (!response.ok) {
-                            throw new Error(`HTTP错误: ${response.status}`);
+                            const errorBody = (await response.text()).trim();
+                            const detail = errorBody ? `: ${errorBody.slice(0, 300)}` : '';
+                            throw new Error(`HTTP错误: ${response.status}${detail}`);
                         }
 
                         // 从响应头获取文件名

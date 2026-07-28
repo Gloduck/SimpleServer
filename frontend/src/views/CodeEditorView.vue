@@ -5762,6 +5762,7 @@ function completeAiToolMessage(message, result) {
   if (message.tool.cancelled) return;
   message.content = result.summary || "";
   message.imagePreview = createAiImagePreview(result);
+  if (!result.ok) message.expanded = true;
   message.tool.pending = false;
   message.tool.cancelled = false;
   message.tool.ok = Boolean(result.ok);
@@ -8423,6 +8424,7 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, cre
     }
 
     const result = {
+      ok: response.ok,
       summary: `${requestMethod} ${String(url)} -> ${response.status} (${clipped.returned_chars}/${clipped.text_chars} chars${filtered ? `, filtered from ${text.length} chars` : ""})`,
       url: String(url),
       status: response.status,
