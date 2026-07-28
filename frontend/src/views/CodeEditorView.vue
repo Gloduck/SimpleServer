@@ -6601,7 +6601,7 @@ function getAiAllToolDefinitions() {
         "node:process is limited to argv, env, cwd(), exit(), exitCode, and nextTick(). node:cluster exposes single-process primary-state metadata and event APIs for package-loading compatibility; creating worker processes and cluster IPC are unsupported. node:tty provides isatty() and reports false because the Worker has no terminal. node:http provides METHODS, STATUS_CODES, header validation, and minimal get/request; node:https provides only minimal get/request. Prefer fetch, and do not use setEncoding, resume, Agent, sockets, or connection-pool APIs. node:zlib supports buffered deflate/inflate, raw deflate/inflate, gzip/gunzip, and unzip APIs but not Brotli or full native streaming semantics.",
         "Unsupported Node features include child_process, os, worker_threads, net, tls, dns, native extensions, RSA/DSA signing, PEM/KeyObject/certificate APIs, CommonJS import(), variable dynamic imports, and cyclic ESM dependencies.",
       ].join("\n"),
-      "During execution, fetch, XMLHttpRequest, node:http, and node:https share request-count, per-response-size, cumulative-download-size, and timeout limits. Requests use RequestProxy when the backend is available and otherwise use the browser network directly, which may still be blocked by CORS, DNS, TLS, or browser security policy. use_target_origin and use_target_referer make the backend synthesize source headers from each target URL. Do not set either option unless the user explicitly requests it; never enable them automatically to retry a failed, CORS-blocked, or XSRF-rejected request.",
+      "During execution, fetch, XMLHttpRequest, node:http, and node:https share request-count, per-response-size, cumulative-download-size, and timeout limits. Requests use RequestProxy when the backend is available and otherwise use the browser network directly, which may still be blocked by CORS, DNS, TLS, or browser security policy. proxy_options.use_target_origin and proxy_options.use_target_referer make the backend synthesize source headers from each target URL. Do not set either option unless the user explicitly requests it; never enable them automatically to retry a failed, CORS-blocked, or XSRF-rejected request.",
       [
         "Runtime limits not represented directly by parameter schemas:",
         `- dependency preparation: up to ${AI_JAVASCRIPT_MAX_PREPARE_REQUEST_COUNT} requests and a cumulative download budget independent from execution`,
@@ -6627,8 +6627,10 @@ function getAiAllToolDefinitions() {
       dependencies: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, items: { type: "string" }, description: "Pinned npm package-root specifications used only when a bare import cannot be resolved from workspace node_modules, for example jpeg-js@0.4.4 or @scope/package@1.2.3. Source code still imports the ordinary bare name. Do not pass package subpaths, relative paths, or HTTP/HTTPS URLs. The same package cannot have conflicting declared versions, and an installed workspace package remains preferred." },
       registry_url: { type: "string", description: "Optional trusted npm-compatible Registry root URL for dependencies and inline npm: specifiers. It must be HTTP/HTTPS and contain no credentials, query, or fragment. Omit it to use the user setting, or https://registry.npmjs.org when that setting is empty. Do not switch registries merely to retry an invalid package name or version." },
       credentials: { type: "array", items: { type: "string" }, description: "Keys of previously loaded credentials to inject into process.env. Pass Keys only, never values. Credentials override same-named env entries; missing Keys become empty strings." },
-      use_target_origin: { type: "boolean", description: "Ask the backend proxy to send Origin using each target URL's origin. Defaults to false. Set only when the user explicitly requests it; do not enable it automatically as a request-failure workaround." },
-      use_target_referer: { type: "boolean", description: "Ask the backend proxy to send Referer using each target URL's origin. Defaults to false. Set only when the user explicitly requests it; do not enable it automatically as a request-failure workaround." },
+      proxy_options: { type: "object", description: "Optional backend request-proxy behavior. Omit unless the user explicitly requests target source headers.", properties: {
+        use_target_origin: { type: "boolean", description: "Ask the backend proxy to send Origin using each target URL's origin. Defaults to false. Set only when the user explicitly requests it; do not enable it automatically as a request-failure workaround." },
+        use_target_referer: { type: "boolean", description: "Ask the backend proxy to send Referer using each target URL's origin. Defaults to false. Set only when the user explicitly requests it; do not enable it automatically as a request-failure workaround." }
+      } },
       input_files: { type: "array", maxItems: AI_JAVASCRIPT_MAX_FILE_COUNT, description: "Every existing non-module workspace file read through node:fs or node:fs/promises must be declared here. A file's presence in the workspace does not place it in the virtual filesystem; reading an undeclared file fails with FILE_NOT_FOUND. JavaScript, JSON, and package files referenced by static import or require are loaded automatically and should not be declared again.", items: { type: "object", properties: {
         path: { type: "string", description: "Required existing file path relative to the workspace root. Absolute paths, reserved runtime paths, and paths outside the workspace are invalid." },
         type: { type: "string", enum: ["text", "bytes"], description: "Load mode. Defaults to text; binary files must use bytes." },
@@ -6678,7 +6680,7 @@ function getAiAllToolDefinitions() {
       "Fetch an external HTTP/HTTPS URL through the configured backend request proxy to avoid browser CORS limits.",
       "Declare credential Keys through credentials, then use ${KEY}, ${KEY|urlencode}, ${KEY|json}, or ${KEY|base64} in the URL, header values, or body. Missing Keys are empty strings. Use $${KEY} for a literal placeholder.",
       "Only http and https URLs are supported. GET and HEAD requests cannot include a body. Prefer compact API formats when available. If a successful response contains enough information, answer from it instead of making follow-up requests.",
-      "use_target_origin and use_target_referer make the backend synthesize source headers from the target URL. Do not set either option unless the user explicitly requests it; never enable them automatically to retry a failed, CORS-blocked, or XSRF-rejected request.",
+      "proxy_options controls backend proxy behavior. Its use_target_origin and use_target_referer fields synthesize source headers from the target URL. Do not set either source-header option unless the user explicitly requests it; never enable them automatically to retry a failed, CORS-blocked, or XSRF-rejected request.",
       "Use filter_script to reduce large response bodies at the source of the tool result: it runs after the request in an isolated Worker and the tool body becomes the script return value."
     ), parameters: { type: "object", properties: {
       url: { type: "string", description: "Absolute target URL, including query string if needed. Supports declared credential placeholders." },
@@ -6686,10 +6688,12 @@ function getAiAllToolDefinitions() {
       headers: { type: "object", additionalProperties: { type: "string" }, description: "Optional request headers. Header values support declared credential placeholders." },
       body: { type: "string", description: "Optional request body supporting declared credential placeholders. Not allowed for GET or HEAD." },
       credentials: { type: "array", items: { type: "string" }, description: "Credential Keys available to URL, header value, and body placeholders." },
-      follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." },
-      enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." },
-      use_target_origin: { type: "boolean", description: "Send Origin using the target URL's origin. Defaults to false. Set only when the user explicitly requests it." },
-      use_target_referer: { type: "boolean", description: "Send Referer using the target URL's origin. Defaults to false. Set only when the user explicitly requests it." },
+      proxy_options: { type: "object", description: "Optional backend request-proxy behavior.", properties: {
+        follow_redirect: { type: "boolean", description: "Whether the backend proxy should follow redirects. Defaults to true." },
+        enable_cors: { type: "boolean", description: "Whether the proxy response should include permissive CORS headers. Defaults to true." },
+        use_target_origin: { type: "boolean", description: "Send Origin using the target URL's origin. Defaults to false. Set only when the user explicitly requests it." },
+        use_target_referer: { type: "boolean", description: "Send Referer using the target URL's origin. Defaults to false. Set only when the user explicitly requests it." }
+      } },
       include_headers: { type: "boolean", description: "Whether to include response headers in the tool result. Defaults to false." },
       filter_script: { type: "string", description: "Optional JavaScript async function body used to filter only the response body before returning it. input is the response body string." },
       max_chars: { type: "number", description: aiToolOutputLimitDescription() }
@@ -7784,7 +7788,7 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
   return { summary: `${results.length} match(es)`, results };
 }
 
-async function aiToolRunJavaScript({ reason, code, entry_file: entryFile, format, resolve_from: resolveFrom, cwd, input = {}, env, args, dependencies, registry_url: registryUrl, credentials, use_target_origin: useTargetOrigin = false, use_target_referer: useTargetReferer = false, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs } = {}, signal, session = getActiveAiSession()) {
+async function aiToolRunJavaScript({ reason, code, entry_file: entryFile, format, resolve_from: resolveFrom, cwd, input = {}, env, args, dependencies, registry_url: registryUrl, credentials, proxy_options: proxyOptions = {}, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs } = {}, signal, session = getActiveAiSession()) {
   throwIfAiAborted(signal);
   const startedAt = performance.now();
   const logs = [];
@@ -7891,8 +7895,8 @@ async function aiToolRunJavaScript({ reason, code, entry_file: entryFile, format
       network: {
         serverUrl: backendBaseUrl,
         baseUrl: window.location.href,
-        useTargetOrigin: useTargetOrigin === true,
-        useTargetReferer: useTargetReferer === true,
+        useTargetOrigin: proxyOptions?.use_target_origin === true,
+        useTargetReferer: proxyOptions?.use_target_referer === true,
         limits: {
           maxRequestCount: AI_JAVASCRIPT_MAX_REQUEST_COUNT,
           maxResponseBytes: maxReadBytes,
@@ -8415,7 +8419,7 @@ async function stageAiJavaScriptOutputs(outputs, workspace, session, signal) {
   return files;
 }
 
-async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, credentials, follow_redirect: followRedirect = true, enable_cors: enableCors = true, use_target_origin: useTargetOrigin = false, use_target_referer: useTargetReferer = false, include_headers: includeHeaders = false, filter_script: filterScript, max_chars: maxChars } = {}, signal) {
+async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, credentials, proxy_options: proxyOptions = {}, include_headers: includeHeaders = false, filter_script: filterScript, max_chars: maxChars } = {}, signal) {
   throwIfAiAborted(signal);
   validateBackendEnabled();
   if (!url) throw new Error("url is required");
@@ -8430,10 +8434,12 @@ async function aiToolRequestProxy({ url, method = "GET", headers = {}, body, cre
     if ((requestMethod === "GET" || requestMethod === "HEAD") && resolvedBody != null) throw new Error(`${requestMethod} requests cannot include a body`);
 
     const outputLimit = clampToolCharLimit(maxChars);
+    const followRedirect = proxyOptions?.follow_redirect !== false;
+    const enableCors = proxyOptions?.enable_cors !== false;
     const requestProxy = new RequestProxy(getBackendBaseUrl(), {
       enableCors,
-      useTargetOrigin: useTargetOrigin === true,
-      useTargetReferer: useTargetReferer === true,
+      useTargetOrigin: proxyOptions?.use_target_origin === true,
+      useTargetReferer: proxyOptions?.use_target_referer === true,
     });
     const response = await requestProxy.fetch(target, {
       method: requestMethod,
