@@ -3,12 +3,16 @@ const PROXY_CONTROL_HEADERS = new Set([
     'x-proxy-host',
     'x-proxy-cors',
     'x-proxy-follow-redirect',
+    'x-proxy-origin',
+    'x-proxy-referer',
 ]);
 const PROXY_REQUEST_BLOCKED_HEADERS = new Set([
     ...PROXY_CONTROL_HEADERS,
     'proxy-host',
     'proxy-cors',
     'proxy-follow-redirect',
+    'proxy-origin',
+    'proxy-referer',
     'host',
     'connection',
     'content-length',
@@ -36,6 +40,8 @@ class RequestProxy {
     #baseUrlSource;
     #proxyPath;
     #enableCors;
+    #useTargetOrigin;
+    #useTargetReferer;
     #nativeFetch;
     #Request;
     #Headers;
@@ -52,6 +58,8 @@ class RequestProxy {
         this.#baseUrlSource = options.baseUrl ?? (() => globalThis.location?.href || '');
         this.#proxyPath = normalizeProxyPath(options.proxyPath ?? REQUEST_PROXY_PATH);
         this.#enableCors = options.enableCors !== false;
+        this.#useTargetOrigin = options.useTargetOrigin === true;
+        this.#useTargetReferer = options.useTargetReferer === true;
         this.#nativeFetch = options.fetch ?? (typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null);
         this.#Request = options.Request ?? globalThis.Request;
         this.#Headers = options.Headers ?? globalThis.Headers;
@@ -102,6 +110,8 @@ class RequestProxy {
                 proxyPath: this.#proxyPath,
                 enableCors: this.#enableCors,
                 followRedirect: redirect === 'follow',
+                useTargetOrigin: this.#useTargetOrigin,
+                useTargetReferer: this.#useTargetReferer,
             });
             const proxyInput = requestInput && this.#Request ? new this.#Request(proxyUrl, requestInput) : proxyUrl;
             const proxyInit = {...(init || {})};
@@ -129,6 +139,8 @@ class RequestProxy {
             proxyPath: this.#proxyPath,
             enableCors: this.#enableCors,
             followRedirect: false,
+            useTargetOrigin: this.#useTargetOrigin,
+            useTargetReferer: this.#useTargetReferer,
         });
         const proxyProtocol = new URL(proxyUrl).protocol;
         const proxyModule = this.#getNodeModule(proxyProtocol);
@@ -149,6 +161,8 @@ class RequestProxy {
                 proxyPath: this.#proxyPath,
                 enableCors: this.#enableCors,
                 followRedirect,
+                useTargetOrigin: this.#useTargetOrigin,
+                useTargetReferer: this.#useTargetReferer,
             }),
         };
     }
@@ -173,6 +187,8 @@ function buildRequestProxyUrl(serverUrl, targetUrl, {
     proxyPath = REQUEST_PROXY_PATH,
     enableCors = true,
     followRedirect = true,
+    useTargetOrigin = false,
+    useTargetReferer = false,
 } = {}) {
     const server = resolveUrl(serverUrl, baseUrl);
     const target = resolveUrl(targetUrl, baseUrl);
@@ -187,6 +203,8 @@ function buildRequestProxyUrl(serverUrl, targetUrl, {
     query.set('X-Proxy-Host', target.origin);
     query.set('X-Proxy-Cors', enableCors ? 'true' : 'false');
     query.set('X-Proxy-Follow-Redirect', followRedirect ? 'true' : 'false');
+    query.set('X-Proxy-Origin', useTargetOrigin ? 'true' : 'false');
+    query.set('X-Proxy-Referer', useTargetReferer ? 'true' : 'false');
     server.search = query.toString();
     return server.href;
 }

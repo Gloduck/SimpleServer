@@ -22,6 +22,8 @@ async function execute(payload, port) {
         const prepared = payload.prepared || {};
         const requestProxy = new RequestProxy(payload.network?.serverUrl || '', {
             baseUrl: payload.network?.baseUrl || '',
+            useTargetOrigin: payload.network?.useTargetOrigin === true,
+            useTargetReferer: payload.network?.useTargetReferer === true,
             fetch: nativeFetch,
             XMLHttpRequest: NativeXMLHttpRequest,
         });

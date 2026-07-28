@@ -192,6 +192,37 @@ test('正式 AI Worker 的 fetch 与 XMLHttpRequest 共用网络统计和限制'
     expect(outcome.network.responseBytes).toBe(6);
 });
 
+test('正式 AI Worker 按显式参数为代理请求启用目标来源信息', async ({page}) => {
+    let proxyUrl;
+    await page.route('**/api/requestProxy/**', async (route) => {
+        proxyUrl = new URL(route.request().url());
+        await route.fulfill({status: 200, body: 'ok'});
+    });
+    const payload = createPayload({
+        prepared: {
+            format: 'commonjs',
+            entryPath: 'main.cjs',
+            cwd: '',
+            input: {},
+            env: {},
+            args: [],
+            files: [],
+            code: 'module.exports = fetch("http://jira.example.test/rest/api/2/issue/TEST-1").then((response) => response.text());',
+        },
+    });
+    payload.network.serverUrl = 'http://127.0.0.1:4174';
+    payload.network.useTargetOrigin = true;
+    payload.network.useTargetReferer = true;
+
+    const outcome = await runAiWorker(page, payload);
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result.text).toBe('ok');
+    expect(proxyUrl.searchParams.get('X-Proxy-Host')).toBe('http://jira.example.test');
+    expect(proxyUrl.searchParams.get('X-Proxy-Origin')).toBe('true');
+    expect(proxyUrl.searchParams.get('X-Proxy-Referer')).toBe('true');
+});
+
 test('依赖准备下载与脚本执行下载使用独立累计预算', async ({page}) => {
     const runtimeBody = 'r'.repeat(30);
     await page.route('**/test/runtime-budget', (route) => route.fulfill({body: runtimeBody}));

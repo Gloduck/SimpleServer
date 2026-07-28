@@ -20,6 +20,8 @@ test('场景：代理地址保留目标路径和查询参数并附加控制参�
     assert.deepEqual(result.searchParams.getAll('X-Proxy-Host'), ['https://target.test']);
     assert.equal(result.searchParams.get('X-Proxy-Cors'), 'true');
     assert.equal(result.searchParams.get('X-Proxy-Follow-Redirect'), 'true');
+    assert.equal(result.searchParams.get('X-Proxy-Origin'), 'false');
+    assert.equal(result.searchParams.get('X-Proxy-Referer'), 'false');
 });
 
 test('场景：fetch 在服务器地址为空时原样调用原生实现', async () => {
@@ -47,6 +49,8 @@ test('场景：fetch 动态切换代理地址并过滤代理内部请求头', as
     const proxy = new RequestProxy(() => serverUrl, {
         baseUrl: 'https://page.test/workspace/',
         enableCors: false,
+        useTargetOrigin: true,
+        useTargetReferer: true,
         fetch: async (...args) => {
             calls.push(args);
             return new Response('ok');
@@ -57,6 +61,8 @@ test('场景：fetch 动态切换代理地址并过滤代理内部请求头', as
         headers: {
             'X-Test': 'value',
             'X-Proxy-Host': 'invalid.test',
+            'X-Proxy-Origin': 'invalid',
+            'Proxy-Referer': 'invalid',
             'Proxy-Cors': 'invalid',
             Host: 'invalid.test',
             Connection: 'close',
@@ -73,8 +79,12 @@ test('场景：fetch 动态切换代理地址并过滤代理内部请求头', as
     assert.equal(firstUrl.searchParams.get('X-Proxy-Host'), 'https://page.test');
     assert.equal(firstUrl.searchParams.get('X-Proxy-Cors'), 'false');
     assert.equal(firstUrl.searchParams.get('X-Proxy-Follow-Redirect'), 'false');
+    assert.equal(firstUrl.searchParams.get('X-Proxy-Origin'), 'true');
+    assert.equal(firstUrl.searchParams.get('X-Proxy-Referer'), 'true');
     assert.equal(calls[0][1].headers.get('x-test'), 'value');
     assert.equal(calls[0][1].headers.has('x-proxy-host'), false);
+    assert.equal(calls[0][1].headers.has('x-proxy-origin'), false);
+    assert.equal(calls[0][1].headers.has('proxy-referer'), false);
     assert.equal(calls[0][1].headers.has('proxy-cors'), false);
     assert.equal(calls[0][1].headers.has('host'), false);
     assert.equal(calls[0][1].headers.has('connection'), false);
@@ -129,6 +139,8 @@ test('场景：XMLHttpRequest 只改写 open 地址并继续使用原生实现',
     let serverUrl = 'https://proxy.test';
     const proxy = new RequestProxy(() => serverUrl, {
         baseUrl: 'https://page.test/',
+        useTargetOrigin: true,
+        useTargetReferer: true,
         XMLHttpRequest: NativeXMLHttpRequest,
     });
     const xhr = new proxy.XMLHttpRequest();
@@ -138,6 +150,8 @@ test('场景：XMLHttpRequest 只改写 open 地址并继续使用原生实现',
     const proxyUrl = new URL(xhr.openArgs[1]);
     assert.equal(proxyUrl.pathname, '/api/requestProxy/resource');
     assert.equal(proxyUrl.searchParams.get('X-Proxy-Host'), 'https://page.test');
+    assert.equal(proxyUrl.searchParams.get('X-Proxy-Origin'), 'true');
+    assert.equal(proxyUrl.searchParams.get('X-Proxy-Referer'), 'true');
     xhr.setRequestHeader('X-Proxy-Host', 'invalid.test');
     xhr.setRequestHeader('Connection', 'close');
     xhr.setRequestHeader('X-Test', 'value');
