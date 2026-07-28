@@ -6595,8 +6595,10 @@ function getAiAllToolDefinitions() {
         `- console output: up to ${AI_JAVASCRIPT_MAX_LOGS} log entries`,
         `- structured result collections: up to ${AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS} entries each and ${AI_JAVASCRIPT_MAX_RESULT_DEPTH} levels deep`,
       ].join("\n"),
+      "You must provide reason as one short sentence explaining what the script is intended to do.",
       "A successful call returns the script result, logs, and staged files. A failure returns ok: false with a structured error. Always check ok; logs or partially created temporary files do not mean that execution succeeded."
     ), parameters: { type: "object", properties: {
+      reason: { type: "string", description: "Required short explanation of what this JavaScript execution is intended to do." },
       code: { type: "string", maxLength: AI_JAVASCRIPT_MAX_CODE_CHARS, description: `Complete JavaScript module or script source, not a function body. Provide exactly one of code or entry_file. Set format explicitly for generated code. CommonJS returns through module.exports and generated async CommonJS should use module.exports = main(); ESM returns its module namespace and should use top-level await for async work. Up to ${AI_JAVASCRIPT_MAX_CODE_CHARS} characters.` },
       entry_file: { type: "string", description: "Workspace-relative entry-file path. Provide exactly one of entry_file or code. The entry and its static dependencies use the effective view, including unsaved editor changes. Relative imports inside the entry resolve from the entry file's directory." },
       format: { type: "string", enum: ["auto", "commonjs", "module", "umd", "global"], description: "Script format. Generated code should use commonjs or module to match its syntax. Use auto for an existing workspace file when inference from its extension, nearest package.json, and source syntax is appropriate. Do not use auto to hide mixed module syntax." },
@@ -6623,7 +6625,7 @@ function getAiAllToolDefinitions() {
         overwrite: { type: "boolean", description: "Allow replacing existing files within this directory. Defaults to false and never permits a file/directory type conflict." }
       }, required: ["path"] } },
       timeout_ms: { type: "number", exclusiveMinimum: 0, maximum: AI_JAVASCRIPT_MAX_TIMEOUT_MS, description: `Script execution timeout in milliseconds. It must be a positive finite number, defaults to ${AI_JAVASCRIPT_DEFAULT_TIMEOUT_MS}, and is capped at ${AI_JAVASCRIPT_MAX_TIMEOUT_MS}. Dependency preparation and individual network requests are also constrained by this value and their own internal limits.` }
-    } } },
+    }, required: ["reason"] } },
     { type: "function", name: "list_files", requirements: ["workspace"], description: aiToolDescription("List workspace files and directories.", "Use path relative to workspace root. Use an empty path or '.' for the workspace root. By default only the first level is listed; set recursive to true for descendants. Use max_items to keep output concise."), parameters: { type: "object", properties: { path: { type: "string", description: "Optional directory path relative to workspace root. '.' means workspace root." }, max_items: { type: "number", description: "Maximum items to return. Capped internally." }, recursive: { type: "boolean", description: "Whether to recursively list descendants. Defaults to false." } } } },
     { type: "function", name: "refresh_tree", requirements: ["workspace"], description: aiToolDescription("Refresh the workspace file tree from disk.", "Use this before locating files that may have been created, deleted, renamed, downloaded, or externally changed."), parameters: { type: "object", properties: { collapse_all: { type: "boolean", description: "Whether to collapse all directories after refreshing. Defaults to false." } } } },
     { type: "function", name: "read_file", requirements: ["workspace"], description: aiToolDescription("Read a workspace text file.", "Dirty in-memory content is returned when present. Use offset and limit for partial line-based reads. This tool only reads text-like files; binary or unsupported files will fail.", "Use max_chars to keep large files concise; default is intentionally limited."), parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "number", description: "Optional 1-based starting line number. Defaults to 1." }, limit: { type: "number", description: "Optional maximum number of lines to return." }, max_chars: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["path"] } },
@@ -7760,14 +7762,16 @@ async function aiToolSearchText({ query, path = "", max_results: maxResults = 30
   return { summary: `${results.length} match(es)`, results };
 }
 
-async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolve_from: resolveFrom, cwd, input = {}, env, args, dependencies, registry_url: registryUrl, credentials, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs } = {}, signal, session = getActiveAiSession()) {
+async function aiToolRunJavaScript({ reason, code, entry_file: entryFile, format, resolve_from: resolveFrom, cwd, input = {}, env, args, dependencies, registry_url: registryUrl, credentials, input_files: inputFiles, output_files: outputFiles, output_directories: outputDirectories, timeout_ms: timeoutMs } = {}, signal, session = getActiveAiSession()) {
   throwIfAiAborted(signal);
   const startedAt = performance.now();
   const logs = [];
+  const normalizedReason = String(reason || "").trim();
   let credentialSelection;
   let prepareNetwork;
 
   try {
+    if (!normalizedReason) throw createAiJavaScriptError("REASON_REQUIRED", "reason is required", { phase: "preflight" });
     const hasCode = code !== undefined && code !== null;
     const rawEntryFile = String(entryFile || "").trim();
     if (hasCode === Boolean(rawEntryFile)) throw createAiJavaScriptError("INVALID_ENTRY", "Provide exactly one of code or entry_file", { phase: "preflight" });
@@ -7895,7 +7899,8 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
     if (!data.ok) {
       return {
         ok: false,
-        summary: `JavaScript failed: ${data.error?.message || "Unknown error"}`,
+        summary: `JavaScript failed: ${data.error?.message || "Unknown error"}\nPurpose: ${normalizedReason}`,
+        reason: normalizedReason,
         error: serializeAiJavaScriptError(data.error),
         recovery_hint: getAiJavaScriptFailureRecoveryHint(data.error),
         logs,
@@ -7919,7 +7924,8 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
       : [];
     return {
       ok: true,
-      summary: `JavaScript completed in ${data.elapsedMs || 0}ms${stagedFiles.length ? ` and produced ${stagedFiles.length} file(s)` : ""}`,
+      summary: `JavaScript completed in ${data.elapsedMs || 0}ms${stagedFiles.length ? ` and produced ${stagedFiles.length} file(s)` : ""}\nPurpose: ${normalizedReason}`,
+      reason: normalizedReason,
       result: data.result,
       exit_code: data.exitCode || 0,
       entry_path: prepared.entryPath,
@@ -7940,6 +7946,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
     if (error?.name === "AbortError") throw error;
     return {
       ...aiJavaScriptErrorResult(error),
+      reason: normalizedReason,
       logs,
       elapsed_ms: Math.round(performance.now() - startedAt),
       requested_credentials: credentialSelection?.requested || [],
