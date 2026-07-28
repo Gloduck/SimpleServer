@@ -39,6 +39,7 @@ public class RequestProxyService {
     private static final String PROXY_FOLLOW_REDIRECT_KEY = "X-Proxy-Follow-Redirect";
     private static final String PROXY_ORIGIN_KEY = "X-Proxy-Origin";
     private static final String PROXY_REFERER_KEY = "X-Proxy-Referer";
+    private static final String SEC_FETCH_HEADER_PREFIX = "Sec-Fetch-";
     private static final Set<String> IGNORE_REQUEST_PARAMETERS = new LinkedHashSet<>(Arrays.asList(
             PROXY_HOST_KEY,
             PROXY_CORS_KEY,
@@ -409,7 +410,8 @@ public class RequestProxyService {
     private void copyRequestHeaders(MultivaluedMap<String, String> headers, HttpRequest.Builder requestBuilder,
                                     boolean includeSensitiveHeaders) {
         headers.forEach((header, values) -> {
-            if (shouldIgnoreHeader(header, IGNORE_REQUEST_HEADERS)
+            if (header.regionMatches(true, 0, SEC_FETCH_HEADER_PREFIX, 0, SEC_FETCH_HEADER_PREFIX.length())
+                    || shouldIgnoreHeader(header, IGNORE_REQUEST_HEADERS)
                     || (!includeSensitiveHeaders
                     && shouldIgnoreHeader(header, IGNORE_CROSS_ORIGIN_REDIRECT_HEADERS))) {
                 return;
