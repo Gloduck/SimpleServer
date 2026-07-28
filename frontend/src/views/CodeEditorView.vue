@@ -1096,7 +1096,12 @@ const messages = {
     "ai.toolArgs": "入参",
     "ai.toolResult": "结果",
     "ai.toolRunning": "执行中",
+    "ai.toolRunningReason": "执行中\n\n用途：{reason}",
+    "ai.toolPurpose": "用途：{reason}",
     "ai.toolCancelled": "已取消",
+    "ai.javascriptCompleted": "JavaScript 执行完成，耗时 {elapsed}ms{files}",
+    "ai.javascriptProducedFiles": "，生成 {count} 个文件",
+    "ai.javascriptFailed": "JavaScript 执行失败：{message}",
     "ai.imageGenerated": "已生成图片 {path}",
     "ai.imageEdited": "已编辑图片 {path}",
     "ai.error.emptySessionName": "AI 未返回有效的会话名称。",
@@ -1472,7 +1477,12 @@ const messages = {
     "ai.toolArgs": "Arguments",
     "ai.toolResult": "Result",
     "ai.toolRunning": "RUNNING",
+    "ai.toolRunningReason": "RUNNING\n\nPurpose: {reason}",
+    "ai.toolPurpose": "Purpose: {reason}",
     "ai.toolCancelled": "CANCELLED",
+    "ai.javascriptCompleted": "JavaScript completed in {elapsed}ms{files}",
+    "ai.javascriptProducedFiles": " and produced {count} file(s)",
+    "ai.javascriptFailed": "JavaScript failed: {message}",
     "ai.imageGenerated": "Generated image {path}",
     "ai.imageEdited": "Edited image {path}",
     "ai.error.emptySessionName": "AI did not return a valid session name.",
@@ -5752,10 +5762,16 @@ function createAiMessage(role, content, meta = {}) {
 }
 
 function addPendingAiToolMessage(call, args, session, batchIndex, batchSize) {
-  return addAiMessage("tool", tr("ai.toolRunning"), {
+  const reason = String(args?.reason || "").trim();
+  const content = reason ? tr("ai.toolRunningReason", { reason }) : tr("ai.toolRunning");
+  return addAiMessage("tool", content, {
     expanded: false,
     tool: { name: call.name, pending: true, cancelled: false, ok: null, args, result: null, batchIndex, batchSize },
   }, session);
+}
+
+function appendAiToolPurpose(summary, reason) {
+  return reason ? `${summary}\n\n${tr("ai.toolPurpose", { reason })}` : summary;
 }
 
 function completeAiToolMessage(message, result) {
@@ -6516,6 +6532,7 @@ function getAiToolDefinitions() {
 }
 
 function getAiAllToolDefinitions() {
+  const reasonLanguage = settings.locale === "zh-CN" ? "Chinese" : "English";
   return [
     { type: "function", name: "get_tool_availability", description: aiToolDescription(
       "Check current AI tool availability and requirement status.",
@@ -6595,10 +6612,10 @@ function getAiAllToolDefinitions() {
         `- console output: up to ${AI_JAVASCRIPT_MAX_LOGS} log entries`,
         `- structured result collections: up to ${AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS} entries each and ${AI_JAVASCRIPT_MAX_RESULT_DEPTH} levels deep`,
       ].join("\n"),
-      "You must provide reason as one short sentence explaining what the script is intended to do.",
+      `You must provide reason as one short sentence explaining what the script is intended to do. Write reason in ${reasonLanguage} to match the current interface language.`,
       "A successful call returns the script result, logs, and staged files. A failure returns ok: false with a structured error. Always check ok; logs or partially created temporary files do not mean that execution succeeded."
     ), parameters: { type: "object", properties: {
-      reason: { type: "string", description: "Required short explanation of what this JavaScript execution is intended to do." },
+      reason: { type: "string", description: `Required short explanation of what this JavaScript execution is intended to do. Write it in ${reasonLanguage}.` },
       code: { type: "string", maxLength: AI_JAVASCRIPT_MAX_CODE_CHARS, description: `Complete JavaScript module or script source, not a function body. Provide exactly one of code or entry_file. Set format explicitly for generated code. CommonJS returns through module.exports and generated async CommonJS should use module.exports = main(); ESM returns its module namespace and should use top-level await for async work. Up to ${AI_JAVASCRIPT_MAX_CODE_CHARS} characters.` },
       entry_file: { type: "string", description: "Workspace-relative entry-file path. Provide exactly one of entry_file or code. The entry and its static dependencies use the effective view, including unsaved editor changes. Relative imports inside the entry resolve from the entry file's directory." },
       format: { type: "string", enum: ["auto", "commonjs", "module", "umd", "global"], description: "Script format. Generated code should use commonjs or module to match its syntax. Use auto for an existing workspace file when inference from its extension, nearest package.json, and source syntax is appropriate. Do not use auto to hide mixed module syntax." },
@@ -7899,7 +7916,7 @@ async function aiToolRunJavaScript({ reason, code, entry_file: entryFile, format
     if (!data.ok) {
       return {
         ok: false,
-        summary: `JavaScript failed: ${data.error?.message || "Unknown error"}\nPurpose: ${normalizedReason}`,
+        summary: appendAiToolPurpose(tr("ai.javascriptFailed", { message: data.error?.message || "Unknown error" }), normalizedReason),
         reason: normalizedReason,
         error: serializeAiJavaScriptError(data.error),
         recovery_hint: getAiJavaScriptFailureRecoveryHint(data.error),
@@ -7922,9 +7939,10 @@ async function aiToolRunJavaScript({ reason, code, entry_file: entryFile, format
     const stagedFiles = workspace
       ? await stageAiJavaScriptOutputs(validatedOutputs, workspace, session, signal)
       : [];
+    const filesSummary = stagedFiles.length ? tr("ai.javascriptProducedFiles", { count: stagedFiles.length }) : "";
     return {
       ok: true,
-      summary: `JavaScript completed in ${data.elapsedMs || 0}ms${stagedFiles.length ? ` and produced ${stagedFiles.length} file(s)` : ""}\nPurpose: ${normalizedReason}`,
+      summary: appendAiToolPurpose(tr("ai.javascriptCompleted", { elapsed: data.elapsedMs || 0, files: filesSummary }), normalizedReason),
       reason: normalizedReason,
       result: data.result,
       exit_code: data.exitCode || 0,
@@ -7944,8 +7962,10 @@ async function aiToolRunJavaScript({ reason, code, entry_file: entryFile, format
   } catch (error) {
     prepareNetwork?.abortAll(error);
     if (error?.name === "AbortError") throw error;
+    const errorResult = aiJavaScriptErrorResult(error);
     return {
-      ...aiJavaScriptErrorResult(error),
+      ...errorResult,
+      summary: appendAiToolPurpose(tr("ai.javascriptFailed", { message: errorResult.summary }), normalizedReason),
       reason: normalizedReason,
       logs,
       elapsed_ms: Math.round(performance.now() - startedAt),
