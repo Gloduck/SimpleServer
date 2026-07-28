@@ -6533,6 +6533,7 @@ function getAiAllToolDefinitions() {
       "Execute a complete JavaScript program in an isolated browser Worker for computation, data transformation, network requests, and declared workspace file processing. The runtime implements a documented subset of Node.js APIs, not a complete Node.js environment. Do not assume that an unlisted module or method is available.",
       "Choose an explicit format for generated code instead of relying on inference. CommonJS uses require() and module.exports; generated async CommonJS must execute and export its entry Promise with module.exports = main() so the task runs and is awaited. Do not use module.exports = main or module.exports = async () => {...}; those forms only export a function without executing the task. ESM uses import, export, and top-level await; use export default await main() when returning one async result. UMD returns module.exports when available, otherwise its detected global export. A global script must expose returned values through globalThis.",
       "Do not mix CommonJS and ESM syntax. CommonJS does not support import(). ESM dynamic import() accepts only a string literal. Every require(), static import, and dynamic import() that must be prepared before execution must use a direct string literal, not a variable, template literal, or concatenated string. Do not catch and ignore entry errors. Handle an error only when the script can recover; otherwise let it reject or throw. To mark an explicit failure, set a nonzero process.exitCode or call process.exit() with a nonzero code.",
+      "If a package's ESM graph fails specifically with UNSUPPORTED_ESM_CYCLE and the package also exports CommonJS, retry that package with format commonjs and require(). Do not switch formats for unrelated syntax, dependency, or runtime errors.",
       "Relative modules, JSON, workspace node_modules, npm Registry packages, and HTTP/HTTPS modules are supported. Workspace code should use ordinary bare package names and declare Registry packages missing from the workspace through dependencies. Runtime-specific npm: and direct HTTP/HTTPS module specifiers are for temporary inline code and should not be written into workspace files unless the user explicitly requests that format. Prefer version-pinned, browser-compatible packages with small dependency trees. For small tasks, prefer a pinned single-file CDN build; use an npm package when its complete module or resource set is needed. Do not assume that an arbitrary npm entry point works in a browser Worker.",
       [
         "Dependency usage examples:",
@@ -6573,13 +6574,13 @@ function getAiAllToolDefinitions() {
       "node:fs exposes promises, readFileSync, writeFileSync, statSync, existsSync, readdirSync, readFile, writeFile, createWriteStream, and a compatibility-only recursive mkdirSync; writes create missing parents automatically. node:fs/promises exposes access, readFile, writeFile, stat, readdir, mkdir, unlink, and rm. Do not use rename, createReadStream, file watchers, permission changes, file-descriptor operations, or other unlisted filesystem APIs.",
       [
         "Supported built-ins (the same names without node: are accepted as aliases):",
-        "- Core and data: node:assert, node:assert/strict, node:buffer, node:events, node:path, node:path/posix, node:process, node:punycode, node:querystring, node:string_decoder, node:tty, node:url, node:util, and node:util/types.",
+        "- Core and data: node:assert, node:assert/strict, node:buffer, node:cluster, node:events, node:path, node:path/posix, node:process, node:punycode, node:querystring, node:string_decoder, node:tty, node:url, node:util, and node:util/types.",
         "- Files and network: node:fs, node:fs/promises, node:http, and node:https.",
         "- Streams, timers, and compression: node:stream, node:stream/promises, node:stream/web, node:timers, node:timers/promises, and node:zlib.",
         "- Cryptography APIs: node:crypto exposes webcrypto, subtle, getRandomValues, randomBytes, randomFill, randomFillSync, randomInt, randomUUID, createHash, createHmac, timingSafeEqual, PBKDF2, HKDF, scrypt, createCipheriv, createDecipheriv, and createECDH.",
         "- Hash algorithms: md5, sha1, sha224, sha256, sha384, sha512, sha512-224, sha512-256, sha3-224/256/384/512, shake128, shake256, ripemd160, blake2b512, and blake2s256. MD5 and SHA-1 are provided only for legacy compatibility and should not be used for new security-sensitive work.",
         "- Cipher and ECDH algorithms: AES-128/192/256 in CBC, CTR, CFB, ECB, and GCM modes; ChaCha20-Poly1305; and ECDH curves prime256v1, secp256k1, secp384r1, and secp521r1. Cipher update() buffers input and final() returns the result. Authenticated ciphers support only 16-byte tags, AES-GCM IVs must be at least 8 bytes, scrypt maxmem is capped at 64 MiB, and symmetric CryptoKey/KeyObject inputs are unsupported.",
-        "node:process is limited to argv, env, cwd(), exit(), exitCode, and nextTick(). node:tty provides isatty() and reports false because the Worker has no terminal. node:http provides METHODS, STATUS_CODES, header validation, and minimal get/request; node:https provides only minimal get/request. Prefer fetch, and do not use setEncoding, resume, Agent, sockets, or connection-pool APIs. node:zlib supports buffered deflate/inflate, raw deflate/inflate, gzip/gunzip, and unzip APIs but not Brotli or full native streaming semantics.",
+        "node:process is limited to argv, env, cwd(), exit(), exitCode, and nextTick(). node:cluster exposes single-process primary-state metadata and event APIs for package-loading compatibility; creating worker processes and cluster IPC are unsupported. node:tty provides isatty() and reports false because the Worker has no terminal. node:http provides METHODS, STATUS_CODES, header validation, and minimal get/request; node:https provides only minimal get/request. Prefer fetch, and do not use setEncoding, resume, Agent, sockets, or connection-pool APIs. node:zlib supports buffered deflate/inflate, raw deflate/inflate, gzip/gunzip, and unzip APIs but not Brotli or full native streaming semantics.",
         "Unsupported Node features include child_process, os, worker_threads, net, tls, dns, native extensions, RSA/DSA signing, PEM/KeyObject/certificate APIs, CommonJS import(), variable dynamic imports, and cyclic ESM dependencies.",
       ].join("\n"),
       "During execution, fetch, XMLHttpRequest, node:http, and node:https share request-count, per-response-size, cumulative-download-size, and timeout limits. Requests use RequestProxy when the backend is available and otherwise use the browser network directly, which may still be blocked by CORS, DNS, TLS, or browser security policy.",
@@ -7895,7 +7896,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
         ok: false,
         summary: `JavaScript failed: ${data.error?.message || "Unknown error"}`,
         error: serializeAiJavaScriptError(data.error),
-        recovery_hint: AI_JAVASCRIPT_FAILURE_RECOVERY_HINT,
+        recovery_hint: getAiJavaScriptFailureRecoveryHint(data.error),
         logs,
         log_stats: data.logStats,
         network: data.network,
@@ -8023,7 +8024,14 @@ function isAiJavaScriptTextOutput(path, type, mimeType) {
 
 function aiJavaScriptErrorResult(error) {
   const serialized = serializeAiJavaScriptError(error);
-  return { ok: false, summary: serialized.message, error: serialized, recovery_hint: AI_JAVASCRIPT_FAILURE_RECOVERY_HINT, files_written: [] };
+  return { ok: false, summary: serialized.message, error: serialized, recovery_hint: getAiJavaScriptFailureRecoveryHint(error), files_written: [] };
+}
+
+function getAiJavaScriptFailureRecoveryHint(error) {
+  if (error?.code === "UNSUPPORTED_ESM_CYCLE") {
+    return "This package's ESM graph contains a cycle that the browser runtime cannot load. If the package also exports CommonJS, retry with format commonjs and require(); otherwise explain the limitation.";
+  }
+  return AI_JAVASCRIPT_FAILURE_RECOVERY_HINT;
 }
 
 function normalizeAiJavaScriptArray(value, field) {

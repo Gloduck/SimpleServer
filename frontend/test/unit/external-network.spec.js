@@ -21,6 +21,81 @@ test.describe('外部依赖网络集成', () => {
         expect(result).toBe('2024-02-29');
     });
 
+    test('从 npm Registry 加载依赖 node:cluster 的 GitBeaker ESM 包', async ({page}) => {
+        await page.route('https://gitlab.example.test/api/v4/user', (route) => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({id: 1, username: 'gitlab-user'}),
+        }));
+        const result = await page.evaluate(async () => {
+            const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
+            const prepared = await prepareRunScript({
+                format: 'module',
+                code: [
+                    'import {Gitlab, Search} from "@gitbeaker/rest";',
+                    'const client = new Gitlab({host: "https://gitlab.example.test", token: "test-token"});',
+                    'const user = await client.Users.showCurrentUser();',
+                    'export default {type: typeof Search, methods: Object.getOwnPropertyNames(Search.prototype), username: user.username};',
+                ].join('\n'),
+                dependencies: ['@gitbeaker/rest@43.7.0'],
+            });
+            return (await new NodeWorker(prepared).run()).exports.default;
+        });
+
+        expect(result.type).toBe('function');
+        expect(result.methods).toContain('constructor');
+        expect(result.username).toBe('gitlab-user');
+    });
+
+    test('从 npm Registry 加载 jira.js 并创建 Version3Client', async ({page}) => {
+        await page.route('https://jira.example.test/**', (route) => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({id: '10001', key: 'TEST-1'}),
+        }));
+        const result = await page.evaluate(async () => {
+            const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
+            const prepared = await prepareRunScript({
+                format: 'commonjs',
+                code: [
+                    'const {Version3Client} = require("jira.js");',
+                    'const client = new Version3Client({',
+                    '  host: "https://jira.example.test",',
+                    '  authentication: {basic: {email: "test@example.test", apiToken: "test-token"}},',
+                    '});',
+                    'module.exports = client.issues.getIssue({issueIdOrKey: "TEST-1"}).then((issue) => ({',
+                    '  client: typeof client, issues: typeof client.issues, getIssue: typeof client.issues.getIssue, issueKey: issue.key,',
+                    '}));',
+                ].join('\n'),
+                dependencies: ['jira.js@5.4.0'],
+            });
+            return (await new NodeWorker(prepared).run()).exports;
+        });
+
+        expect(result).toEqual({client: 'object', issues: 'object', getIssue: 'function', issueKey: 'TEST-1'});
+    });
+
+    test('从 npm Registry 加载 Octokit 并创建客户端', async ({page}) => {
+        await page.route('https://api.github.com/user', (route) => route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({login: 'octocat'}),
+        }));
+        const result = await page.evaluate(async () => {
+            const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;
+            const prepared = await prepareRunScript({
+                format: 'module',
+                code: [
+                    'import {Octokit} from "octokit";',
+                    'const client = new Octokit({auth: "test-token"});',
+                    'const response = await client.request("GET /user");',
+                    'export default {client: typeof client, request: typeof client.request, rest: typeof client.rest, graphql: typeof client.graphql, login: response.data.login};',
+                ].join('\n'),
+                dependencies: ['octokit@5.0.5'],
+            });
+            return (await new NodeWorker(prepared).run()).exports.default;
+        });
+
+        expect(result).toEqual({client: 'object', request: 'function', rest: 'object', graphql: 'function', login: 'octocat'});
+    });
+
     test('从 CDN 加载 nanoid ESM 及其远程相对依赖', async ({page}) => {
         const result = await page.evaluate(async () => {
             const {NodeWorker, prepareRunScript} = globalThis.runtimeHarness;

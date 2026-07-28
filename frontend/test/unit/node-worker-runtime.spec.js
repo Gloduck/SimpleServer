@@ -42,6 +42,43 @@ test('node:tty isatty 与原生 Node 的非 TTY 行为一致', async ({page}) =>
     });
 });
 
+test('node:cluster 提供单进程兼容状态并拒绝创建 Worker', async ({page}) => {
+    const result = await runNodeWorker(page, {
+        format: 'module',
+        code: [
+            'import cluster, {isPrimary, isWorker} from "node:cluster";',
+            'let forkError;',
+            'try { cluster.fork(); } catch (error) { forkError = {code: error.code, message: error.message}; }',
+            'const setupResult = cluster.setupPrimary({silent: true});',
+            'const setupMasterResult = cluster.setupMaster({serialization: "json"});',
+            'export default {',
+            '  alias: cluster === (await import("cluster")).default,',
+            '  eventEmitter: typeof cluster.on === "function" && typeof cluster.setMaxListeners === "function",',
+            '  setupReturnsUndefined: setupResult === undefined && setupMasterResult === undefined,',
+            '  settings: cluster.settings,',
+            '  isPrimary,',
+            '  isWorker,',
+            '  workers: Object.keys(cluster.workers).length,',
+            '  forkError,',
+            '};',
+        ].join('\n'),
+    });
+
+    expect(result.exports.default).toEqual({
+        alias: true,
+        eventEmitter: true,
+        setupReturnsUndefined: true,
+        settings: {silent: true, serialization: 'json'},
+        isPrimary: true,
+        isWorker: false,
+        workers: 0,
+        forkError: {
+            code: 'ERR_CLUSTER_UNSUPPORTED',
+            message: 'Cluster worker processes are not supported in the browser runtime',
+        },
+    });
+});
+
 test('浏览器 Buffer Polyfill 支持常用编码、复制和数值读写', async ({page}) => {
     const result = await runNodeWorker(page, {
         format: 'commonjs',

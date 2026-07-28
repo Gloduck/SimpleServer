@@ -88,6 +88,32 @@ test('包子路径按嵌套 exports 条件分别解析 CommonJS 和 ESM', async 
     expect(esm.exports.default).toBe('esm-subpath');
 });
 
+test('包解析优先使用 browser 条件、内部映射和 imports 默认目标', async ({page}) => {
+    const result = await runNodeWorker(page, {
+        entryPath: 'workspace/main.mjs',
+        files: [
+            {path: 'workspace/main.mjs', content: 'import value from "example"; export default value;'},
+            {
+                path: 'workspace/node_modules/example/package.json',
+                content: JSON.stringify({
+                    type: 'module',
+                    exports: {browser: './browser-entry.js', import: './node-entry.js'},
+                    imports: {'#runtime': {node: './node-runtime.js', default: './browser-runtime.js'}},
+                    browser: {'./node-helper.js': './browser-helper.js'},
+                }),
+            },
+            {path: 'workspace/node_modules/example/browser-entry.js', content: 'import helper from "./node-helper.js"; import runtime from "#runtime"; export default `${helper}:${runtime}`;'},
+            {path: 'workspace/node_modules/example/node-entry.js', content: 'export default "node-entry";'},
+            {path: 'workspace/node_modules/example/node-helper.js', content: 'export default "node-helper";'},
+            {path: 'workspace/node_modules/example/browser-helper.js', content: 'export default "browser-helper";'},
+            {path: 'workspace/node_modules/example/node-runtime.js', content: 'export default "node-runtime";'},
+            {path: 'workspace/node_modules/example/browser-runtime.js', content: 'export default "browser-runtime";'},
+        ],
+    });
+
+    expect(result.exports.default).toBe('browser-helper:browser-runtime');
+});
+
 test('CommonJS 加载相对模块、扩展名省略和 JSON', async ({page}) => {
     const result = await runNodeWorker(page, {
         entryPath: 'workspace/main.cjs',

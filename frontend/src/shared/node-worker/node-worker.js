@@ -32,6 +32,7 @@ const BUILTIN_ALIASES = new Map([
     ['assert', 'node:assert'],
     ['assert/strict', 'node:assert/strict'],
     ['buffer', 'node:buffer'],
+    ['cluster', 'node:cluster'],
     ['crypto', 'node:crypto'],
     ['events', 'node:events'],
     ['fs', 'node:fs'],
@@ -171,6 +172,7 @@ class NodeWorker {
                 SlowBuffer,
                 kMaxLength,
             }],
+            ['node:cluster', createClusterModule()],
             ['node:crypto', createCryptoModule(this.Buffer)],
             ['node:events', EventEmitter],
             ['node:path', path],
@@ -626,7 +628,17 @@ class NodeWorker {
         this.scriptGlobalRestores.clear();
     }
 
-    resolveModule(specifier, parentPath, mode) {
+    resolveModule(specifier, parentPath, mode, mappedSpecifiers = new Set()) {
+        const mappingKey = `${parentPath}\0${specifier}\0${mode}`;
+        if (!mappedSpecifiers.has(mappingKey)) {
+            mappedSpecifiers.add(mappingKey);
+            const packageTarget = specifier.startsWith('#')
+                ? this.resolvePackageImportTarget(specifier, parentPath, mode)
+                : this.resolveBrowserTarget(specifier, parentPath);
+            if (packageTarget) {
+                return this.resolveModule(packageTarget.specifier, packageTarget.parentPath, mode, mappedSpecifiers);
+            }
+        }
         const candidates = [];
         if (specifier.startsWith('/') || specifier.startsWith('./') || specifier.startsWith('../')) {
             const base = specifier.startsWith('/') ? '' : getParentFilePath(parentPath);
@@ -655,6 +667,51 @@ class NodeWorker {
             specifier,
             parent: displayPath(parentPath),
         });
+    }
+
+    resolvePackageImportTarget(specifier, parentPath, mode) {
+        const scope = this.findPackageScope(parentPath);
+        if (!scope) return null;
+        const target = packageImport(scope.manifest, specifier, mode);
+        if (!target) return null;
+        return {
+            specifier: target,
+            parentPath: target.startsWith('.') ? scope.packagePath : parentPath,
+        };
+    }
+
+    resolveBrowserTarget(specifier, parentPath) {
+        const scope = this.findPackageScope(parentPath);
+        const browser = scope?.manifest?.browser;
+        if (!browser || typeof browser !== 'object' || Array.isArray(browser)) return null;
+        const candidates = [specifier];
+        if (specifier.startsWith('./') || specifier.startsWith('../')) {
+            const resolved = resolveLogicalPath(specifier, getParentFilePath(parentPath));
+            const relative = relativeModulePath(resolved, scope.root);
+            if (relative !== null) candidates.unshift(`./${relative}`);
+        }
+        const key = candidates.find((candidate) => Object.prototype.hasOwnProperty.call(browser, candidate));
+        if (!key || typeof browser[key] !== 'string') return null;
+        return {
+            specifier: browser[key],
+            parentPath: browser[key].startsWith('.') ? scope.packagePath : parentPath,
+        };
+    }
+
+    findPackageScope(path) {
+        let directory = getParentFilePath(path);
+        while (true) {
+            const packagePath = joinFilePath(directory, 'package.json');
+            if (this.isFile(packagePath)) {
+                try {
+                    return {root: directory, packagePath, manifest: JSON.parse(this.readModuleText(packagePath))};
+                } catch {
+                    return null;
+                }
+            }
+            if (!directory) return null;
+            directory = getParentFilePath(directory);
+        }
     }
 
     resolveModuleCandidate(path, mode, visited) {
@@ -1015,6 +1072,8 @@ function isJavaScriptFile(file) {
 function packageEntry(manifest, mode) {
     const target = packageExport(manifest, '.', mode);
     if (target) return target;
+    if (typeof manifest?.browser === 'string') return manifest.browser;
+    if (mode === 'import' && typeof manifest?.module === 'string') return manifest.module;
     return typeof manifest?.main === 'string' ? manifest.main : '';
 }
 
@@ -1039,13 +1098,36 @@ function conditionalPackageExport(target, mode) {
     }
     if (!target || typeof target !== 'object') return '';
     const conditions = mode === 'import'
-        ? ['import', 'browser', 'default', 'require']
-        : ['require', 'browser', 'default', 'import'];
+        ? ['browser', 'import', 'default', 'require']
+        : ['browser', 'require', 'default', 'import'];
     for (const condition of conditions) {
         const resolved = conditionalPackageExport(target[condition], mode);
         if (resolved) return resolved;
     }
     return '';
+}
+
+function packageImport(manifest, specifier, mode) {
+    const imports = manifest?.imports;
+    if (!imports || typeof imports !== 'object' || Array.isArray(imports)) return '';
+    if (Object.prototype.hasOwnProperty.call(imports, specifier)) {
+        return conditionalPackageExport(imports[specifier], mode);
+    }
+    for (const [pattern, target] of Object.entries(imports)) {
+        const star = pattern.indexOf('*');
+        if (star === -1 || !specifier.startsWith(pattern.slice(0, star)) || !specifier.endsWith(pattern.slice(star + 1))) continue;
+        const match = specifier.slice(star, specifier.length - (pattern.length - star - 1));
+        return conditionalPackageExport(target, mode).replaceAll('*', match);
+    }
+    return '';
+}
+
+function relativeModulePath(path, root) {
+    const normalizedPath = normalizeFilePath(path);
+    const normalizedRoot = normalizeFilePath(root);
+    if (normalizedPath === normalizedRoot) return '';
+    if (!normalizedRoot || !normalizedPath.startsWith(`${normalizedRoot}/`)) return null;
+    return normalizedPath.slice(normalizedRoot.length + 1);
 }
 
 function splitPackageSpecifier(specifier) {
@@ -1186,6 +1268,38 @@ function createPathModule(getCwd) {
 
 function createTtyModule() {
     return {isatty: () => false};
+}
+
+function createClusterModule() {
+    const cluster = new EventEmitter();
+    Object.assign(cluster, {
+        SCHED_NONE: 1,
+        SCHED_RR: 2,
+        schedulingPolicy: 2,
+        isPrimary: true,
+        isMaster: true,
+        isWorker: false,
+        worker: undefined,
+        workers: {},
+        settings: {},
+        setupPrimary(settings = {}) {
+            cluster.settings = {...cluster.settings, ...settings};
+            cluster.emit('setup', cluster.settings);
+        },
+        setupMaster(settings = {}) {
+            cluster.setupPrimary(settings);
+        },
+        disconnect(callback) {
+            queueMicrotask(() => {
+                cluster.emit('disconnect');
+                if (typeof callback === 'function') callback();
+            });
+        },
+        fork() {
+            throw nodeWorkerError('ERR_CLUSTER_UNSUPPORTED', 'Cluster worker processes are not supported in the browser runtime');
+        },
+    });
+    return cluster;
 }
 
 function createStreamPromisesModule(Stream) {

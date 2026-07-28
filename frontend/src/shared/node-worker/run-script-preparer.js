@@ -14,6 +14,7 @@ const BUILTIN_MODULES = new Set([
     'assert',
     'assert/strict',
     'buffer',
+    'cluster',
     'crypto',
     'events',
     'fs',
@@ -243,6 +244,7 @@ function createRunScriptPreparer(config = {}) {
     async function resolveDependency(context, parent, dependency) {
         const specifier = dependency.specifier;
         if (specifier === 'path/posix') return 'node:path/posix';
+        if (specifier.startsWith('#')) return null;
         if (isBuiltinSpecifier(specifier)) return null;
         if (specifier.startsWith('npm:')) {
             const target = await resolveNpmSpecifier(context, specifier, parent, parent.depth + 1);
@@ -843,17 +845,41 @@ function mergeModuleSpecifiers(...collections) {
 }
 
 function packageEntry(manifest, mode) {
-    const exports = manifest?.exports;
-    if (typeof exports === 'string') return exports;
-    if (exports && typeof exports === 'object') {
-        const root = exports['.'] || exports;
-        if (typeof root === 'string') return root;
-        if (root && typeof root === 'object') {
-            const target = root[mode] || root.default || root.require || root.import;
-            if (typeof target === 'string') return target;
-        }
-    }
+    const target = packageExport(manifest, '.', mode);
+    if (target) return target;
+    if (typeof manifest?.browser === 'string') return manifest.browser;
+    if (mode === 'import' && typeof manifest?.module === 'string') return manifest.module;
     return typeof manifest?.main === 'string' ? manifest.main : '';
+}
+
+function packageExport(manifest, subpath, mode) {
+    const exports = manifest?.exports;
+    if (!exports) return '';
+    const target = exports && typeof exports === 'object' && !Array.isArray(exports)
+        && Object.keys(exports).some((key) => key.startsWith('.'))
+        ? exports[subpath]
+        : subpath === '.' ? exports : undefined;
+    return conditionalPackageExport(target, mode);
+}
+
+function conditionalPackageExport(target, mode) {
+    if (typeof target === 'string') return target;
+    if (Array.isArray(target)) {
+        for (const value of target) {
+            const resolved = conditionalPackageExport(value, mode);
+            if (resolved) return resolved;
+        }
+        return '';
+    }
+    if (!target || typeof target !== 'object') return '';
+    const conditions = mode === 'import'
+        ? ['browser', 'import', 'default', 'require']
+        : ['browser', 'require', 'default', 'import'];
+    for (const condition of conditions) {
+        const resolved = conditionalPackageExport(target[condition], mode);
+        if (resolved) return resolved;
+    }
+    return '';
 }
 
 function getEffectiveModuleFormat(module, packageManifest, detectedFormat) {
