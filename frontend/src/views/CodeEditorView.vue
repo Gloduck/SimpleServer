@@ -863,6 +863,7 @@ const AI_JAVASCRIPT_MAX_FILE_COUNT = 1000;
 const AI_JAVASCRIPT_MAX_LOGS = 100;
 const AI_JAVASCRIPT_MAX_REQUEST_COUNT = 100;
 const AI_JAVASCRIPT_MAX_PREPARE_REQUEST_COUNT = 200;
+const AI_JAVASCRIPT_FAILURE_RECOVERY_HINT = "Inspect the structured error and correct the script, arguments, dependencies, or supported-runtime assumptions before retrying. If the task cannot run in the documented browser runtime, explain the limitation instead of silently changing the execution environment.";
 const AI_JAVASCRIPT_MAX_RESULT_COLLECTION_ITEMS = 100;
 const AI_JAVASCRIPT_MAX_RESULT_DEPTH = 5;
 const SSH_OUTPUT_MAX_CHARS = 120000;
@@ -6313,6 +6314,7 @@ function getAgentInstructions() {
     "When multiple independent tool calls are needed and their inputs are already known, issue those tool calls together in the same response instead of one per round. Prefer batch tools when available to reduce latency and token usage.",
     "Use tools only when they are necessary. If a tool result is sufficient to answer the request, stop calling more tools and answer from that result. Do not retry with alternate URLs, formats, or sources just to confirm information that is already clear.",
     "When using tools, make focused calls, request the smallest output that can answer the user, and explicitly set available output limits for simple lookups or large-result tools. Keep output limits as small as possible while still completing the task to avoid bloating context.",
+    "Choose an execution environment from the user's requested target and keep that boundary throughout the task. A failure in one environment does not grant permission to move execution to another environment. Remote-host tools are only for tasks that explicitly target a configured remote host or inherently depend on that host's state.",
     "Never claim something changed unless you have confirmed it through the available context.",
     "Resolve references like 'the file you created' from Recent chat and AI-touched files before using the current editor file. If multiple files match, ask a short clarification instead of editing or deleting the current file by default.",
     "Prefer small, targeted edits. Explain changed files briefly; do not paste whole modified files in chat.",
@@ -6667,12 +6669,13 @@ function getAiAllToolDefinitions() {
       max_chars: { type: "number", description: aiToolOutputLimitDescription() }
     }, required: ["url"] } },
     { type: "function", name: "get_ssh_connections", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Get SSH settings exposed to AI.", "Returns id, name, host, port, active state, and command whitelist. Secrets are never returned. Use this before opening or choosing an SSH connection when the target is ambiguous."), parameters: { type: "object", properties: {} } },
-    { type: "function", name: "open_ssh_connection", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Open an exposed SSH connection by id, name, or host.", "The backend SSH WebSocket performs the actual SSH connection. Reuse active connections when possible instead of reconnecting."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
+    { type: "function", name: "open_ssh_connection", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Open an exposed SSH connection by id, name, or host.", "The backend SSH WebSocket performs the actual SSH connection. Reuse active connections when possible instead of reconnecting.", "Open a connection only for a task that explicitly targets or inherently depends on that remote host."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "activate_ssh_terminal", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Switch the visible editor tab to an already active exposed SSH terminal.", "This does not execute any SSH command. It requires the connection to already be active."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "close_ssh_connection", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Close an active exposed SSH connection by id, name, or host.", "Use only when the user asks to disconnect or when cleanup is clearly part of the requested task."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." } }, required: ["connection"] } },
     { type: "function", name: "read_ssh_output", requirements: ["backend", "ssh_exposed"], description: aiToolDescription("Read recent output from an active exposed SSH connection.", "This reads the SSH terminal transcript. Commands run through execute_ssh_command and commands manually typed by the user can both appear here, along with their outputs, prompts, and terminal control artifacts.", "Use this to inspect terminal context when needed. When the distinction matters, separate AI-run commands and results from user-run commands and results before drawing conclusions. Output may be truncated and may include ANSI terminal artifacts."), parameters: { type: "object", properties: { connection: { type: "string", description: "SSH setting id, name, or host." }, max_chars: { type: "number", description: aiToolOutputLimitDescription() } }, required: ["connection"] } },
     { type: "function", name: "execute_ssh_command", requirements: ["backend", "ssh_exposed"], description: aiToolDescription(
       "Execute a command on an active exposed SSH connection.",
+      "Use this only for work that must occur on the selected remote host.",
       "Prefer commands from the connection whitelist when they can complete the task, and choose concise commands or flags that produce short output when possible.",
       "You must provide a clear reason, commands array containing every main command used by the shell command, and high_risk based on your own risk assessment.",
       "If an SSH command approval is rejected, do not try alternate SSH commands for the same purpose unless the user explicitly asks you to continue or grants permission. List every SSH command you ran in your final answer."
@@ -7892,6 +7895,7 @@ async function aiToolRunJavaScript({ code, entry_file: entryFile, format, resolv
         ok: false,
         summary: `JavaScript failed: ${data.error?.message || "Unknown error"}`,
         error: serializeAiJavaScriptError(data.error),
+        recovery_hint: AI_JAVASCRIPT_FAILURE_RECOVERY_HINT,
         logs,
         log_stats: data.logStats,
         network: data.network,
@@ -8019,7 +8023,7 @@ function isAiJavaScriptTextOutput(path, type, mimeType) {
 
 function aiJavaScriptErrorResult(error) {
   const serialized = serializeAiJavaScriptError(error);
-  return { ok: false, summary: serialized.message, error: serialized, files_written: [] };
+  return { ok: false, summary: serialized.message, error: serialized, recovery_hint: AI_JAVASCRIPT_FAILURE_RECOVERY_HINT, files_written: [] };
 }
 
 function normalizeAiJavaScriptArray(value, field) {
