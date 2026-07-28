@@ -1148,6 +1148,9 @@ const messages = {
     "ssh.closedStatus": "SSH 已断开 {name}",
     "ssh.connectFailedStatus": "SSH 连接失败",
     "ssh.connectFailed": "SSH 连接失败",
+    "ssh.connectTimeout": "连接超时，未收到后端响应",
+    "ssh.websocketAbnormalClose": "WebSocket 异常关闭（代码 1006，浏览器未收到服务端原因）。请检查后端服务、HTTPS/WSS 和反向代理的 WebSocket Upgrade 配置。",
+    "ssh.websocketClosed": "WebSocket 已关闭（代码 {code}）",
     "ssh.deletedStatus": "已删除 SSH 设置 {name}",
     "ssh.confirmDelete": "确定删除 SSH 设置“{name}”吗？",
     "ssh.confirmUnauthorizedCommand": "AI 请求执行白名单外 SSH 命令，需要授权。\n\n连接：{name}\n主命令：{commands}\n说明：{reason}\n命令：{command}",
@@ -1521,6 +1524,9 @@ const messages = {
     "ssh.closedStatus": "SSH disconnected {name}",
     "ssh.connectFailedStatus": "SSH connection failed",
     "ssh.connectFailed": "SSH connection failed",
+    "ssh.connectTimeout": "Connection timed out without a response from the backend",
+    "ssh.websocketAbnormalClose": "WebSocket closed abnormally (code 1006, no server reason was available to the browser). Check the backend service, HTTPS/WSS, and the reverse proxy WebSocket Upgrade configuration.",
+    "ssh.websocketClosed": "WebSocket closed (code {code})",
     "ssh.deletedStatus": "Deleted SSH setting {name}",
     "ssh.confirmDelete": "Delete SSH setting “{name}”?",
     "ssh.confirmUnauthorizedCommand": "AI requests to run an SSH command outside the whitelist. Approval is required.\n\nConnection: {name}\nMain commands: {commands}\nReason: {reason}\nCommand: {command}",
@@ -2758,11 +2764,11 @@ async function connectSshConfig(config) {
     session.websocketUrl = buildSshWebSocketUrl();
     socket = new WebSocket(session.websocketUrl);
   } catch (error) {
-    failSshConnection(session);
+    failSshConnection(session, error?.message);
     return session;
   }
   session.ws = socket;
-  session.connectTimer = window.setTimeout(() => failSshConnection(session), SSH_CONNECT_TIMEOUT_MS);
+  session.connectTimer = window.setTimeout(() => failSshConnection(session, tr("ssh.connectTimeout")), SSH_CONNECT_TIMEOUT_MS);
   socket.addEventListener("open", () => {
     fitSshTerminal(session);
     socket.send(JSON.stringify({ type: "connect", ...buildSshConnectPayload(normalized, session) }));
@@ -2774,17 +2780,13 @@ async function connectSshConfig(config) {
       markSshSessionClosed(session);
       return;
     }
-    if (!session.connected && !session.connectFailed) {
-      failSshConnection(session);
+    if (!session.connected) {
+      if (!session.connectFailed) failSshConnection(session, getSshWebSocketCloseReason(event));
       return;
     }
-    const reason = event.reason || (event.code && event.code !== 1000 ? `WebSocket closed (${event.code})` : "");
+    const reason = getSshWebSocketCloseReason(event);
     if (reason) appendSshOutput(session, `\n[${new Date().toLocaleTimeString(settings.locale)}] ${reason}\n`);
     markSshSessionClosed(session);
-  });
-  socket.addEventListener("error", () => {
-    if (session.closing) return;
-    failSshConnection(session);
   });
   return session;
 }
@@ -2812,6 +2814,7 @@ function createSshSession(config) {
     heartbeatTimer: 0,
     connectTimer: 0,
     connectFailed: false,
+    failureReason: "",
     closing: false,
     websocketUrl: "",
     startedAt: Date.now(),
@@ -3305,25 +3308,34 @@ function handleSshWebSocketMessage(session, raw) {
     return;
   }
   if (event.type === "error") {
-    failSshConnection(session);
+    failSshConnection(session, event.message);
     return;
   }
   touchSshState();
 }
 
-function failSshConnection(session) {
+function failSshConnection(session, reason = "") {
   if (!session) return;
   window.clearTimeout(session.connectTimer);
   session.connectTimer = 0;
   session.connectFailed = true;
+  session.failureReason = String(reason || "").trim();
   session.closing = false;
   session.connected = false;
   setSshTerminalInputEnabled(session, false);
   window.clearInterval(session.heartbeatTimer);
   session.heartbeatTimer = 0;
-  const message = tr("ssh.connectFailed");
+  const message = session.failureReason ? `${tr("ssh.connectFailed")}: ${session.failureReason}` : tr("ssh.connectFailed");
   appendSshOutput(session, `\n[${new Date().toLocaleTimeString(settings.locale)}] ${message}\n`);
-  setStatus(tr("ssh.connectFailedStatus"), session.title);
+  setStatus(tr("ssh.connectFailedStatus"), session.failureReason || session.title);
+}
+
+function getSshWebSocketCloseReason(event) {
+  const reason = String(event?.reason || "").trim();
+  if (reason) return reason;
+  if (event?.code === 1006) return tr("ssh.websocketAbnormalClose");
+  if (event?.code && event.code !== 1000) return tr("ssh.websocketClosed", { code: event.code });
+  return "";
 }
 
 function appendSshOutput(session, data) {
@@ -8453,7 +8465,7 @@ async function waitForSshSessionConnected(session, timeoutMs = SSH_CONNECT_TIMEO
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     if (session.connected) return session;
-    if (session.connectFailed) throw new Error(tr("ssh.connectFailed"));
+    if (session.connectFailed) throw new Error(session.failureReason || tr("ssh.connectFailed"));
     if (session.closing || session.ws?.readyState === WebSocket.CLOSED) throw new Error(tr("ssh.disconnected"));
     await delay(100);
   }

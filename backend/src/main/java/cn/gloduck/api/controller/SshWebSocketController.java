@@ -17,9 +17,13 @@ import jakarta.websocket.server.ServerEndpoint;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 @ServerEndpoint("/api/ssh/ws")
 public class SshWebSocketController {
+    private static final Logger LOGGER = Logger.getLogger(SshWebSocketController.class.getName());
+
     @Inject
     SshService sshService;
 
@@ -32,6 +36,7 @@ public class SshWebSocketController {
         try {
             sshService.verify(queryValue(session.getQueryString(), "securityKey"));
         } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "SSH WebSocket authentication failed: {0}", e.getMessage());
             session.close(new CloseReason(CloseReason.CloseCodes.VIOLATED_POLICY, e.getMessage()));
         }
     }
@@ -69,6 +74,7 @@ public class SshWebSocketController {
                 send(SshWebSocketEvent.error("unsupported message type: " + type));
             }
         } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "SSH WebSocket message failed", e);
             send(SshWebSocketEvent.error(e.getMessage()));
         }
     }
@@ -83,6 +89,7 @@ public class SshWebSocketController {
 
     @OnError
     public void onError(Throwable throwable) {
+        LOGGER.log(Level.WARNING, "SSH WebSocket failed", throwable);
         onClose();
     }
 
