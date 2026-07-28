@@ -362,7 +362,10 @@ public class RequestProxyService {
             authority = proxyHost.substring(schemeIndex + 3);
         }
         String targetPath = path == null || path.isEmpty() ? "/" : "/" + path;
-        return new URI(scheme, authority, targetPath, buildQuery(query), null);
+        URI targetOrigin = new URI(scheme, authority, null, null, null);
+        String rawQuery = new URI(null, null, null, buildQuery(query), null).getRawQuery();
+        String target = targetOrigin.toASCIIString() + targetPath;
+        return new URI(rawQuery == null ? target : target + "?" + rawQuery);
     }
 
     private String buildQuery(MultivaluedMap<String, String> query) {
