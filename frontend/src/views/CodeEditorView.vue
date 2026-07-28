@@ -550,7 +550,7 @@
               <a v-if="previewPageUrl" class="icon-button preview-external-link" :href="previewPageUrl" target="_blank" rel="noopener noreferrer" :title="tr('preview.openNewTab')" :aria-label="tr('preview.openNewTab')">
                 <span class="codicon codicon-link-external" aria-hidden="true"></span>
               </a>
-              <button type="button" class="icon-button" :title="tr('action.close')" :aria-label="tr('action.close')" @click="closePreview">
+              <button type="button" class="icon-button" :title="tr('action.close')" :aria-label="tr('action.close')" @click="closePreview()">
                 <span class="codicon codicon-close" aria-hidden="true"></span>
               </button>
             </div>
