@@ -37,10 +37,14 @@ public class RequestProxyService {
     private static final String PROXY_HOST_KEY = "X-Proxy-Host";
     private static final String PROXY_CORS_KEY = "X-Proxy-Cors";
     private static final String PROXY_FOLLOW_REDIRECT_KEY = "X-Proxy-Follow-Redirect";
+    private static final String PROXY_ORIGIN_KEY = "X-Proxy-Origin";
+    private static final String PROXY_REFERER_KEY = "X-Proxy-Referer";
     private static final Set<String> IGNORE_REQUEST_PARAMETERS = new LinkedHashSet<>(Arrays.asList(
             PROXY_HOST_KEY,
             PROXY_CORS_KEY,
-            PROXY_FOLLOW_REDIRECT_KEY));
+            PROXY_FOLLOW_REDIRECT_KEY,
+            PROXY_ORIGIN_KEY,
+            PROXY_REFERER_KEY));
     private static final Set<String> IGNORE_REQUEST_HEADERS = new LinkedHashSet<>(Arrays.asList(
             "Host",
             "Connection",
@@ -48,14 +52,16 @@ public class RequestProxyService {
             "Transfer-Encoding",
             "Upgrade",
             "Expect",
+            "Origin",
+            "Referer",
             PROXY_HOST_KEY,
             PROXY_CORS_KEY,
-            PROXY_FOLLOW_REDIRECT_KEY));
+            PROXY_FOLLOW_REDIRECT_KEY,
+            PROXY_ORIGIN_KEY,
+            PROXY_REFERER_KEY));
     private static final Set<String> IGNORE_CROSS_ORIGIN_REDIRECT_HEADERS = new LinkedHashSet<>(Arrays.asList(
             "Authorization",
-            "Cookie",
-            "Origin",
-            "Referer"));
+            "Cookie"));
     private static final Set<String> IGNORE_RESPONSE_HEADERS = new LinkedHashSet<>(Arrays.asList(
             "Connection",
             "Content-Length",
@@ -86,12 +92,15 @@ public class RequestProxyService {
         }
 
         boolean enableCors = isCorsEnabled(headers, query);
-        boolean followRedirect = isRedirectEnabled(headers, query);
         HttpResponse<InputStream> response;
         try {
+            ProxyRequestOptions options = new ProxyRequestOptions(
+                    isRedirectEnabled(headers, query),
+                    isProxyHeaderEnabled(headers, query, PROXY_ORIGIN_KEY),
+                    isProxyHeaderEnabled(headers, query, PROXY_REFERER_KEY));
             String scheme = resolveRequestScheme(headers, proxyHost);
             URI targetUri = buildTargetUri(proxyHost, scheme, path, filterRequestParameters(query));
-            response = sendRequest(method, body, headers, targetUri, followRedirect);
+            response = sendRequest(method, body, headers, targetUri, options);
         } catch (URISyntaxException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity("Invalid proxy target URI").build();
         } catch (IllegalArgumentException e) {
@@ -113,7 +122,7 @@ public class RequestProxyService {
     }
 
     private HttpResponse<InputStream> sendRequest(String method, InputStream body, HttpHeaders headers, URI targetUri,
-                                                   boolean followRedirect)
+                                                   ProxyRequestOptions options)
             throws IOException, InterruptedException {
         String currentMethod = method;
         boolean hasBody = body != null && !"GET".equals(method) && !"HEAD".equals(method);
@@ -126,11 +135,14 @@ public class RequestProxyService {
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(targetUri)
                     .method(currentMethod, currentBody);
             copyRequestHeaders(headers.getRequestHeaders(), requestBuilder, includeSensitiveHeaders);
+            applyProxyRequestHeaders(requestBuilder, targetUri, options);
             HttpResponse<InputStream> response = httpClient.send(
                     requestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
 
             String location = response.headers().firstValue("Location").orElse(null);
-            if (!followRedirect || !isRedirectStatus(response.statusCode()) || StringUtils.isNullOrEmpty(location)) {
+            if (!options.followRedirect()
+                    || !isRedirectStatus(response.statusCode())
+                    || StringUtils.isNullOrEmpty(location)) {
                 return response;
             }
 
@@ -405,6 +417,17 @@ public class RequestProxyService {
         });
     }
 
+    private void applyProxyRequestHeaders(HttpRequest.Builder requestBuilder, URI targetUri,
+                                          ProxyRequestOptions options) {
+        String targetOrigin = buildTargetOrigin(targetUri);
+        if (options.useTargetOrigin()) {
+            requestBuilder.header("Origin", targetOrigin);
+        }
+        if (options.useTargetReferer()) {
+            requestBuilder.header("Referer", targetOrigin + "/");
+        }
+    }
+
     private void copyResponseHeaders(Map<String, List<String>> sourceHeaders, Response.ResponseBuilder responseBuilder) {
         sourceHeaders.forEach((header, values) -> {
             if (shouldIgnoreHeader(header, IGNORE_RESPONSE_HEADERS)) {
@@ -457,6 +480,19 @@ public class RequestProxyService {
         return ignoredHeaders.stream().anyMatch(ignored -> ignored.equalsIgnoreCase(header));
     }
 
+    private boolean isProxyHeaderEnabled(HttpHeaders headers, MultivaluedMap<String, String> queryParameters,
+                                         String key) {
+        String value = getFirstHeader(headers, key);
+        if (StringUtils.isNullOrEmpty(value)) {
+            value = queryParameters.getFirst(key);
+        }
+        return isTruthy(value);
+    }
+
+    private static String buildTargetOrigin(URI targetUri) {
+        return targetUri.getScheme() + "://" + targetUri.getRawAuthority();
+    }
+
     private boolean isTruthy(String value) {
         return "true".equalsIgnoreCase(value) || "1".equals(value) || "yes".equalsIgnoreCase(value);
     }
@@ -484,5 +520,8 @@ public class RequestProxyService {
             builder.proxy(ProxySelector.of(proxyAddress));
         }
         return builder.build();
+    }
+
+    private record ProxyRequestOptions(boolean followRedirect, boolean useTargetOrigin, boolean useTargetReferer) {
     }
 }
