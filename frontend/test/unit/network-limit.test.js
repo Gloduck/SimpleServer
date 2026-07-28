@@ -165,6 +165,7 @@ class FakeXMLHttpRequest extends EventTarget {
             this.dispatchEvent(progress);
             if (this.aborted) return;
             this.readyState = this.DONE;
+            this.dispatchEvent(new Event('readystatechange'));
             this.dispatchEvent(new Event('load'));
             this.dispatchEvent(new Event('loadend'));
         });

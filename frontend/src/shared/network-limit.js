@@ -173,14 +173,37 @@ function createLimitedXMLHttpRequest(NativeXMLHttpRequest, {baseUrl, limits, sta
             state.pendingOperations += 1;
             state.requests.add(this);
 
-            const onReadyStateChange = () => {
-                if (this.readyState !== this.HEADERS_RECEIVED) return;
-                const declaredSize = Number(this.getResponseHeader('content-length'));
-                if (!Number.isFinite(declaredSize)) return;
+            const recordFinalSize = () => {
+                const finalSize = getXMLHttpRequestResponseSize(this);
+                const difference = Math.max(0, finalSize - this.#loadedBytes);
+                this.#loadedBytes += difference;
+                state.responseBytes += difference;
                 try {
-                    assertResponseSize(declaredSize, state.responseBytes + declaredSize, this.#url, limits, state);
+                    assertResponseSize(this.#loadedBytes, state.responseBytes, this.#url, limits, state);
                 } catch (error) {
                     this.#failLimit(error);
+                }
+            };
+            const finishOperation = () => {
+                if (!this.#active) return;
+                this.#active = false;
+                state.pendingOperations = Math.max(0, state.pendingOperations - 1);
+                state.requests.delete(this);
+            };
+            const onReadyStateChange = () => {
+                if (this.readyState === this.HEADERS_RECEIVED) {
+                    const declaredSize = Number(this.getResponseHeader('content-length'));
+                    if (Number.isFinite(declaredSize)) {
+                        try {
+                            assertResponseSize(declaredSize, state.responseBytes + declaredSize, this.#url, limits, state);
+                        } catch (error) {
+                            this.#failLimit(error);
+                        }
+                    }
+                }
+                if (this.readyState === this.DONE) {
+                    recordFinalSize();
+                    finishOperation();
                 }
             };
             const onProgress = (event) => {
@@ -194,37 +217,27 @@ function createLimitedXMLHttpRequest(NativeXMLHttpRequest, {baseUrl, limits, sta
                     this.#failLimit(error);
                 }
             };
-            const onLoad = () => {
-                const finalSize = getXMLHttpRequestResponseSize(this);
-                const difference = Math.max(0, finalSize - this.#loadedBytes);
-                this.#loadedBytes += difference;
-                state.responseBytes += difference;
-                try {
-                    assertResponseSize(this.#loadedBytes, state.responseBytes, this.#url, limits, state);
-                } catch (error) {
-                    this.#failLimit(error);
-                }
-            };
+            const onRequestFailure = finishOperation;
             const onLoadEnd = () => {
                 this.removeEventListener('readystatechange', onReadyStateChange);
                 this.removeEventListener('progress', onProgress);
-                this.removeEventListener('load', onLoad);
+                this.removeEventListener('abort', onRequestFailure);
+                this.removeEventListener('error', onRequestFailure);
+                this.removeEventListener('timeout', onRequestFailure);
                 this.removeEventListener('loadend', onLoadEnd);
-                if (this.#active) {
-                    this.#active = false;
-                    state.pendingOperations = Math.max(0, state.pendingOperations - 1);
-                    state.requests.delete(this);
-                }
             };
 
             this.addEventListener('readystatechange', onReadyStateChange);
             this.addEventListener('progress', onProgress);
-            this.addEventListener('load', onLoad);
+            this.addEventListener('abort', onRequestFailure);
+            this.addEventListener('error', onRequestFailure);
+            this.addEventListener('timeout', onRequestFailure);
             this.addEventListener('loadend', onLoadEnd);
             try {
                 return super.send(body);
             } catch (error) {
                 onLoadEnd();
+                finishOperation();
                 throw error;
             }
         }
