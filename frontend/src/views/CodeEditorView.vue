@@ -494,12 +494,12 @@
         </button>
       </div>
       <div class="tabs" role="tablist">
-        <button v-for="file in openFileList" :key="file.path" class="tab" :class="{ active: file.path === activePath && !activeDiffPath && !activeSshTerminal }" :title="file.path" role="tab" :aria-selected="file.path === activePath && !activeDiffPath && !activeSshTerminal" @click="activateFile(file.path)">
+        <button v-for="file in openFileList" :key="file.path" class="tab" :class="{ active: file.path === activePath && !activeDiffPath && !activeSshTerminal }" :title="file.path" role="tab" :aria-selected="file.path === activePath && !activeDiffPath && !activeSshTerminal" @click="activateFile(file.path)" @auxclick.middle="closeFile(file.path)">
           <span class="tab-name">{{ file.name }}</span>
           <span class="dirty-dot">{{ file.dirty ? '•' : '' }}</span>
           <span class="tab-close" :title="tr('action.close')" @click.stop="closeFile(file.path)">×</span>
         </button>
-        <button v-for="terminal in sshTerminalTabs" :key="`ssh:${terminal.configId}`" class="tab ssh-tab" :class="{ active: terminal.configId === activeSshTerminalId }" :title="terminal.title" role="tab" :aria-selected="terminal.configId === activeSshTerminalId" @click="activateSshTerminal(terminal.configId)">
+        <button v-for="terminal in sshTerminalTabs" :key="`ssh:${terminal.configId}`" class="tab ssh-tab" :class="{ active: terminal.configId === activeSshTerminalId }" :title="terminal.title" role="tab" :aria-selected="terminal.configId === activeSshTerminalId" @click="activateSshTerminal(terminal.configId)" @auxclick.middle="closeSshTerminalTab(terminal.configId)">
           <span class="codicon codicon-terminal" aria-hidden="true"></span>
           <span class="tab-name">{{ terminal.title }}</span>
           <span class="dirty-dot">{{ terminal.connected ? '●' : '' }}</span>
