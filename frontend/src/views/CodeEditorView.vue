@@ -842,6 +842,7 @@ function waitForAiSessionTransaction(transaction) {
 const AI_COMPLETION_MANUAL_PREFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_SUFFIX_CHARS = 500;
 const AI_COMPLETION_MANUAL_MAX_OUTPUT_TOKENS = 512;
+const AI_RESPONSE_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
 const AI_IMAGE_MAX_FILE_SIZE = 20 * 1024 * 1024;
 const AI_IMAGE_MASK_MAX_FILE_SIZE = 4 * 1024 * 1024;
 const AI_IMAGE_OUTPUT_MAX_FILE_SIZE = 25 * 1024 * 1024;
@@ -5203,6 +5204,18 @@ function getAiBaseUrl() {
 
 async function callOpenAiResponses(payload, signal) {
   const startedAt = performance.now();
+  for (let retry = 0; ; retry += 1) {
+    try {
+      return await requestOpenAiResponse(payload, signal, startedAt);
+    } catch (error) {
+      if (signal?.aborted || error.name === "AbortError" || retry >= AI_RESPONSE_RETRY_DELAYS_MS.length || !isRetryableAiResponseError(error)) throw error;
+      const retryDelay = error.retryAfterMs ?? AI_RESPONSE_RETRY_DELAYS_MS[retry];
+      await delayWithAbortSignal(retryDelay, signal);
+    }
+  }
+}
+
+async function requestOpenAiResponse(payload, signal, startedAt) {
   const response = await fetch(`${getAiBaseUrl()}/responses`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${settings.ai.apiKey.trim()}` },
@@ -5211,9 +5224,19 @@ async function callOpenAiResponses(payload, signal) {
   });
   if (!response.ok || !response.headers.get("content-type")?.includes("text/event-stream")) {
     const raw = await response.text();
-    const data = raw ? JSON.parse(raw) : {};
+    let data = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      data = { message: raw };
+    }
     Object.defineProperty(data, "__meta", { value: { ms: Math.round(performance.now() - startedAt), bytes: raw.length }, enumerable: false });
-    if (!response.ok) throw new Error(data.error?.message || data.message || response.statusText);
+    if (!response.ok) {
+      const error = new Error(data.error?.message || data.message || response.statusText);
+      error.status = response.status;
+      error.retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
+      throw error;
+    }
     return data;
   }
 
@@ -5249,6 +5272,39 @@ async function callOpenAiResponses(payload, signal) {
   const data = completedResponse;
   Object.defineProperty(data, "__meta", { value: { ms: Math.round(performance.now() - startedAt), bytes }, enumerable: false });
   return data;
+}
+
+function isRetryableAiResponseError(error) {
+  const status = Number(error?.status);
+  if ([408, 409, 425, 429].includes(status) || (status >= 500 && status < 600)) return true;
+  if (error instanceof TypeError) return true;
+  return /(?:overloaded|server busy|try again later|temporarily unavailable|temporary capacity)/i.test(error?.message || "");
+}
+
+function parseRetryAfterMs(value) {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : null;
+}
+
+function delayWithAbortSignal(ms, signal) {
+  if (signal?.aborted) return Promise.reject(createAiAbortError());
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(done, ms);
+    signal?.addEventListener("abort", abort, { once: true });
+
+    function done() {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }
+
+    function abort() {
+      window.clearTimeout(timer);
+      reject(createAiAbortError());
+    }
+  });
 }
 
 async function callOpenAiImage(options, signal) {
