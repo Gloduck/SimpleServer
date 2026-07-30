@@ -5841,7 +5841,7 @@ function handleAiMessagesWheel(event) {
 
 function scrollAiMessagesToBottom(force = false) {
   const element = aiMessagesEl.value;
-  if (!element || (!force && (!aiMessagesFollowOutput || !activeAiSession.value?.busy))) return;
+  if (!element || (!force && !aiMessagesFollowOutput)) return;
   element.scrollTop = element.scrollHeight;
   aiMessagesFollowOutput = true;
 }
