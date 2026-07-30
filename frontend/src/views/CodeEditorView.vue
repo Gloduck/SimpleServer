@@ -175,7 +175,7 @@
           </div>
         </div>
         <div class="ai-chat">
-          <div ref="aiMessagesEl" class="ai-chat-messages">
+          <div ref="aiMessagesEl" class="ai-chat-messages" @scroll.passive="handleAiMessagesScroll" @wheel.passive="handleAiMessagesWheel" @load.capture="scrollAiMessagesToBottom()">
             <div v-if="aiMessages.length === 0" class="workspace-card">{{ tr('ai.empty') }}</div>
             <article v-for="message in aiMessages" :key="message.id" class="ai-message" :class="`ai-message-${message.role}`">
               <template v-if="message.role === 'tool' && message.tool">
@@ -773,6 +773,7 @@ const DEFAULT_SIDEBAR_WIDTH = 300;
 const PREVIEW_MIN_WIDTH = 280;
 const PREVIEW_MAX_WIDTH = 900;
 const DEFAULT_PREVIEW_WIDTH = 480;
+const AI_MESSAGES_BOTTOM_TOLERANCE_PX = 2;
 const defaultSettings = { theme: "vs-dark", locale: "zh-CN", fontSize: 14, wordWrap: false, minimap: true, maxMemoryReadBytes: DEFAULT_MAX_MEMORY_READ_BYTES, maxMemoryWriteBytes: DEFAULT_MAX_MEMORY_WRITE_BYTES, shortcuts: { ...vscodeShortcuts }, ai: { ...defaultAiSettings }, backend: { ...defaultBackendSettings }, ssh: { ...defaultSshSettings } };
 
 class AiSessionStore {
@@ -1875,6 +1876,7 @@ const aiSessionFingerprints = new Map();
 let aiSessionsReady = false;
 let updatingAiSessionTimestamps = false;
 let aiSessionPersistTask = Promise.resolve();
+let aiMessagesFollowOutput = true;
 const aiPrompt = computed({
   get: () => activeAiSession.value?.prompt ?? aiSessionDraft.prompt,
   set: (value) => {
@@ -1996,7 +1998,7 @@ watch(activeSshTerminalId, () => { nextTick(attachActiveSshTerminal); });
 watch(activeAiSessionId, () => {
   aiSessionTitleEditing.value = false;
   aiSessionMenuVisible.value = false;
-  nextTick(scrollAiMessagesToBottom);
+  nextTick(() => scrollAiMessagesToBottom(true));
 });
 watch(aiSessions, handleAiSessionsChanged, { deep: true, flush: "sync" });
 watch(searchMatchCase, () => { if (searchSearched.value && searchQuery.value.trim()) runGlobalSearch(); });
@@ -5827,9 +5829,21 @@ function removeAiTouchedPath(path) {
   refreshAiTouchedFlags();
 }
 
-function scrollAiMessagesToBottom() {
+function handleAiMessagesScroll() {
   const element = aiMessagesEl.value;
-  if (element) element.scrollTop = element.scrollHeight;
+  if (!element) return;
+  aiMessagesFollowOutput = element.scrollHeight - element.scrollTop - element.clientHeight <= AI_MESSAGES_BOTTOM_TOLERANCE_PX;
+}
+
+function handleAiMessagesWheel(event) {
+  if (event.deltaY < 0) aiMessagesFollowOutput = false;
+}
+
+function scrollAiMessagesToBottom(force = false) {
+  const element = aiMessagesEl.value;
+  if (!element || (!force && (!aiMessagesFollowOutput || !activeAiSession.value?.busy))) return;
+  element.scrollTop = element.scrollHeight;
+  aiMessagesFollowOutput = true;
 }
 
 function handleAiPromptKeydown(event) {
@@ -9157,7 +9171,7 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .ai-history-delete { width: 28px; height: 28px; margin-right: 8px; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
 .code-editor-view .ai-history-delete:hover:not(:disabled) { border-color: var(--border); background: var(--panel-soft); color: #ffb3b3; }
 .code-editor-view .ai-chat { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; flex: 1; }
-.code-editor-view .ai-chat-messages { display: grid; align-content: start; gap: 10px; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: 0 12px 12px; }
+.code-editor-view .ai-chat-messages { display: grid; align-content: start; gap: 10px; min-height: 0; overflow: hidden auto; overflow-anchor: none; padding: 0 12px 12px; }
 .code-editor-view .ai-message { display: grid; min-width: 0; gap: 5px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-soft); }
 .code-editor-view .ai-message strong { color: var(--accent-strong); font-size: 12px; }
 .code-editor-view .ai-message-user strong { color: var(--text); }
