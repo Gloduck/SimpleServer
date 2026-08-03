@@ -5466,10 +5466,10 @@ function extractFunctionCalls(response) {
   return (response.output || []).filter((item) => item.type === "function_call" && item.name);
 }
 
-function createAiSessionDraft() {
+function createAiSessionDraft(options = {}) {
   return {
     title: "",
-    agentModel: String(getAgentModels()[0] || "").trim(),
+    agentModel: String(options.agentModel || getAgentModels()[0] || "").trim(),
     reasoningEffort: settings.ai.reasoningEffort,
     prompt: "",
     saved: Boolean(settings.ai.autoSaveSessions),
@@ -5477,8 +5477,8 @@ function createAiSessionDraft() {
   };
 }
 
-function resetAiSessionDraft() {
-  Object.assign(aiSessionDraft, createAiSessionDraft());
+function resetAiSessionDraft(options = {}) {
+  Object.assign(aiSessionDraft, createAiSessionDraft(options));
 }
 
 function createAiSession(options = {}) {
@@ -5630,8 +5630,9 @@ function getActiveAiSession() {
 
 function createAiSessionAndActivate() {
   if (!activeAiSession.value) return;
+  const agentModel = activeAiSession.value.agentModel;
   activeAiSessionId.value = "";
-  resetAiSessionDraft();
+  resetAiSessionDraft({ agentModel });
   closeAiHistory();
 }
 
