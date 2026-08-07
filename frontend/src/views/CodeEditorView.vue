@@ -578,6 +578,9 @@
       <button type="button" role="menuitem" @click="runContextAction('new-folder')">{{ tr('action.newFolder') }}</button>
       <div class="context-separator" aria-hidden="true"></div>
       <button type="button" role="menuitem" :disabled="!contextMenu.node" @click="runContextAction('save-as')">{{ tr('action.saveAs') }}</button>
+      <button type="button" role="menuitem" :disabled="!canRunPersistentNodeAction(contextMenu.node, 'rename')" @click="runContextAction('rename')">{{ tr('action.rename') }}</button>
+      <button type="button" role="menuitem" :disabled="!canRunPersistentNodeAction(contextMenu.node, 'move')" @click="runContextAction('move')">{{ tr('action.move') }}</button>
+      <button type="button" role="menuitem" :disabled="!canRunPersistentNodeAction(contextMenu.node, 'copy')" @click="runContextAction('copy')">{{ tr('action.copy') }}</button>
       <div class="context-separator" aria-hidden="true"></div>
       <button type="button" role="menuitem" class="danger" :disabled="!contextMenu.node" @click="runContextAction('delete')">{{ tr('action.delete') }}</button>
       <div class="context-separator" aria-hidden="true"></div>
@@ -600,6 +603,12 @@
         <label v-if="isPromptDialogMode(dialogState.mode)" class="editor-dialog-input-row">
           <span>{{ dialogState.inputLabel }}</span>
           <input ref="dialogInput" v-model="dialogState.value" type="text" :placeholder="dialogState.placeholder" autocomplete="off" spellcheck="false" />
+        </label>
+        <label v-if="isSelectDialogMode(dialogState.mode)" class="editor-dialog-input-row">
+          <span>{{ dialogState.inputLabel }}</span>
+          <select ref="dialogSelect" v-model="dialogState.value">
+            <option v-for="option in dialogState.selectOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
         </label>
         <label v-if="dialogState.optionLabel" class="editor-dialog-option" :class="{ disabled: dialogState.optionDisabled }">
           <input ref="dialogOptionInput" v-model="dialogState.optionChecked" type="checkbox" :disabled="dialogState.optionDisabled" />
@@ -910,6 +919,9 @@ const messages = {
     "action.saveAs": "另存为",
     "action.newFile": "新建文件",
     "action.newFolder": "新建文件夹",
+    "action.rename": "重命名",
+    "action.move": "移动",
+    "action.copy": "复制",
     "action.delete": "删除",
     "action.revert": "回滚更改",
     "action.refreshTree": "刷新文件树",
@@ -977,6 +989,7 @@ const messages = {
     "settings.importInvalid": "URL 中的 settings 参数无法解析，已忽略。",
     "workspace.none": "未打开文件夹",
     "workspace.treeEmpty": "尚未载入文件树",
+    "workspace.root": "工作区根目录",
     "changes.none": "没有未保存的变更",
     "changes.openDiff": "打开对比",
     "changes.deleted": "待删除",
@@ -1019,6 +1032,9 @@ const messages = {
     "status.openedFile": "已打开 {name}",
     "status.savedFile": "已保存 {name}",
     "status.deleted": "已删除 {path}",
+    "status.renamed": "已将 {source} 重命名为 {destination}",
+    "status.moved": "已将 {source} 移动到 {destination}",
+    "status.copied": "已将 {source} 复制到 {destination}",
     "status.pendingCreate": "已标记新建 {path}",
     "status.pendingDelete": "已标记删除 {path}",
     "status.reverted": "已回滚 {path}",
@@ -1228,6 +1244,11 @@ const messages = {
     "preview.openNewTab": "在新页签中打开",
     "prompt.newFile": "输入新文件路径",
     "prompt.newFolder": "输入新文件夹路径",
+    "prompt.renameNode": "输入新名称",
+    "prompt.moveNode": "选择“{path}”要移动到的文件夹",
+    "prompt.copyNode": "选择“{path}”要复制到的文件夹",
+    "dialog.name": "名称",
+    "dialog.destinationFolder": "目标文件夹",
     "fileAction.applyImmediately": "立即应用到磁盘",
     "fileAction.createImmediateHint": "取消选中后，文件会作为未保存的新建变更，保存时才写入磁盘。",
     "fileAction.deleteImmediateHint": "取消选中后，文件会标记为待删除，保存时才从磁盘删除。",
@@ -1247,6 +1268,15 @@ const messages = {
     "error.destinationInsideSource": "不能把文件夹另存到它自身或其子文件夹中。",
     "error.createFile": "新建文件失败",
     "error.createFolder": "新建文件夹失败",
+    "error.rename": "重命名失败",
+    "error.move": "移动失败",
+    "error.copy": "复制失败",
+    "error.unsavedNodeTransfer": "“{path}”包含 {count} 个未保存文件，请先保存或回滚这些变更。",
+    "error.destinationExists": "目标已存在：{path}",
+    "error.nodeNotPersisted": "该项目尚未写入磁盘，无法执行此操作：{path}",
+    "error.nodeActionUnsupported": "当前文件系统不支持此操作：{path}",
+    "error.overlappingNodeTransfer": "不能在相互重叠的目录之间执行此操作。",
+    "error.noMoveDestination": "工作区中没有可移动到的其他文件夹。",
     "error.openFolder": "打开文件夹失败",
     "error.refreshTree": "刷新文件树失败",
     "error.openFile": "打开文件失败",
@@ -1291,6 +1321,9 @@ const messages = {
     "action.saveAs": "Save As",
     "action.newFile": "New File",
     "action.newFolder": "New Folder",
+    "action.rename": "Rename",
+    "action.move": "Move",
+    "action.copy": "Copy",
     "action.delete": "Delete",
     "action.revert": "Revert Changes",
     "action.refreshTree": "Refresh Tree",
@@ -1358,6 +1391,7 @@ const messages = {
     "settings.importInvalid": "The settings parameter in the URL could not be parsed and was ignored.",
     "workspace.none": "No Folder Opened",
     "workspace.treeEmpty": "No file tree loaded",
+    "workspace.root": "Workspace Root",
     "changes.none": "No unsaved changes",
     "changes.openDiff": "Open Diff",
     "changes.deleted": "Pending delete",
@@ -1400,6 +1434,9 @@ const messages = {
     "status.openedFile": "Opened {name}",
     "status.savedFile": "Saved {name}",
     "status.deleted": "Deleted {path}",
+    "status.renamed": "Renamed {source} to {destination}",
+    "status.moved": "Moved {source} to {destination}",
+    "status.copied": "Copied {source} to {destination}",
     "status.pendingCreate": "Marked {path} as new",
     "status.pendingDelete": "Marked {path} for deletion",
     "status.reverted": "Reverted {path}",
@@ -1609,6 +1646,11 @@ const messages = {
     "preview.openNewTab": "Open in New Tab",
     "prompt.newFile": "Enter new file path",
     "prompt.newFolder": "Enter new folder path",
+    "prompt.renameNode": "Enter a new name",
+    "prompt.moveNode": "Choose a folder to move “{path}” into",
+    "prompt.copyNode": "Choose a folder to copy “{path}” into",
+    "dialog.name": "Name",
+    "dialog.destinationFolder": "Destination folder",
     "fileAction.applyImmediately": "Apply immediately to disk",
     "fileAction.createImmediateHint": "Clear this option to keep the file as an unsaved creation until it is saved.",
     "fileAction.deleteImmediateHint": "Clear this option to mark the file for deletion and remove it from disk only when saved.",
@@ -1628,6 +1670,15 @@ const messages = {
     "error.destinationInsideSource": "A folder cannot be saved inside itself or one of its subfolders.",
     "error.createFile": "Failed to create file",
     "error.createFolder": "Failed to create folder",
+    "error.rename": "Failed to rename",
+    "error.move": "Failed to move",
+    "error.copy": "Failed to copy",
+    "error.unsavedNodeTransfer": "“{path}” contains {count} unsaved file(s). Save or revert those changes first.",
+    "error.destinationExists": "Destination already exists: {path}",
+    "error.nodeNotPersisted": "This item has not been written to disk: {path}",
+    "error.nodeActionUnsupported": "The current file system does not support this operation: {path}",
+    "error.overlappingNodeTransfer": "This operation cannot use overlapping source and destination directories.",
+    "error.noMoveDestination": "There is no other folder in this workspace to move the item into.",
     "error.openFolder": "Failed to open folder",
     "error.refreshTree": "Failed to refresh file tree",
     "error.openFile": "Failed to open file",
@@ -1837,9 +1888,10 @@ const status = reactive({ left: "Ready", right: "Monaco Editor" });
 const contextMenu = reactive({ visible: false, x: 0, y: 0, node: null });
 const changesContextMenu = reactive({ visible: false, x: 0, y: 0, file: null });
 const dialogInput = ref(null);
+const dialogSelect = ref(null);
 const dialogOptionInput = ref(null);
 const dialogPrimaryButton = ref(null);
-const dialogState = reactive({ visible: false, mode: "alert", title: "", message: "", value: "", inputLabel: "", placeholder: "", optionLabel: "", optionHint: "", optionChecked: false, optionDisabled: false, confirmLabel: "", cancelLabel: "", tone: "default", selectOnFocus: false, closeOnBackdrop: true });
+const dialogState = reactive({ visible: false, mode: "alert", title: "", message: "", value: "", inputLabel: "", placeholder: "", selectOptions: [], optionLabel: "", optionHint: "", optionChecked: false, optionDisabled: false, confirmLabel: "", cancelLabel: "", tone: "default", selectOnFocus: false, closeOnBackdrop: true });
 const settings = reactive(loadSettings());
 const maxMemoryReadMb = computed({
   get: () => bytesToMegabytes(settings.maxMemoryReadBytes),
@@ -2557,6 +2609,10 @@ function showPromptWithOption(message, defaultValue, option, options = {}) {
   return showDialog({ mode: "prompt-option", message, value: defaultValue, option, title: options.title || tr("dialog.promptTitle"), inputLabel: options.inputLabel, placeholder: options.placeholder || "", confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), selectOnFocus: options.selectOnFocus, closeOnBackdrop: options.closeOnBackdrop });
 }
 
+function showSelect(message, defaultValue, selectOptions, options = {}) {
+  return showDialog({ mode: "select", message, value: defaultValue, selectOptions, title: options.title || tr("dialog.promptTitle"), inputLabel: options.inputLabel, confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), closeOnBackdrop: options.closeOnBackdrop });
+}
+
 function showDialog(options) {
   return new Promise((resolve) => {
     dialogQueue.push({ options, resolve });
@@ -2576,6 +2632,7 @@ function openNextDialog() {
     value: nextDialog.options.value || "",
     inputLabel: nextDialog.options.inputLabel || tr("dialog.inputLabel"),
     placeholder: nextDialog.options.placeholder || "",
+    selectOptions: nextDialog.options.selectOptions || [],
     optionLabel: nextDialog.options.option?.label || "",
     optionHint: nextDialog.options.option?.hint || "",
     optionChecked: Boolean(nextDialog.options.option?.checked),
@@ -2592,6 +2649,10 @@ function openNextDialog() {
       if (dialogState.selectOnFocus) dialogInput.value?.select();
       return;
     }
+    if (isSelectDialogMode(dialogState.mode)) {
+      dialogSelect.value?.focus();
+      return;
+    }
     if (isOptionDialogMode(dialogState.mode) && !dialogState.optionDisabled) {
       dialogOptionInput.value?.focus();
       return;
@@ -2601,16 +2662,24 @@ function openNextDialog() {
 }
 
 function confirmDialog() {
-  const value = isPromptDialogMode(dialogState.mode) ? dialogState.value : true;
+  const value = isValueDialogMode(dialogState.mode) ? dialogState.value : true;
   settleDialog(isOptionDialogMode(dialogState.mode) ? { value, checked: dialogState.optionChecked } : value);
 }
 
 function cancelDialog() {
-  settleDialog(isOptionDialogMode(dialogState.mode) ? null : (isPromptDialogMode(dialogState.mode) ? null : false));
+  settleDialog(isOptionDialogMode(dialogState.mode) ? null : (isValueDialogMode(dialogState.mode) ? null : false));
 }
 
 function isPromptDialogMode(mode) {
   return mode === "prompt" || mode === "prompt-option";
+}
+
+function isSelectDialogMode(mode) {
+  return mode === "select";
+}
+
+function isValueDialogMode(mode) {
+  return isPromptDialogMode(mode) || isSelectDialogMode(mode);
 }
 
 function isOptionDialogMode(mode) {
@@ -4603,7 +4672,7 @@ function showContextMenu(event, node) {
   contextMenu.visible = true;
   nextTick(() => {
     const width = 190;
-    const height = 220;
+    const height = 330;
     contextMenu.x = Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8));
     contextMenu.y = Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8));
   });
@@ -4625,6 +4694,9 @@ async function runContextAction(action) {
   if (action === "new-file") await createFileFromContext(node);
   if (action === "new-folder") await createFolderFromContext(node);
   if (action === "save-as") await saveNodeAs(node);
+  if (action === "rename") await renameNode(node);
+  if (action === "move") await moveNode(node);
+  if (action === "copy") await copyNode(node);
   if (action === "delete") await deleteNode(node);
   if (action === "refresh") await refreshTree();
 }
@@ -4642,6 +4714,243 @@ function getDirectoryPath(path) {
   const normalized = normalizeWorkspacePath(path);
   const index = normalized.lastIndexOf("/");
   return index === -1 ? "" : normalized.slice(0, index);
+}
+
+function canRunPersistentNodeAction(node, action) {
+  if (!node || !fileSession.value || !findNodeByPath(diskTree.value, node.path)) return false;
+  const capability = action === "copy"
+    ? (node.kind === "directory" ? "copyDirectory" : "copy")
+    : (node.kind === "directory" ? "moveDirectory" : "move");
+  return fileSession.value.fileSystem.supports(capability);
+}
+
+async function renameNode(node) {
+  if (!node) return;
+  const workspace = captureWorkspace();
+  const name = await showPrompt(tr("prompt.renameNode"), node.name, {
+    title: tr("action.rename"),
+    inputLabel: tr("dialog.name"),
+    confirmLabel: tr("action.rename"),
+    selectOnFocus: true,
+  });
+  if (!name || !isCurrentWorkspace(workspace)) return;
+  try {
+    const destinationPath = joinFilePath(node.parentPath, normalizeNodeName(name));
+    await runPersistentNodeTransfer("rename", node, destinationPath, workspace);
+  } catch (error) {
+    if (isCurrentWorkspace(workspace)) reportError("error.rename", error);
+  }
+}
+
+async function moveNode(node) {
+  if (!node) return;
+  const workspace = captureWorkspace();
+  const destinations = getNodeDestinationDirectories(node, "move");
+  if (!destinations.length) {
+    await showAlert(tr("error.noMoveDestination"), { title: tr("action.move") });
+    return;
+  }
+  const destinationDirectory = await showSelect(tr("prompt.moveNode", { path: node.path }), destinations[0].value, destinations, {
+    title: tr("action.move"),
+    inputLabel: tr("dialog.destinationFolder"),
+    confirmLabel: tr("action.move"),
+  });
+  if (destinationDirectory === null || !isCurrentWorkspace(workspace)) return;
+  try {
+    await runPersistentNodeTransfer("move", node, joinFilePath(destinationDirectory, node.name), workspace);
+  } catch (error) {
+    if (isCurrentWorkspace(workspace)) reportError("error.move", error);
+  }
+}
+
+async function copyNode(node) {
+  if (!node) return;
+  const workspace = captureWorkspace();
+  const destinations = getNodeDestinationDirectories(node, "copy");
+  const defaultDestination = destinations.find((destination) => destination.value === node.parentPath)?.value ?? destinations[0]?.value;
+  const destinationDirectory = await showSelect(tr("prompt.copyNode", { path: node.path }), defaultDestination, destinations, {
+    title: tr("action.copy"),
+    inputLabel: tr("dialog.destinationFolder"),
+    confirmLabel: tr("action.copy"),
+  });
+  if (destinationDirectory === null || !isCurrentWorkspace(workspace)) return;
+  try {
+    const destinationPath = await resolveCopyDestinationPath(node, destinationDirectory, workspace);
+    await runPersistentNodeTransfer("copy", node, destinationPath, workspace);
+  } catch (error) {
+    if (isCurrentWorkspace(workspace)) reportError("error.copy", error);
+  }
+}
+
+function getNodeDestinationDirectories(node, action) {
+  const directories = [{ value: "", label: tr("workspace.root") }];
+  const visit = (nodes) => nodes.forEach((item) => {
+    if (item.kind !== "directory") return;
+    directories.push({ value: item.path, label: `/${item.path}` });
+    visit(item.children || []);
+  });
+  visit(tree.value);
+  return directories.filter((directory) => {
+    if (action === "move" && directory.value === node.parentPath) return false;
+    if (node.kind !== "directory") return true;
+    return directory.value !== node.path && !isPathUnder(directory.value, node.path);
+  });
+}
+
+async function resolveCopyDestinationPath(node, directoryPath, workspace) {
+  const desiredPath = joinFilePath(directoryPath, node.name);
+  if (!await nodeDestinationExists(desiredPath, workspace)) return desiredPath;
+  const extensionIndex = node.kind === "file" ? node.name.lastIndexOf(".") : -1;
+  const hasExtension = extensionIndex > 0;
+  const baseName = hasExtension ? node.name.slice(0, extensionIndex) : node.name;
+  const extension = hasExtension ? node.name.slice(extensionIndex) : "";
+  for (let index = 1; index <= 1000; index += 1) {
+    const suffix = index === 1 ? "-copy" : `-copy-${index}`;
+    const candidate = joinFilePath(directoryPath, `${baseName}${suffix}${extension}`);
+    if (!await nodeDestinationExists(candidate, workspace)) return candidate;
+  }
+  throw new Error(tr("error.destinationExists", { path: desiredPath }));
+}
+
+async function nodeDestinationExists(path, workspace) {
+  assertCurrentWorkspace(workspace);
+  if (findNodeByPath(tree.value, path) || getOpenFilesUnderPath(path).length) return true;
+  return workspace.session.fileSystem.exists(path);
+}
+
+function normalizeNodeName(value) {
+  const name = decodeWorkspacePath(value).trim();
+  if (!name || name === "." || name === ".." || /[\\/\0]/.test(name)) throw new Error(tr("error.invalidName"));
+  return name;
+}
+
+async function runPersistentNodeTransfer(action, node, destinationPath, workspace = captureWorkspace()) {
+  assertCurrentWorkspace(workspace);
+  const sourceNode = findNodeByPath(diskTree.value, node.path);
+  if (!sourceNode) throw new Error(tr("error.nodeNotPersisted", { path: node.path }));
+  if (!canRunPersistentNodeAction(sourceNode, action)) throw new Error(tr("error.nodeActionUnsupported", { path: sourceNode.path }));
+
+  const sourcePath = sourceNode.path;
+  if (sourcePath === destinationPath) {
+    if (action === "copy") throw new Error(tr("error.destinationExists", { path: destinationPath }));
+    return false;
+  }
+  assertFilePathAncestors(destinationPath);
+  if (sourceNode.kind === "directory" && (isPathUnder(destinationPath, sourcePath) || isPathUnder(sourcePath, destinationPath))) {
+    throw new Error(tr("error.overlappingNodeTransfer"));
+  }
+  if (hasExternalWriteOverlap(sourcePath, workspace.generation) || hasExternalWriteOverlap(destinationPath, workspace.generation)) {
+    throw new Error(`File operation is already in progress: ${sourcePath}`);
+  }
+
+  const sourceOperationKey = acquireExternalWritePath(sourcePath, workspace.generation);
+  const destinationOperationKey = acquireExternalWritePath(destinationPath, workspace.generation);
+  let mutationAttempted = false;
+  let movedOpenFiles = [];
+  try {
+    await Promise.all([
+      awaitPendingFileLoads(workspace, sourcePath),
+      awaitPendingFileLoads(workspace, destinationPath),
+    ]);
+    const affectedFiles = getOpenFilesUnderPath(sourcePath);
+    await Promise.all(affectedFiles.map((file) => awaitLatestStage(file)));
+    assertCurrentWorkspace(workspace);
+    const dirtyFiles = affectedFiles.filter((file) => file.dirty);
+    if (dirtyFiles.length) throw new Error(tr("error.unsavedNodeTransfer", { path: sourcePath, count: dirtyFiles.length }));
+    if (findNodeByPath(tree.value, destinationPath) || getOpenFilesUnderPath(destinationPath).length) {
+      throw new Error(tr("error.destinationExists", { path: destinationPath }));
+    }
+
+    const fileSystem = workspace.session.fileSystem;
+    const sourceEntry = await fileSystem.stat(sourcePath);
+    if (await fileSystem.exists(destinationPath)) throw new Error(tr("error.destinationExists", { path: destinationPath }));
+    movedOpenFiles = action === "copy" ? [] : captureMovedOpenFiles(sourcePath, destinationPath);
+    const options = {
+      recursive: sourceEntry.kind === "directory",
+      overwrite: false,
+      destinationExpectedVersion: null,
+      ...(sourceEntry.version != null ? { sourceExpectedVersion: sourceEntry.version } : {}),
+    };
+    mutationAttempted = true;
+    if (action === "copy") await fileSystem.copy(sourcePath, destinationPath, options);
+    else if (action === "rename") await fileSystem.rename(sourcePath, destinationPath, options);
+    else await fileSystem.move(sourcePath, destinationPath, options);
+    assertCurrentWorkspace(workspace);
+
+    workspace.session.forgetBase(destinationPath);
+    if (action !== "copy") {
+      workspace.session.forgetBase(sourcePath);
+      closeOpenFilesUnderPath(sourcePath);
+      remapPathSet(collapsedPaths, sourcePath, destinationPath);
+      remapAiTouchedPaths(sourcePath, destinationPath);
+    }
+    if (searchResults.value.length) clearSearchResults();
+  } catch (error) {
+    if (mutationAttempted && isCurrentWorkspace(workspace)) {
+      workspace.session.forgetBase(sourcePath);
+      workspace.session.forgetBase(destinationPath);
+      await refreshTree();
+    }
+    throw error;
+  } finally {
+    releaseExternalWritePath(destinationOperationKey);
+    releaseExternalWritePath(sourceOperationKey);
+  }
+
+  if (!isCurrentWorkspace(workspace) || !await refreshTree()) return false;
+  if (action !== "copy") {
+    await restoreMovedOpenFiles(movedOpenFiles, workspace);
+    refreshAiTouchedFlags();
+  }
+  setStatus(tr(`status.${action === "rename" ? "renamed" : action === "move" ? "moved" : "copied"}`, {
+    source: sourcePath,
+    destination: destinationPath,
+  }), destinationPath);
+  return true;
+}
+
+function hasExternalWriteOverlap(path, generation = workspaceGeneration) {
+  return isExternalWritePath(path, generation) || hasExternalWriteUnder(path, generation);
+}
+
+function captureMovedOpenFiles(sourcePath, destinationPath) {
+  return getOpenFilesUnderPath(sourcePath).map((file) => ({
+    oldPath: file.path,
+    newPath: remapPath(file.path, sourcePath, destinationPath),
+    closed: file.closed,
+    active: activePath.value === file.path,
+    diff: activeDiffPath.value === file.path,
+    preview: previewOpenPaths.has(file.path),
+  }));
+}
+
+async function restoreMovedOpenFiles(files, workspace) {
+  let activeFileState = null;
+  for (const state of files) {
+    if (state.closed && !state.active && !state.preview) continue;
+    const file = await ensureAnyFileState(state.newPath, { closed: state.closed, workspace });
+    if (state.preview) previewOpenPaths.add(state.newPath);
+    if (state.active) activeFileState = { ...state, file };
+  }
+  if (!activeFileState) return;
+  if (activeFileState.diff) activateDiff(activeFileState.file.path);
+  else activateFile(activeFileState.file.path);
+}
+
+function remapPath(path, sourcePath, destinationPath) {
+  if (path === sourcePath) return destinationPath;
+  return path.startsWith(`${sourcePath}/`) ? `${destinationPath}${path.slice(sourcePath.length)}` : path;
+}
+
+function remapPathSet(paths, sourcePath, destinationPath) {
+  const affected = Array.from(paths).filter((path) => path === sourcePath || path.startsWith(`${sourcePath}/`));
+  affected.forEach((path) => paths.delete(path));
+  affected.forEach((path) => paths.add(remapPath(path, sourcePath, destinationPath)));
+}
+
+function remapAiTouchedPaths(sourcePath, destinationPath) {
+  aiSessions.forEach((session) => remapPathSet(session.touchedPaths, sourcePath, destinationPath));
+  refreshAiTouchedFlags();
 }
 
 async function saveNodeAs(node) {
@@ -4995,6 +5304,7 @@ async function deleteNode(node) {
       if (!isCurrentWorkspace(workspace)) return;
       await workspace.session.fileSystem.remove(node.path, { recursive: node.kind === "directory" });
       if (!isCurrentWorkspace(workspace)) return;
+      workspace.session.forgetBase(node.path);
       closeOpenFilesUnderPath(node.path);
     } finally {
       releaseExternalWritePath(operationKey);
@@ -9356,8 +9666,10 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .editor-dialog h2 { min-width: 0; margin: 0; overflow: hidden; font-size: 15px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .code-editor-view .editor-dialog-message { margin: 0; overflow-wrap: anywhere; color: var(--text); font-size: 13px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .code-editor-view .editor-dialog-input-row { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
-.code-editor-view .editor-dialog-input-row input { width: 100%; border: 1px solid var(--border); border-radius: 5px; background: var(--input); color: var(--text); padding: 8px 9px; }
-.code-editor-view .editor-dialog-input-row input:focus { border-color: var(--accent-strong); outline: none; box-shadow: 0 0 0 1px var(--accent-strong); }
+.code-editor-view .editor-dialog-input-row input,
+.code-editor-view .editor-dialog-input-row select { width: 100%; border: 1px solid var(--border); border-radius: 5px; background: var(--input); color: var(--text); padding: 8px 9px; }
+.code-editor-view .editor-dialog-input-row input:focus,
+.code-editor-view .editor-dialog-input-row select:focus { border-color: var(--accent-strong); outline: none; box-shadow: 0 0 0 1px var(--accent-strong); }
 .code-editor-view .editor-dialog-option { display: flex; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-soft); cursor: pointer; }
 .code-editor-view .editor-dialog-option.disabled { cursor: not-allowed; opacity: 0.62; }
 .code-editor-view .editor-dialog-option > input { flex: 0 0 auto; width: auto; margin: 2px 0 0; accent-color: var(--accent-strong); }
