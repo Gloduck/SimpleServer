@@ -70,6 +70,22 @@ test('移动和复制可以选择由未保存文件形成的临时文件夹', as
     expect(await readOpfsText(page, 'temporary-move/move-source.txt')).toBe('move source');
 });
 
+test('立即落盘的文件操作共用禁用的立即应用选项', async ({page}) => {
+    await page.locator('.file-tree').dispatchEvent('contextmenu', {clientX: 240, clientY: 240});
+    await page.getByRole('menu', {name: '文件树菜单'}).getByRole('menuitem', {name: '新建文件夹', exact: true}).click();
+    const createDialog = page.getByRole('dialog', {name: '新建文件夹'});
+    await expectImmediateOnlyOption(createDialog);
+    await createDialog.getByRole('textbox').fill('immediate-folder');
+    await createDialog.getByRole('button', {name: '新建文件夹', exact: true}).click();
+    await expect(treeRow(page, 'immediate-folder')).toBeVisible();
+
+    await treeRow(page, 'immediate-folder').click({button: 'right'});
+    await page.getByRole('menu', {name: '文件树菜单'}).getByRole('menuitem', {name: '删除', exact: true}).click();
+    const deleteDialog = page.getByRole('dialog', {name: '删除'});
+    await expectImmediateOnlyOption(deleteDialog);
+    await deleteDialog.getByRole('button', {name: '取消', exact: true}).click();
+});
+
 function treeRow(page, path) {
     return page.locator('.file-tree').getByTitle(path, {exact: true});
 }
@@ -78,10 +94,18 @@ async function runTreeAction(page, sourcePath, action, value) {
     await treeRow(page, sourcePath).click({button: 'right'});
     await page.getByRole('menu', {name: '文件树菜单'}).getByRole('menuitem', {name: action, exact: true}).click();
     const dialog = page.getByRole('dialog', {name: action});
+    await expectImmediateOnlyOption(dialog);
     if (action === '重命名') await dialog.getByRole('textbox').fill(value);
     else await dialog.getByRole('combobox').selectOption(value);
     await dialog.getByRole('button', {name: action, exact: true}).click();
     await expect(dialog).toBeHidden();
+}
+
+async function expectImmediateOnlyOption(dialog) {
+    const checkbox = dialog.getByRole('checkbox', {name: '立即应用到磁盘'});
+    await expect(checkbox).toBeChecked();
+    await expect(checkbox).toBeDisabled();
+    await expect(dialog).toContainText('该操作暂不支持临时态，必须立即应用到磁盘。');
 }
 
 async function expandDirectory(page, path) {

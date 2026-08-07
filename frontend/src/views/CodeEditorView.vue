@@ -1251,8 +1251,8 @@ const messages = {
     "dialog.destinationFolder": "目标文件夹",
     "fileAction.applyImmediately": "立即应用到磁盘",
     "fileAction.createImmediateHint": "取消选中后，文件会作为未保存的新建变更，保存时才写入磁盘。",
+    "fileAction.immediateOnlyHint": "该操作暂不支持临时态，必须立即应用到磁盘。",
     "fileAction.deleteImmediateHint": "取消选中后，文件会标记为待删除，保存时才从磁盘删除。",
-    "fileAction.directoryDeleteImmediateHint": "文件夹变更暂不支持暂存，必须立即从磁盘删除。",
     "fileAction.unsavedItemDeleteHint": "该项目尚未写入磁盘，删除只会丢弃其中的未保存内容。",
     "saveAs.message": "选择要另存为的内容版本。",
     "saveAs.includeUnsaved": "包含未保存的变更",
@@ -1653,8 +1653,8 @@ const messages = {
     "dialog.destinationFolder": "Destination folder",
     "fileAction.applyImmediately": "Apply immediately to disk",
     "fileAction.createImmediateHint": "Clear this option to keep the file as an unsaved creation until it is saved.",
+    "fileAction.immediateOnlyHint": "This operation does not support a temporary state yet and must be applied to disk immediately.",
     "fileAction.deleteImmediateHint": "Clear this option to mark the file for deletion and remove it from disk only when saved.",
-    "fileAction.directoryDeleteImmediateHint": "Folder changes cannot be staged yet, so this folder must be deleted from disk immediately.",
     "fileAction.unsavedItemDeleteHint": "This item has not been written to disk. Deleting it will only discard its unsaved content.",
     "saveAs.message": "Choose which version of the content to save as.",
     "saveAs.includeUnsaved": "Include unsaved changes",
@@ -2609,8 +2609,17 @@ function showPromptWithOption(message, defaultValue, option, options = {}) {
   return showDialog({ mode: "prompt-option", message, value: defaultValue, option, title: options.title || tr("dialog.promptTitle"), inputLabel: options.inputLabel, placeholder: options.placeholder || "", confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), selectOnFocus: options.selectOnFocus, closeOnBackdrop: options.closeOnBackdrop });
 }
 
-function showSelect(message, defaultValue, selectOptions, options = {}) {
-  return showDialog({ mode: "select", message, value: defaultValue, selectOptions, title: options.title || tr("dialog.promptTitle"), inputLabel: options.inputLabel, confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), closeOnBackdrop: options.closeOnBackdrop });
+function showSelectWithOption(message, defaultValue, selectOptions, option, options = {}) {
+  return showDialog({ mode: "select-option", message, value: defaultValue, selectOptions, option, title: options.title || tr("dialog.promptTitle"), inputLabel: options.inputLabel, confirmLabel: options.confirmLabel || tr("dialog.ok"), cancelLabel: options.cancelLabel || tr("dialog.cancel"), closeOnBackdrop: options.closeOnBackdrop });
+}
+
+function getImmediateOnlyFileActionOption() {
+  return {
+    label: tr("fileAction.applyImmediately"),
+    checked: true,
+    disabled: true,
+    hint: tr("fileAction.immediateOnlyHint"),
+  };
 }
 
 function showDialog(options) {
@@ -2675,7 +2684,7 @@ function isPromptDialogMode(mode) {
 }
 
 function isSelectDialogMode(mode) {
-  return mode === "select";
+  return mode === "select" || mode === "select-option";
 }
 
 function isValueDialogMode(mode) {
@@ -2683,7 +2692,7 @@ function isValueDialogMode(mode) {
 }
 
 function isOptionDialogMode(mode) {
-  return mode === "confirm-option" || mode === "prompt-option";
+  return mode === "confirm-option" || mode === "prompt-option" || mode === "select-option";
 }
 
 function settleDialog(result) {
@@ -4727,12 +4736,13 @@ function canRunPersistentNodeAction(node, action) {
 async function renameNode(node) {
   if (!node) return;
   const workspace = captureWorkspace();
-  const name = await showPrompt(tr("prompt.renameNode"), node.name, {
+  const selection = await showPromptWithOption(tr("prompt.renameNode"), node.name, getImmediateOnlyFileActionOption(), {
     title: tr("action.rename"),
     inputLabel: tr("dialog.name"),
     confirmLabel: tr("action.rename"),
     selectOnFocus: true,
   });
+  const name = selection?.value;
   if (!name || !isCurrentWorkspace(workspace)) return;
   try {
     const destinationPath = joinFilePath(node.parentPath, normalizeNodeName(name));
@@ -4750,12 +4760,13 @@ async function moveNode(node) {
     await showAlert(tr("error.noMoveDestination"), { title: tr("action.move") });
     return;
   }
-  const destinationDirectory = await showSelect(tr("prompt.moveNode", { path: node.path }), destinations[0].value, destinations, {
+  const selection = await showSelectWithOption(tr("prompt.moveNode", { path: node.path }), destinations[0].value, destinations, getImmediateOnlyFileActionOption(), {
     title: tr("action.move"),
     inputLabel: tr("dialog.destinationFolder"),
     confirmLabel: tr("action.move"),
   });
-  if (destinationDirectory === null || !isCurrentWorkspace(workspace)) return;
+  const destinationDirectory = selection?.value;
+  if (destinationDirectory === undefined || !isCurrentWorkspace(workspace)) return;
   try {
     await runPersistentNodeTransfer("move", node, joinFilePath(destinationDirectory, node.name), workspace);
   } catch (error) {
@@ -4768,12 +4779,13 @@ async function copyNode(node) {
   const workspace = captureWorkspace();
   const destinations = getNodeDestinationDirectories(node, "copy");
   const defaultDestination = destinations.find((destination) => destination.value === node.parentPath)?.value ?? destinations[0]?.value;
-  const destinationDirectory = await showSelect(tr("prompt.copyNode", { path: node.path }), defaultDestination, destinations, {
+  const selection = await showSelectWithOption(tr("prompt.copyNode", { path: node.path }), defaultDestination, destinations, getImmediateOnlyFileActionOption(), {
     title: tr("action.copy"),
     inputLabel: tr("dialog.destinationFolder"),
     confirmLabel: tr("action.copy"),
   });
-  if (destinationDirectory === null || !isCurrentWorkspace(workspace)) return;
+  const destinationDirectory = selection?.value;
+  if (destinationDirectory === undefined || !isCurrentWorkspace(workspace)) return;
   try {
     const destinationPath = await resolveCopyDestinationPath(node, destinationDirectory, workspace);
     await runPersistentNodeTransfer("copy", node, destinationPath, workspace);
@@ -5154,11 +5166,12 @@ async function createFileFromContext(node) {
 
 async function createFolderFromContext(node) {
   const workspace = captureWorkspace();
-  const name = await showPrompt(tr("prompt.newFolder"), "", {
+  const selection = await showPromptWithOption(tr("prompt.newFolder"), "", getImmediateOnlyFileActionOption(), {
     title: tr("action.newFolder"),
     inputLabel: tr("dialog.folderPath"),
     confirmLabel: tr("action.newFolder"),
   });
+  const name = selection?.value;
   if (!name) return;
   try {
     const path = joinWorkspacePath(getContextDirectoryPath(node), name);
@@ -5276,7 +5289,7 @@ async function deleteNode(node) {
     checked: immediateOnly || !memoryOnlyNode,
     disabled: immediateOnly || memoryOnlyNode,
     hint: immediateOnly
-      ? tr("fileAction.directoryDeleteImmediateHint")
+      ? tr("fileAction.immediateOnlyHint")
       : memoryOnlyNode
         ? tr("fileAction.unsavedItemDeleteHint")
         : tr("fileAction.deleteImmediateHint"),
