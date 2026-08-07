@@ -624,6 +624,20 @@
       </form>
     </div>
 
+    <div v-if="downloadDialog.visible" class="editor-dialog-backdrop" role="presentation" @click.self="closeDownloadDialog">
+      <section class="editor-dialog download-dialog" role="dialog" aria-modal="true" aria-labelledby="download-dialog-title" @keydown.esc.prevent.stop="closeDownloadDialog" @click.stop>
+        <div class="editor-dialog-header">
+          <span class="codicon codicon-cloud-download" aria-hidden="true"></span>
+          <h2 id="download-dialog-title">{{ tr('download.title') }}</h2>
+        </div>
+        <p class="editor-dialog-message">{{ tr('download.ready', { name: downloadDialog.name }) }}</p>
+        <div class="editor-dialog-actions">
+          <button type="button" @click="closeDownloadDialog">{{ tr('dialog.close') }}</button>
+          <a class="primary" :href="downloadDialog.url" :download="downloadDialog.name" target="_blank" rel="noopener noreferrer">{{ tr('download.action') }}</a>
+        </div>
+      </section>
+    </div>
+
     <div v-if="sshDialog.visible" class="editor-dialog-backdrop" role="presentation" @click.self="closeSshDialog">
       <form class="editor-dialog ssh-dialog" role="dialog" aria-modal="true" aria-labelledby="ssh-dialog-title" @submit.prevent="saveSshDialog" @keydown.esc.prevent.stop="closeSshDialog" @click.stop>
         <div class="editor-dialog-header">
@@ -1035,6 +1049,7 @@ const messages = {
     "status.renamed": "已将 {source} 重命名为 {destination}",
     "status.moved": "已将 {source} 移动到 {destination}",
     "status.copied": "已将 {source} 复制到 {destination}",
+    "status.downloadReady": "已准备下载 {name}",
     "status.pendingCreate": "已标记新建 {path}",
     "status.pendingDelete": "已标记删除 {path}",
     "status.reverted": "已回滚 {path}",
@@ -1260,6 +1275,9 @@ const messages = {
     "saveAs.includeUnsavedRequired": "该项目仅存在于未保存变更中，必须包含未保存内容。",
     "saveAs.pendingDelete": "该文件已标记删除，只能另存磁盘中的已保存版本。",
     "saveAs.noUnsaved": "当前项目没有未保存变更，将使用磁盘内容。",
+    "download.title": "下载文件",
+    "download.ready": "文件“{name}”已准备好，请点击“下载文件”。",
+    "download.action": "下载文件",
     "error.unsupportedBrowser": "当前浏览器不支持 File System Access API。请使用 Chrome、Edge 或 Arc，并通过 localhost 或 HTTPS 打开页面。",
     "error.opfsUnsupported": "当前环境不支持 OPFS。OPFS 需要支持该 API 的浏览器，并通过 localhost 或 HTTPS 等安全上下文打开页面。",
     "error.clearBrowserFolder": "清空浏览器文件夹失败",
@@ -1437,6 +1455,7 @@ const messages = {
     "status.renamed": "Renamed {source} to {destination}",
     "status.moved": "Moved {source} to {destination}",
     "status.copied": "Copied {source} to {destination}",
+    "status.downloadReady": "Prepared {name} for download",
     "status.pendingCreate": "Marked {path} as new",
     "status.pendingDelete": "Marked {path} for deletion",
     "status.reverted": "Reverted {path}",
@@ -1662,6 +1681,9 @@ const messages = {
     "saveAs.includeUnsavedRequired": "This item exists only in unsaved changes, so unsaved content must be included.",
     "saveAs.pendingDelete": "This file is marked for deletion, so only its saved disk version can be saved as.",
     "saveAs.noUnsaved": "This item has no unsaved changes. Disk content will be used.",
+    "download.title": "Download File",
+    "download.ready": "“{name}” is ready. Select Download File to continue.",
+    "download.action": "Download File",
     "error.unsupportedBrowser": "This browser does not support the File System Access API. Use Chrome, Edge, or Arc, and open the page from localhost or HTTPS.",
     "error.opfsUnsupported": "OPFS is unavailable in this environment. Use a browser that supports it and open the page in a secure context such as localhost or HTTPS.",
     "error.clearBrowserFolder": "Failed to clear browser folder",
@@ -1892,6 +1914,7 @@ const dialogSelect = ref(null);
 const dialogOptionInput = ref(null);
 const dialogPrimaryButton = ref(null);
 const dialogState = reactive({ visible: false, mode: "alert", title: "", message: "", value: "", inputLabel: "", placeholder: "", selectOptions: [], optionLabel: "", optionHint: "", optionChecked: false, optionDisabled: false, confirmLabel: "", cancelLabel: "", tone: "default", selectOnFocus: false, closeOnBackdrop: true });
+const downloadDialog = reactive({ visible: false, url: "", name: "" });
 const settings = reactive(loadSettings());
 const maxMemoryReadMb = computed({
   get: () => bytesToMegabytes(settings.maxMemoryReadBytes),
@@ -2152,6 +2175,7 @@ onBeforeUnmount(() => {
   previewBroadcastChannel = null;
   revokePreviewPageUrl();
   revokePreviewResourceUrls();
+  closeDownloadDialog();
   editor.value?.dispose();
   diffEditor.value?.dispose();
   document.removeEventListener("click", hideAllContextMenus);
@@ -4994,25 +5018,27 @@ async function saveNodeAs(node) {
 
   try {
     if (sourceNode.kind === "file") {
-      if (!window.showSaveFilePicker) {
-        downloadFile(await getNodeExportBlob(sourceNode, { includeUnsaved, workspace }), sourceNode.name);
-      } else {
-        const destination = await window.showSaveFilePicker({ suggestedName: sourceNode.name });
+      if (!canUseSaveAsPicker("showSaveFilePicker")) {
+        const blob = await getNodeExportBlob(sourceNode, { includeUnsaved, workspace });
         assertCurrentWorkspace(workspace);
-        if (await workspace.session.fileSystem.isSameFileTarget(sourceNode.path, destination)) throw new Error(tr("error.saveAsSource"));
-        const source = await openSaveAsRead(sourceNode.path, { includeUnsaved, workspace });
-        await writeFileTarget(destination, source.stream);
+        openDownloadDialog(blob, sourceNode.name);
+        return;
       }
+      const destination = await window.showSaveFilePicker({ suggestedName: sourceNode.name });
+      assertCurrentWorkspace(workspace);
+      if (await workspace.session.fileSystem.isSameFileTarget(sourceNode.path, destination)) throw new Error(tr("error.saveAsSource"));
+      const source = await openSaveAsRead(sourceNode.path, { includeUnsaved, workspace });
+      await writeFileTarget(destination, source.stream);
       assertCurrentWorkspace(workspace);
       setStatus(tr("status.savedAs", { name: sourceNode.name }), sourceNode.path);
       return;
     }
-    if (!window.showDirectoryPicker) {
+    if (!canUseSaveAsPicker("showDirectoryPicker")) {
       const archiveName = `${sourceNode.name}.zip`;
       setStatus(tr("status.packagingFolder", { name: sourceNode.name }), archiveName);
-      downloadFile(await createFolderZip(sourceNode, { includeUnsaved, workspace }), archiveName);
+      const archive = await createFolderZip(sourceNode, { includeUnsaved, workspace });
       assertCurrentWorkspace(workspace);
-      setStatus(tr("status.savedAs", { name: archiveName }), node.path);
+      openDownloadDialog(archive, archiveName);
       return;
     }
     const destinationParent = markRaw(await window.showDirectoryPicker({ mode: "readwrite" }));
@@ -5041,6 +5067,16 @@ async function saveNodeAs(node) {
   } catch (error) {
     if (error.name !== "AbortError" && isCurrentWorkspace(workspace)) reportError("error.saveAs", error);
   }
+}
+
+function canUseSaveAsPicker(method) {
+  let topLevel = false;
+  try {
+    topLevel = window.top === window.self;
+  } catch {
+    topLevel = false;
+  }
+  return window.isSecureContext && topLevel && typeof window[method] === "function" && !/MicroMessenger/i.test(navigator.userAgent || "");
 }
 
 function isPathPendingDelete(path) {
@@ -5110,13 +5146,17 @@ async function openSaveAsRead(path, { includeUnsaved = true, workspace = capture
   return workspace.session.openRead(path, { view: "effective" });
 }
 
-function downloadFile(file, name) {
-  const url = URL.createObjectURL(file);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+function openDownloadDialog(blob, name) {
+  if (downloadDialog.visible) closeDownloadDialog();
+  const url = URL.createObjectURL(blob);
+  Object.assign(downloadDialog, { visible: true, url, name });
+  setStatus(tr("status.downloadReady", { name }), name);
+}
+
+function closeDownloadDialog() {
+  const url = downloadDialog.url;
+  Object.assign(downloadDialog, { visible: false, url: "", name: "" });
+  if (url) URL.revokeObjectURL(url);
 }
 
 async function fileExists(targetFileSystem, path) {
@@ -9692,7 +9732,9 @@ function getTreeIconClass(node, collapsed = false) {
 .code-editor-view .ssh-dialog { width: min(620px, 100%); max-height: min(760px, calc(100vh - 36px)); overflow: auto; }
 .code-editor-view .ssh-dialog-grid { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 10px; }
 .code-editor-view .editor-dialog-actions { position: sticky; bottom: -18px; display: flex; justify-content: flex-end; gap: 8px; margin: 0 -18px -18px; padding: 12px 18px 18px; border-top: 1px solid var(--border); background: var(--panel); }
-.code-editor-view .editor-dialog-actions button { min-width: 76px; padding: 7px 12px; }
+.code-editor-view .editor-dialog-actions button,
+.code-editor-view .editor-dialog-actions a { min-width: 76px; padding: 7px 12px; text-align: center; text-decoration: none; }
+.code-editor-view .editor-dialog-actions a { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
 .code-editor-view .editor-dialog-actions .primary { border-color: var(--accent); background: var(--accent); color: #ffffff; }
 .code-editor-view .editor-dialog-actions .primary:hover:not(:disabled) { border-color: var(--accent-strong); background: var(--accent-strong); }
 .code-editor-view .editor-dialog-actions .primary.danger { border-color: #b8383d; background: #b8383d; }
